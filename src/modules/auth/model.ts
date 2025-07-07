@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface IUser extends Document {
   u_id: string;
+  password?: string;
   fullName: string;
   role: "ADMIN" | "STUDENT" | "VIEWER";
   ldapAuthenticated: boolean;
@@ -17,6 +18,11 @@ const UserSchema = new Schema<IUser>({
     unique: true,
     trim: true,
     lowercase: true
+  },
+  password: {
+    type: String,
+    required: false,
+    select: false
   },
   fullName: {
     type: String,

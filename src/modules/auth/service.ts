@@ -39,28 +39,53 @@ export class AuthService {
     };
   }
 
-  static async authenticateUser(username: string, password: string): Promise<AuthResult> {
+  static async authenticateUser(
+    username: string,
+    password: string
+  ): Promise<AuthResult> {
     try {
-        const u_id = username.startsWith("it") ? username.substring(2) : username;
+      const u_id =
+        username.startsWith("it") && username.length === 10
+          ? username.substring(2)
+          : username;
       // Step 1: Check if user exists in MongoDB
       let user = await User.findOne({ u_id: u_id.toLowerCase() });
-      console.log("Checking MongoDB for user:", user);
       if (user) {
+        if (!user.password) {
+          const ldapConfig = this.getLDAPConfig(username, password);
+          let ldapResult;
+          try {
+            ldapResult = await authenticate(ldapConfig);
+          } catch (ldapError) {
+            console.error("LDAP authentication failed:", ldapError);
+            return {
+              success: false,
+              message: "Invalid credentials (User exists, but ldap error)",
+            };
+          }
+
+          if (!ldapResult) {
+            return {
+              success: false,
+              message: "Invalid credentials (User exists, but no ldap result)",
+            };
+          }
+        } else if (user.password) {
+            
+        }
         // User exists in MongoDB, update last login
         user.lastLogin = new Date();
         await user.save();
-        
+
         return {
           success: true,
           user,
           isFirstTimeLogin: false,
-          message: "Authentication successful - existing user"
-        };
+          message: "Authentication successful - existing user",
+        } ;
       }
 
-      // Step 2: User not in MongoDB, authenticate with LDAP
       const ldapConfig = this.getLDAPConfig(username, password);
-      
       let ldapResult;
       try {
         ldapResult = await authenticate(ldapConfig);
@@ -68,23 +93,22 @@ export class AuthService {
         console.error("LDAP authentication failed:", ldapError);
         return {
           success: false,
-          message: "Invalid credentials"
+          message: "Invalid credentials",
         };
       }
 
       if (!ldapResult) {
         return {
           success: false,
-          message: "Invalid credentials"
+          message: "Invalid credentials",
         };
       }
-      // Step 3: LDAP authentication successful, create user in MongoDB
       const newUser = new User({
         u_id: u_id.toLowerCase(),
         fullName: ldapResult.displayName || ldapResult.cn || username,
         role: this.determineUserRole(ldapResult),
         ldapAuthenticated: true,
-        lastLogin: new Date()
+        lastLogin: new Date(),
       });
 
       await newUser.save();
@@ -93,40 +117,54 @@ export class AuthService {
         success: true,
         user: newUser,
         isFirstTimeLogin: true,
-        message: "Authentication successful - new user created"
+        message: "Authentication successful - new user created",
       };
-
     } catch (error) {
       console.error("Authentication error:", error);
       return {
         success: false,
-        message: "Authentication failed due to server error"
+        message: "Authentication failed due to server error",
       };
     }
   }
 
-  private static determineUserRole(ldapUser: any): "ADMIN" | "STUDENT" | "VIEWER" {
+  private static determineUserRole(
+    ldapUser: any
+  ): "ADMIN" | "STUDENT" | "VIEWER" {
     // Default role assignment logic
     // You can customize this based on LDAP groups or attributes
-    
+
     if (ldapUser.distinguishedName) {
-      const groups = Array.isArray(ldapUser.distinguishedName) ? ldapUser.distinguishedName : [ldapUser.distinguishedName];
-      
+      const groups = Array.isArray(ldapUser.distinguishedName)
+        ? ldapUser.distinguishedName
+        : [ldapUser.distinguishedName];
+
       // Check for admin groups
       const adminGroups = "OU=Lecturer";
-      if (groups.some((group: string) => group.toLowerCase() === adminGroups.toLowerCase())) {
+      if (
+        groups.some(
+          (group: string) => group.toLowerCase() === adminGroups.toLowerCase()
+        )
+      ) {
         return "ADMIN";
       }
-      
+
       // Check for student groups
       const studentGroups = "OU=Student";
-      if (groups.some((group: string) => group.toLowerCase() === studentGroups.toLowerCase())) {
+      if (
+        groups.some(
+          (group: string) => group.toLowerCase() === studentGroups.toLowerCase()
+        )
+      ) {
         return "STUDENT";
       }
     }
 
     // Check specific attributes
-    if (ldapUser.employeeType === "teacher" || ldapUser.employeeType === "admin") {
+    if (
+      ldapUser.employeeType === "teacher" ||
+      ldapUser.employeeType === "admin"
+    ) {
       return "ADMIN";
     }
 
