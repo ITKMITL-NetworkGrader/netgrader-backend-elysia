@@ -1,6 +1,6 @@
 import { Schema, model } from "mongoose";
 import { t } from "elysia";
-import { getDateWithTimezone } from "../utils/helpers.js";
+import { getDateWithTimezone } from "../../utils/helpers.js";
 import { env } from "process";
 
 const TIMEZONE_OFFSET_HOURS = env.TIMEZONE_OFFSET ? parseInt(env.TIMEZONE_OFFSET) : 7;

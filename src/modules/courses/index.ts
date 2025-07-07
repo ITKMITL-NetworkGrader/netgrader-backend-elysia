@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
-import { Course } from "../models/Course";
-import { Enrollment } from "../models/Enrollment";
-import { getDateWithTimezone } from "../utils/helpers.js";
+import { Course } from "./model";
+import { Enrollment } from "../enrollments/model";
+import { getDateWithTimezone } from "../../utils/helpers.js";
 import { env } from "process";
 
 

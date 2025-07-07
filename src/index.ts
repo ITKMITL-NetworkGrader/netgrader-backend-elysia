@@ -3,7 +3,7 @@ import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 import { env } from "process";
 import { authPlugin } from "./plugins/plugins.js";
-import { routes } from "./routes/index.js";
+import { routes } from "./modules/index.js";
 import { connectDatabase } from "./config/database.js";
 
 export type JWTPayload = {
