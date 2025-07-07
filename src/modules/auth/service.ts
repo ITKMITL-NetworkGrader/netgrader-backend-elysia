@@ -71,7 +71,7 @@ export class AuthService {
             };
           }
         } else if (user.password) {
-            
+
         }
         // User exists in MongoDB, update last login
         user.lastLogin = new Date();
@@ -183,7 +183,7 @@ export class AuthService {
 
   static async getUserByUsername(username: string): Promise<IUser | null> {
     try {
-      return await User.findOne({ username: username.toLowerCase() });
+      return await User.findOne({ u_id: username.toLowerCase() });
     } catch (error) {
       console.error("Error finding user by username:", error);
       return null;

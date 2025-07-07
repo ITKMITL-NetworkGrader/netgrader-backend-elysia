@@ -5,7 +5,5 @@ import { authRoutes } from "./auth";
 export const routes = new Elysia()
 .group("/v0", (app) => app
     .use(courseRoutes)
-)
-.group("/auth", (app) => app
-    .use(authRoutes)
+    .use(authRoutes) // Moved authRoutes to v0 group for consistency
 )

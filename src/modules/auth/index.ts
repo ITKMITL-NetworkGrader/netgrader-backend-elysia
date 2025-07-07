@@ -5,7 +5,7 @@ import { AuthService } from "./service";
 import { JWTPayload } from "../../index";
 import { Types } from "mongoose";
 
-export const authRoutes = new Elysia()
+export const authRoutes = new Elysia({ prefix: "/auth" })
   .use(
     jwt({
       name: "jwt",
@@ -99,6 +99,20 @@ export const authRoutes = new Elysia()
         summary: "User Login",
         description:
           "Authenticate user with username and password. Checks MongoDB first, then LDAP for new users.",
+      },
+    }
+  )
+  .get(
+    "/profile",
+    async ({ profile, set }) => {
+        let user_profile = await AuthService.getUserByUsername(profile?.u_id); 
+        return user_profile?.toJSON()
+    },
+    {
+      detail: {
+        tags: ["Authentication"],
+        summary: "Get User Profile",
+        description: "Retrieve the authenticated user's profile information.",
       },
     }
   );
