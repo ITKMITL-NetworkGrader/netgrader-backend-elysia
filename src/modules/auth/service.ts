@@ -81,7 +81,7 @@ export class AuthService {
       if (user) {
         //----------------------------------------------------------------------------------
         // New Section: Check if user is LDAP authenticated
-        // Step 1.1: Check if password is matched
+        // Check if password is matched
         if (user.password !== passwordHash) {
           // User exists in MongoDB but password does not match
           return {
@@ -89,7 +89,7 @@ export class AuthService {
             message: "Invalid credentials (User exists, but password mismatch)",
           };
         }
-        // Step 1.2: If password matches, return user data
+        // If password matches, return user data
         else if (user.password === passwordHash) {
           // User exists in MongoDB and is LDAP authenticated
           user.lastLogin = getDateWithTimezone(7); // Set last login to current time with timezone offset
@@ -105,7 +105,6 @@ export class AuthService {
       // Step 2 : If user not existing in MongoDB then authen with IT LDAP
       const ldapConfig = this.getLDAPConfig(username, password);
       let ldapResult;
-      // Step 2.1: Authenticate with LDAP
       try {
         ldapResult = await authenticate(ldapConfig);
       } catch (ldapError) {
@@ -115,14 +114,14 @@ export class AuthService {
           message: "LDAP authentication failed",
         };
       }
-      // Step 2.2: If LDAP authentication fails, return error
+      // If LDAP authentication fails, return error
       if (!ldapResult) {
         return {
           success: false,
           message: "Invalid credentials",
         };
       }
-      // Step 2.3: If LDAP authentication is successful, create user in MongoDB
+      // Step 3: If LDAP authentication is successful, create user in MongoDB
       const newUser = new User({
         u_id: u_id.toLowerCase(),
         fullName: ldapResult.displayName || ldapResult.cn || username,
@@ -139,7 +138,7 @@ export class AuthService {
           message: "Failed to create user in MongoDB",
         };
       }
-      // Step 2.4: Return success with user data
+      // Step 4: Return success with user data
       return {
         success: true,
         user: createdUser,
