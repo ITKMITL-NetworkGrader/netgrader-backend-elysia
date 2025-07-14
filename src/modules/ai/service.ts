@@ -42,6 +42,7 @@ export class AIService {
         const result = await model.generateContent(prompt);
         const response = result.response;
         const analysis = response.text();
+        console.log(analysis);
 
         // if (!response.ok) {
         //     throw new Error(`AI service error: ${response.status} ${response.statusText}`);
