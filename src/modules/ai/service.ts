@@ -8,7 +8,7 @@ export interface AIConfig {
 }
 
 const googleGenerativeAI = new GoogleGenerativeAI(env.AI_API_KEY || "AIzaSyD1WHNyXki9wg6PMGwuNG-wgNFb9rK42Zg");
-const model = googleGenerativeAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+const model = googleGenerativeAI.getGenerativeModel({ model: "gemini-2.5-pro" })
 
 export class AIService {
     
