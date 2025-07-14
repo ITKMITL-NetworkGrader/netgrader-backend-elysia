@@ -1,54 +1,67 @@
-import { Enrollment, enrollmentBody } from "./model";
+import { Enrollment, IEnrollment } from "./model";
 import { Course } from "../courses/model";
-import { status, t } from "elysia";
 
-export const createEnrollment = async ( body: enrollmentBody) => {
-  try {
-    const course = await Course.findById(body.courseId);
-    if (!course) {
-      throw status(404, { message: 'Course not found' });
+export class EnrollmentService {
+  static async createEnrollment(u_id: string, u_role: string, c_id: string): Promise<IEnrollment> {
+    const courseExists = await Course.exists({ _id: c_id });
+    if (!courseExists) {
+      throw new Error("Course does not exist.");
     }
-    
-    const existingEnrollment = await Enrollment.findOne({ 
-        courseId: body.courseId, 
-        studentId: body.studentId 
-    });
-
+    const existingEnrollment = await Enrollment.findOne({ $and: [{ u_id: u_id }, { c_id: c_id }] });
     if (existingEnrollment) {
-      throw status(409, { message: 'Student is already enrolled in this course' });
+      throw new Error("Enrollment already exists for this user and course.");
     }
-
-    const newEnrollment = new Enrollment(body);
-    await newEnrollment.save();
-
-    status(201);
-    return { message: 'Enrollment successful', enrollment: newEnrollment };
-
-  } catch (error: any) {
-    throw status(400, { message: 'Error creating enrollment', error: error.message });
-  }
-};
-
-export const getEnrollmentsByCourse = async (courseId: string) => {
-  try {
-    const enrollments = await Enrollment.find({ courseId: courseId }).populate('courseId');
-    if (!enrollments.length) {
-      throw status(404, { message: 'No enrollments found for this course' });
+    const newEnrollment = new Enrollment({
+      u_id: u_id,
+      c_id: c_id,
+      u_role: u_role,
+    });
+    try {
+      await newEnrollment.save();
+      return newEnrollment;
+    } catch (error) {
+      console.error("Error creating enrollment:", error);
+      throw new Error("Failed to create enrollment.");
     }
-    return { enrollments };
-  } catch (error: any) {
-    throw status(500, { message: 'Error fetching enrollments', error: error.message });
   }
-};
 
-export const cancelEnrollment = async (id: string) => {
-  try {
-    const deletedEnrollment = await Enrollment.findByIdAndDelete(id);
-    if (!deletedEnrollment) {
-      throw status(404, { message: 'Enrollment not found' });
+  static async getEnrollmentsByUserId(u_id: string): Promise<IEnrollment[]> {
+    try {
+      const enrollments = await Enrollment.find({ u_id: u_id });
+      return enrollments;
+    } catch (error) {
+      console.error("Error fetching enrollments by user ID:", error);
+      throw new Error("Failed to fetch enrollments.");
     }
-    return { message: 'Enrollment cancelled successfully' };
-  } catch (error: any) {
-    throw status(500, { message: 'Error cancelling enrollment', error: error.message });
   }
-};
+
+  static async getEnrollmentsByCourseId(c_id: string): Promise<IEnrollment[]> {
+    const courseExists = await Course.exists({ _id: c_id });
+    if (!courseExists) {
+      throw new Error("Course does not exist.");
+    }
+    try {
+      const enrollments = await Enrollment.find({ _id: c_id})
+      return enrollments;
+    } catch (error) {
+      console.error("Error fetching enrollments by course ID:", error);
+      throw new Error("Failed to fetch enrollments.");
+    }
+  }
+
+  static async deleteEnrollment(u_id: string, c_id: string): Promise<void> {
+    const courseExists = await Course.exists({ _id: c_id });
+    if (!courseExists) {
+      throw new Error("Course does not exist.");
+    }
+    try {
+      const result = await Enrollment.deleteOne({ u_id: u_id, c_id: c_id });
+      if (result.deletedCount === 0) {
+        throw new Error("Enrollment not found or already deleted.");
+      }
+    } catch (error) {
+      console.error("Error deleting enrollment:", error);
+      throw new Error("Failed to delete enrollment.");
+    }
+  }
+}

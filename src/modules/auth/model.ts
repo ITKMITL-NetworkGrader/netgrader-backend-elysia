@@ -46,6 +46,4 @@ const UserSchema = new Schema<IUser>({
   timestamps: true
 });
 
-// Indexes are automatically created by unique: true, so we don't need to define them separately
-
 export const User = mongoose.model<IUser>("User", UserSchema);
