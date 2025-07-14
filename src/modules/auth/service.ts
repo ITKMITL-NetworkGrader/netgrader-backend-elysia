@@ -70,18 +70,18 @@ export class AuthService {
         username.startsWith("it") && username.length === 10
           ? username.substring(2) // Cut "it" prefix
           : username; // Use username as is if not starting with "it"
-      // Step 1: Check if user exists in MongoDB
+      
       const passwordHash = this.hashPassword(password);
 
       console.log("Password Hash:", passwordHash);
 
       let user = await User.findOne({ u_id: u_id.toLowerCase() });
       // If user exists
-      
+      // Step 1: Check if user exists in MongoDB
       if (user) {
         //----------------------------------------------------------------------------------
         // New Section: Check if user is LDAP authenticated
-        // Step 1.1: Check if user
+        // Step 1.1: Check if password is matched
         if (user.password !== passwordHash) {
           // User exists in MongoDB but password does not match
           return {
@@ -89,6 +89,7 @@ export class AuthService {
             message: "Invalid credentials (User exists, but password mismatch)",
           };
         }
+        // Step 1.2: If password matches, return user data
         else if (user.password === passwordHash) {
           // User exists in MongoDB and is LDAP authenticated
           user.lastLogin = getDateWithTimezone(7); // Set last login to current time with timezone offset
@@ -100,44 +101,11 @@ export class AuthService {
             message: "Authentication successful",
           };
         }
-        //----------------------------------------------------------------------------------
-        // Old Section 
-        // if (!user.password) {
-        //   const ldapConfig = this.getLDAPConfig(username, password);
-        //   let ldapResult;
-        //   try {
-        //     ldapResult = await authenticate(ldapConfig);
-        //   } catch (ldapError) {
-        //     console.error("LDAP authentication failed:", ldapError);
-        //     return {
-        //       success: false,
-        //       message: "Invalid credentials (User exists, but ldap error)",
-        //     };
-        //   }
-
-        //   if (!ldapResult) {
-        //     return {
-        //       success: false,
-        //       message: "Invalid credentials (User exists, but no ldap result)",
-        //     };
-        //   }
-        // } else if (user.password) {
-
-        // }
-        // // User exists in MongoDB, update last login
-        // user.lastLogin = new Date();
-        // await user.save();
-
-        // return {
-        //   success: true,
-        //   user,
-        //   isFirstTimeLogin: false,
-        //   message: "Authentication successful - existing user",
-        // } ;
       }
       // Step 2 : If user not existing in MongoDB then authen with IT LDAP
       const ldapConfig = this.getLDAPConfig(username, password);
       let ldapResult;
+      // Step 2.1: Authenticate with LDAP
       try {
         ldapResult = await authenticate(ldapConfig);
       } catch (ldapError) {
@@ -147,13 +115,14 @@ export class AuthService {
           message: "LDAP authentication failed",
         };
       }
-
+      // Step 2.2: If LDAP authentication fails, return error
       if (!ldapResult) {
         return {
           success: false,
           message: "Invalid credentials",
         };
       }
+      // Step 2.3: If LDAP authentication is successful, create user in MongoDB
       const newUser = new User({
         u_id: u_id.toLowerCase(),
         fullName: ldapResult.displayName || ldapResult.cn || username,
@@ -170,7 +139,7 @@ export class AuthService {
           message: "Failed to create user in MongoDB",
         };
       }
-
+      // Step 2.4: Return success with user data
       return {
         success: true,
         user: createdUser,
