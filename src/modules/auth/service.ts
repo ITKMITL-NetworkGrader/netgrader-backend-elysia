@@ -51,6 +51,7 @@ export class AuthService {
       // Step 1: Check if user exists in MongoDB
       let user = await User.findOne({ u_id: u_id.toLowerCase() });
       if (user) {
+        // Step 1.1: Check if user
         if (!user.password) {
           const ldapConfig = this.getLDAPConfig(username, password);
           let ldapResult;
@@ -84,7 +85,7 @@ export class AuthService {
           message: "Authentication successful - existing user",
         } ;
       }
-
+      // Step 2 : If user not existing in MongoDB then authen with IT LDAP
       const ldapConfig = this.getLDAPConfig(username, password);
       let ldapResult;
       try {
