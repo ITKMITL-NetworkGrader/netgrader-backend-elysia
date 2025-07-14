@@ -4,6 +4,20 @@ import { env } from "process";
 import { AuthService } from "./service";
 import { JWTPayload } from "../../index";
 import { Types } from "mongoose";
+import { User } from "./model";
+
+const UserSchema = t.Object({
+  u_id: t.String({ minLength: 1 }),
+  password: t.String({ minLength: 1 }),
+  fullName: t.String({ minLength: 1 }),
+  role: t.Union([
+    t.Literal("ADMIN"),
+    t.Literal("STUDENT"),
+    t.Literal("VIEWER"),
+  ]),
+  //ldapAuthenticated: t.Boolean({ default: false }),
+  //lastLogin: t.Optional(t.Date()),
+});
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
   .use(
@@ -102,6 +116,57 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       },
     }
   )
+  //-------------------------------------------------------------------------------------------------------
+  .post(
+    "/register", 
+      async ({ body, set }) => {
+        try {
+            const { u_id, password, fullName, role } = body;
+            const userData = new User({u_id, password, fullName, role, ldapAuthenticated: false , lastLogin: new Date()});
+            const createdUserResult = await AuthService.createUser(userData);
+            if (!createdUserResult) {
+              set.status = 400;
+              return { success: false, message: "User already exists" };
+            }
+            set.status = 200;
+            return { 
+              success: true, 
+              user: createdUserResult.u_id,
+              role: createdUserResult.role,
+              message: "User registered successfully" 
+        };
+        }
+        catch (error: any) {
+          set.status = 400;
+          return { success: false, message: error.message || "Error registering user" };
+        }
+    },
+    {
+      body: UserSchema,
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          user: t.String(),
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+        401: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+      },
+      detail: {
+        tags: ["Authentication"],
+        summary: "User Registration",
+        description:
+          "Register a new user with username, password, full name, and role. If the user already exists, it will return an error.",
+      },
+    }
+  )
+  //-------------------------------------------------------------------------------------------------------
   .get(
     "/profile",
     async ({ profile, set }) => {

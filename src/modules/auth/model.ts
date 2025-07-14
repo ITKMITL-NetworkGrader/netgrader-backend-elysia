@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { getDateWithTimezone } from "../../utils/helpers.js"; 
 
 export interface IUser extends Document {
   u_id: string;
@@ -22,7 +23,7 @@ const UserSchema = new Schema<IUser>({
   password: {
     type: String,
     required: false,
-    select: false
+    select: true
   },
   fullName: {
     type: String,
@@ -40,7 +41,7 @@ const UserSchema = new Schema<IUser>({
   },
   lastLogin: {
     type: Date,
-    default: Date.now
+    default: getDateWithTimezone(7) // Default to current time with timezone offset
   }
 }, {
   timestamps: true
@@ -48,4 +49,4 @@ const UserSchema = new Schema<IUser>({
 
 // Indexes are automatically created by unique: true, so we don't need to define them separately
 
-export const User = mongoose.model<IUser>("User", UserSchema);
+export const User = mongoose.model<IUser>("User", UserSchema, "users");
