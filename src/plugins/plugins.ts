@@ -13,8 +13,9 @@ export const authPlugin = new Elysia()
         })
     )
     .derive(async ({ bearer, jwt, set, path }): Promise<{ profile?: JWTPayload }> => {
+        console.log(path)
         const profile = await jwt.verify(bearer) as JWTPayload | null;
-        const excludedPaths = ["/" ,"/swagger", "/swagger/json", "/auth/login"];
+        const excludedPaths = ["/" ,"/swagger", "/swagger/json", "/v0/auth/login"];
         const dev_env = env.NODE_ENV != "production" && !bearer;
         if (excludedPaths.includes(path) || dev_env) {
             return {};

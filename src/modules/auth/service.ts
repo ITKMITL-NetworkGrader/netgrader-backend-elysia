@@ -156,46 +156,33 @@ export class AuthService {
 
   private static determineUserRole(
     ldapUser: any
-  ): "ADMIN" | "STUDENT" | "VIEWER" {
+  ): "INSTRUCTOR" | "STUDENT" | "VIEWER" {
     // Default role assignment logic
     // You can customize this based on LDAP groups or attributes
 
-    if (ldapUser.distinguishedName) {
-      const groups = Array.isArray(ldapUser.distinguishedName)
-        ? ldapUser.distinguishedName
-        : [ldapUser.distinguishedName];
-
-      // Check for admin groups
+    if (ldapUser?.dn) {
+      const groups = ldapUser?.dn.split(",") || [];
       const adminGroups = "OU=Lecturer";
       if (
         groups.some(
           (group: string) => group.toLowerCase() === adminGroups.toLowerCase()
         )
       ) {
-        return "ADMIN";
+        return "INSTRUCTOR";
       }
 
-      // Check for student groups
       const studentGroups = "OU=Student";
       if (
         groups.some(
           (group: string) => group.toLowerCase() === studentGroups.toLowerCase()
         )
       ) {
+        console.log("User is a student based on LDAP group");
         return "STUDENT";
       }
     }
 
-    // Check specific attributes
-    if (
-      ldapUser.employeeType === "teacher" ||
-      ldapUser.employeeType === "admin"
-    ) {
-      return "ADMIN";
-    }
-
-    // Default to STUDENT
-    return "STUDENT";
+    return "VIEWER";
   }
 
   static async getUserById(userId: string): Promise<IUser | null> {
