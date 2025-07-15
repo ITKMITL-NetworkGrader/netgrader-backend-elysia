@@ -1,7 +1,6 @@
 import { Elysia, t } from 'elysia';
 import { channel, QUEUE_NAME } from '../../config/rabbitmq';
 
-const socket: Socket = io('http://localhost:4000/');
 export const gradingRoutes = new Elysia({ prefix: '/grading' })
   .post("/submit", async ({ body, set }) => {
     if (!channel) {
@@ -25,15 +24,13 @@ export const gradingRoutes = new Elysia({ prefix: '/grading' })
           platform: t.Optional(t.String()),
           username: t.Optional(t.String()),
           password: t.Optional(t.String()),
-          ssh_key_path: t.Optional(t.String())
+          ssh_key_path: t.Optional(t.String()),
         })),
         tests: t.Array(t.Object({
-          test_id: t.String(),
-          test_type: t.String(),
-          template_name: t.String(),
-          parameters: t.Record(t.String(), t.Any()),
-          source_device: t.Optional(t.String()),
-          target_device: t.Optional(t.String()),
+          name: t.String(),
+          template: t.String(),
+          vars: t.Optional(t.Record(t.String(), t.Any())),
+          target_device: t.Optional(t.Array(t.String())),
           expected_result: t.Optional(t.String()),
           points: t.Number()
         }))
