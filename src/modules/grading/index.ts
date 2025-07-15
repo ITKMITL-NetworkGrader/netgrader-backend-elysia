@@ -1,7 +1,6 @@
 import { Elysia, t } from 'elysia';
 import { channel, QUEUE_NAME } from '../../config/rabbitmq';
 
-const socket: Socket = io('http://localhost:4000/');
 export const gradingRoutes = new Elysia({ prefix: '/grading' })
   .post("/submit", async ({ body, set }) => {
     if (!channel) {
