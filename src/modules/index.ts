@@ -9,5 +9,7 @@ export const routes = new Elysia()
 .group("/v0", (app) => app
     .use(websocket)
     .use(courseRoutes)
-    .use(authRoutes) // Moved authRoutes to v0 group for consistency
+    .use(authRoutes)
+    .use(gradingRoutes)
+    // .use(aiRoutes)
 )
