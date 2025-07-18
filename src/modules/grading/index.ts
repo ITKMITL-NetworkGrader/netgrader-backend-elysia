@@ -92,13 +92,13 @@ export const gradingRoutes = new Elysia({ prefix: '/grading' })
     console.log(`Final Result for job ${job_id}: Status - ${status}, Points Earned - ${total_points_earned}/${total_points_possible}`);
     if (Array.isArray(body.test_results)) {
       for (const test_result of body.test_results) {
-        const test_id = test_result.test_id ?? '';
+        const test_name = test_result.test_name ?? '';
         const test_status = test_result.status ?? '';
         const test_message = test_result.message ?? '';
         const test_points = test_result.points_earned ?? 0;
         const test_possible = test_result.points_possible ?? 0;
         const status_emoji = test_status === 'passed' ? '✅' : '❌';
-        console.log(`   ${status_emoji} ${test_id}: ${test_message} (${test_points}/${test_possible} pts)`);
+        console.log(`   ${status_emoji} ${test_name}: ${test_message} (${test_points}/${test_possible} pts)`);
       }
     }
     set.status = 200;
@@ -110,12 +110,19 @@ export const gradingRoutes = new Elysia({ prefix: '/grading' })
             total_points_earned: t.Optional(t.Number()),
             total_points_possible: t.Optional(t.Number()),
             test_results: t.Optional(t.Array(t.Object({
-                test_id: t.String(),
+                test_name: t.String(),
                 status: t.String(),
                 message: t.String(),
                 points_earned: t.Number(),
-                points_possible: t.Number()
-            })))
+                points_possible: t.Number(),
+                execution_time: t.Optional(t.Number()),
+                raw_output: t.Optional(t.String()),
+            }))),
+            total_execution_time: t.Optional(t.Number()),
+            error_message: t.Optional(t.String()),
+            created_at: t.Optional(t.String()),
+            compleated_at: t.Optional(t.String()),
+
         }),
         detail: {
             tags: ["Grading"],
