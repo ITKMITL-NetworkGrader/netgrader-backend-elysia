@@ -18,6 +18,11 @@ const courseSchema = new Schema({
         type: String,
         required: true,
     },
+    visibility: {
+        type: String,
+        enum: ["public", "private"],
+        default: "public",
+    },
     createdAt: {
         type: Date,
         default: () => getDateWithTimezone(TIMEZONE_OFFSET_HOURS),
@@ -34,6 +39,7 @@ export const courseBody = t.Object({
     title: t.String(),
     description: t.String(),
     instructor: t.String(),
+    visibility: t.Union([t.Literal("public"), t.Literal("private")]),
     updatedAt: t.Optional(t.Date()),
     createdAt: t.Optional(t.Date()),
 })

@@ -9,6 +9,7 @@ const courseBodySchema = t.Object({
   title: t.String(),
   description: t.String(),
   instructor: t.String(),
+  visibility: t.Union([t.Literal("public"), t.Literal("private")]),
   createdAt: t.Optional(t.Date()),
   updatedAt: t.Optional(t.Date()),
 });
@@ -42,7 +43,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
       try {
         const courses = await Course.find();
         set.status = 200;
-        return { courses };
+        return { courses: courses.filter(course => course.visibility === "public") };
       } catch (error: any) {
         set.status = 500;
         return { message: "Error fetching courses", error: error.message };
