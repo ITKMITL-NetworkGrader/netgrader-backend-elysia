@@ -1,6 +1,5 @@
 import { Elysia, t } from "elysia";
 import { EnrollmentService } from "./service";
-import { profile } from "bun:jsc";
 
 export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
   .post(
