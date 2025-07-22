@@ -187,9 +187,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   .get(
     "/me",
     async ({ set, authPlugin }) => {
-      const profile = authPlugin;
       set.status = 200;
-      return profile;
+      return authPlugin;
     },
     {
       detail: {

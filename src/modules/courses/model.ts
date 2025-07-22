@@ -14,14 +14,14 @@ const courseSchema = new Schema({
         type: String,
         required: true,
     },
-    instructor: {
-        type: String,
-        required: true,
-    },
     visibility: {
         type: String,
         enum: ["public", "private"],
         default: "public",
+    },
+    created_by: {
+        type: String,
+        required: true,
     },
     createdAt: {
         type: Date,

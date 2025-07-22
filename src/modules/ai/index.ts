@@ -23,7 +23,6 @@ export const aiRoutes = new Elysia({ prefix: "/ai" })
             set.status = 400;
             return {
                 success: false,
-                data: null,
                 message: "Prompt is required",
             };
         }
@@ -32,15 +31,15 @@ export const aiRoutes = new Elysia({ prefix: "/ai" })
         // For demonstration, we will return a mock response
         const aiResponse = await AIService.generateResponse(prompt);
         return { 
-            data : aiResponse,
             success: true,
+            data : aiResponse,
         };
     },
     {
         body: promptSchema,
         response: t.Object({
             success: t.Boolean(),
-            data: t.String(),
+            data: t.Optional(t.String()),
             message: t.Optional(t.String()),
         }),
         detail: {

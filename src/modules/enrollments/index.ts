@@ -1,14 +1,18 @@
 import { Elysia, t } from "elysia";
 import { EnrollmentService } from "./service";
+import { authPlugin } from "../../plugins/plugins";
+import { User } from "../auth/model";
 
 export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
+  .use(authPlugin)
   .post(
     "/create",
-    async ({ body, set, profile }) => {
+    async ({ body, set, authPlugin }) => {
       const { c_id } = body;
-      const { u_id, u_role } = profile;
+      const u_id = authPlugin?.u_id || "";
+      const user = await User.findOne({ u_id: u_id }, "role");
       try {
-        const enrollment = await EnrollmentService.createEnrollment(u_id, u_role, c_id);
+        const enrollment = await EnrollmentService.createEnrollment(u_id, user?.role || "", c_id);
         set.status = 201;
         return {
           success: true,
@@ -49,9 +53,9 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
     }}
   )
   .get(
-    "/user",
-    async ({ profile, set }) => {
-      const { u_id } = profile;
+    "/",
+    async ({ authPlugin, set }) => {
+      const { u_id = "" } = authPlugin || {};
       try {
         const enrollments = await EnrollmentService.getEnrollmentsByUserId(u_id);
         set.status = 200;
@@ -101,7 +105,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
     }
   )
   .get(
-    "/course/:c_id",
+    "/:c_id",
     async ({ params }) => {
       const { c_id } = params;
       try {
@@ -146,10 +150,10 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
     }
   )
   .delete(
-    "/delete",
-    async ({ body, set, profile }) => {
+    "/",
+    async ({ body, set, authPlugin }) => {
       const { c_id } = body;
-      const { u_id } = profile;
+      const { u_id = "" } = authPlugin || {};
       try {
         await EnrollmentService.deleteEnrollment(u_id, c_id);
         set.status = 200; // No Content

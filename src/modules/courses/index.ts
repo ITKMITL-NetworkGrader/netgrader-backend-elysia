@@ -3,23 +3,25 @@ import { Course } from "./model";
 import { Enrollment } from "../enrollments/model";
 import { getDateWithTimezone } from "../../utils/helpers.js";
 import { env } from "process";
+import { authPlugin } from "../../plugins/plugins";
 
 
 const courseBodySchema = t.Object({
   title: t.String(),
   description: t.String(),
-  instructor: t.String(),
   visibility: t.Union([t.Literal("public"), t.Literal("private")]),
   createdAt: t.Optional(t.Date()),
   updatedAt: t.Optional(t.Date()),
 });
 
 export const courseRoutes = new Elysia({ prefix: "/courses" })
+  .use(authPlugin)
   .post(
     "/",
-    async ({ body, set }) => {
+    async ({ body, set, authPlugin }) => {
       try {
         const newCourse = new Course(body);
+        newCourse.created_by = authPlugin?.u_id || "=";
         await newCourse.save();
         set.status = 201;
         return { message: "Course created successfully", course: newCourse };
