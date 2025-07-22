@@ -5,6 +5,7 @@ import { AuthService } from "./service";
 import { JWTPayload } from "../../index";
 import { Types } from "mongoose";
 import { User } from "./model";
+import bearer from "@elysiajs/bearer";
 
 const UserSchema = t.Object({
   u_id: t.String({ minLength: 1 }),
@@ -28,7 +29,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   )
   .post(
     "/login",
-    async ({ body, jwt, set }) => {
+    async ({ body, jwt, set, cookie : { auth_token } }) => {
       const { username, password } = body;
 
       if (!username || !password) {
@@ -58,7 +59,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       };
 
       const token = await jwt.sign(payload);
-
+      auth_token.value = token
+      auth_token.httpOnly = true;
       set.status = 200;
       return {
         success: true,
@@ -168,10 +170,21 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   )
   //-------------------------------------------------------------------------------------------------------
   .get(
-    "/profile",
-    async ({ profile, set }) => {
-        let user_profile = await AuthService.getUserByUsername(profile?.u_id); 
-        return user_profile?.toJSON()
+    "/me",
+    async ({ set, cookie: { auth_token }, jwt }) => {
+      if (!auth_token.value) {
+        set.status = 401;
+        return { success: false, message: "Unauthorized" };
+      } else {
+        set.status = 200;
+        const profile = await jwt.verify(auth_token.value) as JWTPayload | null;
+        return {
+          success: true,
+          profile: {
+            u_id: profile?.u_id
+          }
+        };
+      }
     },
     {
       detail: {
