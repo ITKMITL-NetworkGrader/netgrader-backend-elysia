@@ -6,6 +6,7 @@ import { JWTPayload } from "../../index";
 import { Types } from "mongoose";
 import { User } from "./model";
 import bearer from "@elysiajs/bearer";
+import { authPlugin } from "../../plugins/plugins";
 
 const UserSchema = t.Object({
   u_id: t.String({ minLength: 1 }),
@@ -21,6 +22,7 @@ const UserSchema = t.Object({
 });
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
+  .use(authPlugin)
   .use(
     jwt({
       name: "jwt",
@@ -53,6 +55,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       // Create JWT token
       const payload: JWTPayload = {
         u_id: authResult.user.u_id,
+        fullName: authResult.user.fullName,
         u_role: authResult.user.role,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
@@ -169,22 +172,24 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     }
   )
   //-------------------------------------------------------------------------------------------------------
+  .post("/logout", async ({ set, cookie: { auth_token } }) => {
+    auth_token.remove();
+    auth_token.httpOnly = true;
+    set.status = 200;
+    return { success: true, message: "Logged out successfully" };
+  }, {
+    detail: {
+      tags: ["Authentication"],
+      summary: "User Logout",
+      description: "Logout the user by clearing the authentication token.",
+    },
+  })
   .get(
     "/me",
-    async ({ set, cookie: { auth_token }, jwt }) => {
-      if (!auth_token.value) {
-        set.status = 401;
-        return { success: false, message: "Unauthorized" };
-      } else {
-        set.status = 200;
-        const profile = await jwt.verify(auth_token.value) as JWTPayload | null;
-        return {
-          success: true,
-          profile: {
-            u_id: profile?.u_id
-          }
-        };
-      }
+    async ({ set, authPlugin }) => {
+      const profile = authPlugin;
+      set.status = 200;
+      return profile;
     },
     {
       detail: {

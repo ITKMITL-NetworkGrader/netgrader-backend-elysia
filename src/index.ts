@@ -8,6 +8,7 @@ import { connectDatabase } from "./config/database.js";
 
 export type JWTPayload = {
     u_id: string;
+    fullName?: string;
     u_role: "ADMIN" | "STUDENT" | "VIEWER";
     iat: number;
     exp: number;
