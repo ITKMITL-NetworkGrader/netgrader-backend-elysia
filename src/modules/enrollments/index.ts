@@ -5,8 +5,31 @@ import { User } from "../auth/model";
 
 export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
   .use(authPlugin)
+  .get("/", async ({ set }) => {
+    try {
+      const enrollments = await EnrollmentService.getAllEnrollments();
+      set.status = 200;
+      return {
+        success: true,
+        message: "Enrollments fetched successfully.",
+        enrollments,
+      };
+    } catch (error) {
+      set.status = 400;
+      return {
+        success: false,
+        message: (error as Error).message,
+      };
+    }
+  },{
+    detail: {
+      tags: ["Enrollments"],
+      summary: "Get All Enrollments",
+      description: "Fetch all enrollments in the system.",
+    },
+  })
   .post(
-    "/create",
+    "/",
     async ({ body, set, authPlugin }) => {
       const { c_id } = body;
       const u_id = authPlugin?.u_id || "";
@@ -53,7 +76,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
     }}
   )
   .get(
-    "/",
+    "/me",
     async ({ authPlugin, set }) => {
       const { u_id = "" } = authPlugin || {};
       try {

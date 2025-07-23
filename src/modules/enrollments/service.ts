@@ -2,6 +2,15 @@ import { Enrollment, IEnrollment } from "./model";
 import { Course } from "../courses/model";
 
 export class EnrollmentService {
+  static async getAllEnrollments(): Promise<IEnrollment[]> {
+    try {
+      const enrollments = await Enrollment.find();
+      return enrollments;
+    } catch (error) {
+      console.error("Error fetching all enrollments:", error);
+      throw new Error("Failed to fetch enrollments.");
+    }
+  }
   static async createEnrollment(u_id: string, u_role: string, c_id: string): Promise<IEnrollment> {
     const courseExists = await Course.exists({ _id: c_id });
     if (!courseExists) {
@@ -41,7 +50,7 @@ export class EnrollmentService {
       throw new Error("Course does not exist.");
     }
     try {
-      const enrollments = await Enrollment.find({ _id: c_id})
+      const enrollments = await Enrollment.find({ c_id: c_id})
       return enrollments;
     } catch (error) {
       console.error("Error fetching enrollments by course ID:", error);
