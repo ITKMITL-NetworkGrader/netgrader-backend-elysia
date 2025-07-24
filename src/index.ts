@@ -21,7 +21,12 @@ declare module 'elysia' {
 await connectDatabase();
 const app = new Elysia()
 .use(swagger())
-.use(cors())
+.use(cors({
+  origin: env.FRONTEND_ORIGIN,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+}))
 .use(authPlugin)
 .use(routes)
 .get("/", () => "Hello Elysia")
