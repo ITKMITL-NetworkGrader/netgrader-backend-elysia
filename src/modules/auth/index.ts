@@ -7,6 +7,7 @@ import { Types } from "mongoose";
 import { User } from "./model";
 import bearer from "@elysiajs/bearer";
 import { authPlugin } from "../../plugins/plugins";
+import { password } from "bun";
 
 const UserSchema = t.Object({
   u_id: t.String({ minLength: 1 }),
@@ -31,7 +32,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   )
   .post(
     "/login",
-    async ({ body, jwt, set, cookie : { auth_token } }) => {
+    async ({ body, jwt, set, cookie: { auth_token } }) => {
       const { username, password } = body;
 
       if (!username || !password) {
@@ -56,13 +57,12 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       const payload: JWTPayload = {
         u_id: authResult.user.u_id,
         fullName: authResult.user.fullName,
-        u_role: authResult.user.role,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
       };
 
       const token = await jwt.sign(payload);
-      auth_token.value = token
+      auth_token.value = token;
       auth_token.httpOnly = true;
       set.status = 200;
       return {
@@ -74,7 +74,6 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           id: (authResult.user._id as Types.ObjectId).toString(),
           u_id: authResult.user.u_id,
           fullName: authResult.user.fullName,
-          role: authResult.user.role,
           lastLogin: authResult.user.lastLogin,
         },
       };
@@ -95,11 +94,6 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
               id: t.String(),
               u_id: t.String(),
               fullName: t.String(),
-              role: t.Union([
-                t.Literal("ADMIN"),
-                t.Literal("STUDENT"),
-                t.Literal("VIEWER"),
-              ]),
               lastLogin: t.Date(),
             })
           ),
@@ -123,28 +117,37 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   )
   //-------------------------------------------------------------------------------------------------------
   .post(
-    "/register", 
-      async ({ body, set }) => {
-        try {
-            const { u_id, password, fullName, role } = body;
-            const userData = new User({u_id, password, fullName, role, ldapAuthenticated: false , lastLogin: new Date()});
-            const createdUserResult = await AuthService.createUser(userData);
-            if (!createdUserResult) {
-              set.status = 400;
-              return { success: false, message: "User already exists" };
-            }
-            set.status = 200;
-            return { 
-              success: true, 
-              user: createdUserResult.u_id,
-              role: createdUserResult.role,
-              message: "User registered successfully" 
-        };
-        }
-        catch (error: any) {
+    "/register",
+    async ({ body, set }) => {
+      try {
+        const { u_id, password, fullName, role } = body;
+        const userData = new User({
+          u_id,
+          password,
+          fullName,
+          role,
+          ldapAuthenticated: false,
+          lastLogin: new Date(),
+        });
+        const createdUserResult = await AuthService.createUser(userData);
+        if (!createdUserResult) {
           set.status = 400;
-          return { success: false, message: error.message || "Error registering user" };
+          return { success: false, message: "User already exists" };
         }
+        set.status = 200;
+        return {
+          success: true,
+          user: createdUserResult.u_id,
+          role: createdUserResult.role,
+          message: "User registered successfully",
+        };
+      } catch (error: any) {
+        set.status = 400;
+        return {
+          success: false,
+          message: error.message || "Error registering user",
+        };
+      }
     },
     {
       body: UserSchema,
@@ -172,18 +175,22 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     }
   )
   //-------------------------------------------------------------------------------------------------------
-  .post("/logout", async ({ set, cookie: { auth_token } }) => {
-    auth_token.remove();
-    auth_token.httpOnly = true;
-    set.status = 200;
-    return { success: true, message: "Logged out successfully" };
-  }, {
-    detail: {
-      tags: ["Authentication"],
-      summary: "User Logout",
-      description: "Logout the user by clearing the authentication token.",
+  .post(
+    "/logout",
+    async ({ set, cookie: { auth_token } }) => {
+      auth_token.remove();
+      auth_token.httpOnly = true;
+      set.status = 200;
+      return { success: true, message: "Logged out successfully" };
     },
-  })
+    {
+      detail: {
+        tags: ["Authentication"],
+        summary: "User Logout",
+        description: "Logout the user by clearing the authentication token.",
+      },
+    }
+  )
   .get(
     "/me",
     async ({ set, authPlugin }) => {
@@ -195,6 +202,21 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         tags: ["Authentication"],
         summary: "Get User Profile",
         description: "Retrieve the authenticated user's profile information.",
+      },
+    }
+  )
+  .get(
+    "/role",
+    async ({ set, authPlugin }) => {
+      const data = await User.findOne({ u_id: authPlugin?.u_id }).select({ role: 1, _id: 0, password: 0 });
+      set.status = 200;
+      return data?.role;
+    },
+    {
+      detail: {
+        tags: ["Authentication"],
+        summary: "Get User Role",
+        description: "Retrieve the authenticated user's role.",
       },
     }
   );
