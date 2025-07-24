@@ -209,8 +209,15 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     "/role",
     async ({ set, authPlugin }) => {
       const data = await User.findOne({ u_id: authPlugin?.u_id }).select({ role: 1, _id: 0, password: 0 });
+      if (!data) {
+        set.status = 404;
+        return { success: false, message: "User not found" };
+      }
       set.status = 200;
-      return data?.role;
+      return { 
+        success: true,
+        data: data?.role
+      };
     },
     {
       detail: {
