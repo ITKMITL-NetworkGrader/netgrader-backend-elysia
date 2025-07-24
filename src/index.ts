@@ -24,7 +24,7 @@ const app = new Elysia()
 .use(cors({
   origin: env.FRONTEND_ORIGIN,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "ACCEPT", "Authorization"],
   credentials: true,
 }))
 .use(authPlugin)
