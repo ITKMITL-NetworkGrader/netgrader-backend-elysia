@@ -4,7 +4,7 @@ import { Enrollment } from "../enrollments/model";
 import { getDateWithTimezone } from "../../utils/helpers.js";
 import { env } from "process";
 import { authPlugin } from "../../plugins/plugins";
-
+import { objectIdToShortcode, shortcodeToObjectId } from "./services";
 
 const courseBodySchema = t.Object({
   title: t.String(),
@@ -45,7 +45,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
       try {
         const courses = await Course.find();
         set.status = 200;
-        return { courses: courses.filter(course => course.visibility === "public") };
+        return { courses: courses.filter(course => course.visibility === "public").map(course => ({ ...course.toObject(), _id: objectIdToShortcode(course._id) })) };
       } catch (error: any) {
         set.status = 500;
         return { message: "Error fetching courses", error: error.message };
@@ -63,7 +63,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     "/:id",
     async ({ params, set }) => {
       try {
-        const course = await Course.findById(params.id);
+        const course = await Course.findById(shortcodeToObjectId(params.id));
         if (!course) {
           set.status = 404;
           return;
@@ -90,7 +90,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
       const now = getDateWithTimezone(env.TIMEZONE_OFFSET ? parseInt(env.TIMEZONE_OFFSET) : 7)
       body.updatedAt = now;
       try {
-        const updatedCourse = await Course.findByIdAndUpdate(params.id, body, {
+        const updatedCourse = await Course.findByIdAndUpdate(shortcodeToObjectId(params.id), body, {
           new: true,
           runValidators: true,
         });
@@ -122,7 +122,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     "/:id",
     async ({ params, set }) => {
       try {
-        const deletedCourse = await Course.findByIdAndDelete(params?.id);
+        const deletedCourse = await Course.findByIdAndDelete(shortcodeToObjectId(params?.id));
         if (!deletedCourse) {
           set.status = 404;
           return { message: "Course not found" };
