@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { EnrollmentService } from "./service";
 import { authPlugin } from "../../plugins/plugins";
 import { User } from "../auth/model";
+import { shortcodeToObjectId } from "../courses/services";
 
 export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
   .use(authPlugin)
@@ -35,7 +36,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
       const u_id = authPlugin?.u_id || "";
       const user = await User.findOne({ u_id: u_id }, "role");
       try {
-        const enrollment = await EnrollmentService.createEnrollment(u_id, user?.role || "", c_id);
+        const enrollment = await EnrollmentService.createEnrollment(u_id, user?.role || "", shortcodeToObjectId(c_id).toString());
         set.status = 201;
         return {
           success: true,
@@ -132,7 +133,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
     async ({ params }) => {
       const { c_id } = params;
       try {
-        const enrollments = await EnrollmentService.getEnrollmentsByCourseId(c_id);
+        const enrollments = await EnrollmentService.getEnrollmentsByCourseId(shortcodeToObjectId(c_id).toString());
         return {
           success: true,
           enrollments,
@@ -178,7 +179,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
       const { c_id } = body;
       const { u_id = "" } = authPlugin || {};
       try {
-        await EnrollmentService.deleteEnrollment(u_id, c_id);
+        await EnrollmentService.deleteEnrollment(u_id, shortcodeToObjectId(c_id).toString());
         set.status = 200; // No Content
         return { success: true, message: "Enrollment deleted successfully." };
       } catch (error) {
