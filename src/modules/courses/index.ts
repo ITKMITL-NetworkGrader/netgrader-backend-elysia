@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
 import { Course } from "./model";
 import { Enrollment } from "../enrollments/model";
+import { EnrollmentService } from "../enrollments/service";
 import { getDateWithTimezone } from "../../utils/helpers.js";
 import { env } from "process";
 import { authPlugin } from "../../plugins/plugins";
@@ -62,15 +63,18 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
   )
   .get(
     "/:id",
-    async ({ params, set }) => {
+    async ({ params, set, authPlugin }) => {
       try {
-        const course = await Course.findById(shortcodeToObjectId(params.id));
+        const { u_id } = authPlugin ?? { u_id: "" };
+        const courseId = shortcodeToObjectId(params.id);
+        const course = await Course.findById(courseId);
         if (!course) {
           set.status = 404;
           return;
         }
+        const enrollment = await EnrollmentService.getUserEnrollmentStatus(courseId.toString(), u_id);
         set.status = 200;
-        return { course };
+        return { course, ...enrollment };
       } catch (error: any) {
         set.status = 500;
         return { message: "Error fetching course", error: error.message };
