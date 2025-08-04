@@ -10,11 +10,12 @@ export const authPlugin = new Elysia({ name: "authPlugin" })
         jwt({
             name: "jwt",
             secret: env.JWT_SECRET || "secret",
+            exp: '1d'
         })
     )
     .derive({ as: 'global'}, async ({ jwt, set, path, cookie: { auth_token } })=> {
         console.log(path)
-        const excludedPaths = ["/" ,"/swagger", "/swagger/json", "/v0/auth/login", "/v0/auth/register"];
+        const excludedPaths = ["/" ,"/swagger", "/swagger/json", "/v0/auth/login", "/v0/auth/register", "/v0/auth/me"];
         const dev_env = env.NODE_ENV != "production";
         if (excludedPaths.includes(path) || dev_env) {
             return {};

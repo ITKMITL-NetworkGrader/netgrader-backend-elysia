@@ -26,6 +26,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     jwt({
       name: "jwt",
       secret: env.JWT_SECRET || "secret",
+      exp: '1d',
     })
   )
   .post(
@@ -59,15 +60,15 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
       };
 
-      const token = await jwt.sign(payload);
-      auth_token.value = token;
+      const value = await jwt.sign(payload);
+      auth_token.value = value;
       auth_token.httpOnly = true;
       set.status = 200;
       return {
         success: true,
         message: authResult.message || "Authentication successful",
         isFirstTimeLogin: authResult.isFirstTimeLogin,
-        token,
+        value,
         user: {
           id: (authResult.user._id as Types.ObjectId).toString(),
           u_id: authResult.user.u_id,
@@ -191,9 +192,13 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   )
   .get(
     "/me",
-    async ({ set, authPlugin }) => {
-      set.status = 200;
-      return authPlugin;
+    async ({ jwt, status, cookie: { auth_token } }) => {
+      console.log(auth_token.value)
+      const profile = await jwt.verify(auth_token.value);
+      if (!profile) {
+        status(401, 'Unauthorized');
+      }
+      return profile;
     },
     {
       detail: {
