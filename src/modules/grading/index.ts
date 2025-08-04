@@ -30,6 +30,7 @@ export const gradingRoutes = new Elysia({ prefix: '/grading' })
           name: t.String(),
           template: t.String(),
           vars: t.Optional(t.Record(t.String(), t.Any())),
+          test_cases: t.Optional(t.Array(t.Record(t.String(), t.Any()))),
           target_device: t.Optional(t.Array(t.String())),
           expected_result: t.Optional(t.String()),
           points: t.Number()
