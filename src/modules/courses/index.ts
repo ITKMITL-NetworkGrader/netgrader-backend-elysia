@@ -20,8 +20,9 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     "/",
     async ({ body, set, authPlugin }) => {
       try {
+        const { u_id } = authPlugin ?? { u_id: "" };
         const newCourse = new Course(body);
-        newCourse.created_by = authPlugin?.u_id || "=";
+        newCourse.created_by = u_id;
         await newCourse.save();
         set.status = 201;
         return { message: "Course created successfully", course: newCourse };

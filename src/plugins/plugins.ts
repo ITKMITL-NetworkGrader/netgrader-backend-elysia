@@ -34,6 +34,6 @@ export const authPlugin = new Elysia({ name: "authPlugin" })
         } catch (error) {
             console.error("Token verification failed:", error);
             set.status = 401;
-            return { error: "Unauthorized - Token verification failed", message: (error as Error).message };
+            throw new Error("Unauthorized - Token verification failed");
         }
     });

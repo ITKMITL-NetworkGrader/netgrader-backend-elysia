@@ -5,9 +5,7 @@ import { AuthService } from "./service";
 import { JWTPayload } from "../../index";
 import { Types } from "mongoose";
 import { User } from "./model";
-import bearer from "@elysiajs/bearer";
 import { authPlugin } from "../../plugins/plugins";
-import { password } from "bun";
 
 const UserSchema = t.Object({
   u_id: t.String({ minLength: 1 }),
@@ -208,7 +206,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   .get(
     "/role",
     async ({ set, authPlugin }) => {
-      const data = await User.findOne({ u_id: authPlugin?.u_id }).select({ role: 1, _id: 0, password: 0 });
+      const { u_id } = authPlugin ?? { u_id: "" };
+      const data = await User.findOne({ u_id }).select({ role: 1, _id: 0, password: 0 });
       if (!data) {
         set.status = 404;
         return { success: false, message: "User not found" };

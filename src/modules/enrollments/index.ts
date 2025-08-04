@@ -33,8 +33,8 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
     "/",
     async ({ body, set, authPlugin }) => {
       const { c_id } = body;
-      const u_id = authPlugin?.u_id || "";
-      const user = await User.findOne({ u_id: u_id }, "role");
+      const { u_id } = authPlugin ?? { u_id: "" };
+      const user = await User.findOne({ u_id }, "role");
       try {
         const enrollment = await EnrollmentService.createEnrollment(u_id, user?.role || "", shortcodeToObjectId(c_id).toString());
         set.status = 201;
