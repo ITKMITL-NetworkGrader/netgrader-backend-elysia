@@ -4,12 +4,13 @@ import { Enrollment } from "../enrollments/model";
 import { EnrollmentService } from "../enrollments/service";
 import { getDateWithTimezone } from "../../utils/helpers.js";
 import { env } from "process";
-import { authPlugin } from "../../plugins/plugins";
+import { authPlugin, requireRole } from "../../plugins/plugins";
 import { objectIdToShortcode, shortcodeToObjectId } from "./services";
 
 const courseBodySchema = t.Object({
   title: t.String(),
   description: t.String(),
+  password: t.Optional(t.String()),
   visibility: t.Union([t.Literal("public"), t.Literal("private")]),
   createdAt: t.Optional(t.Date()),
   updatedAt: t.Optional(t.Date()),
@@ -22,11 +23,29 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     async ({ body, set, authPlugin }) => {
       try {
         const { u_id } = authPlugin ?? { u_id: "" };
-        const newCourse = new Course(body);
-        newCourse.created_by = u_id;
-        await newCourse.save();
+        const newCourse = new Course({
+          ...body,
+          created_by: u_id
+        });
+        
+        const savedCourse = await newCourse.save();
+        
+        const enrollment = await EnrollmentService.createEnrollment(
+          u_id, 
+          "INSTRUCTOR", 
+          savedCourse._id.toString()
+        );
+        
+        if (!enrollment) {
+          set.status = 400;
+          return { message: "Failed to create enrollment for the instructor." };
+        }
+
         set.status = 201;
-        return { message: "Course created successfully", course: newCourse };
+        return { 
+          message: "Course created successfully", 
+          course: savedCourse 
+        };
       } catch (error: any) {
         set.status = 400;
         return { message: "Error creating course", error: error.message };
@@ -34,6 +53,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     },
     {
       body: courseBodySchema,
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
       detail: {
         tags: ["Courses"],
         description: "Create a new course",
@@ -45,9 +65,15 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     "/",
     async ({ set }) => {
       try {
-        const courses = await Course.find();
+        const courses = await Course.find({ visibility: "public" });
+        
         set.status = 200;
-        return { courses: courses.filter(course => course.visibility === "public").map(course => ({ ...course.toObject(), _id: objectIdToShortcode(course._id) })) };
+        return { 
+          courses: courses.map(course => ({
+            ...course.toObject(),
+            _id: objectIdToShortcode(course._id)
+          }))
+        };
       } catch (error: any) {
         set.status = 500;
         return { message: "Error fetching courses", error: error.message };
@@ -56,8 +82,8 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     {
       detail: {
         tags: ["Courses"],
-        description: "Get all courses",
-        summary: "Get all courses",
+        description: "Get all public courses",
+        summary: "Get all public courses",
       },
     }
   )
@@ -67,13 +93,18 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
       try {
         const { u_id } = authPlugin ?? { u_id: "" };
         const courseId = shortcodeToObjectId(params.id);
+        
         const course = await Course.findById(courseId);
         if (!course) {
           set.status = 404;
-          return;
+          return { message: "Course not found" };
         }
-        const enrollment = await EnrollmentService.getUserEnrollmentStatus(courseId.toString(), u_id);
-        set.status = 200;
+        
+        const enrollment = await EnrollmentService.getUserEnrollmentStatus(
+          courseId.toString(), 
+          u_id
+        );
+        
         return { course, ...enrollment };
       } catch (error: any) {
         set.status = 500;
@@ -92,18 +123,22 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
   .put(
     "/:id",
     async ({ params, body, set }) => {
-      const now = getDateWithTimezone(env.TIMEZONE_OFFSET ? parseInt(env.TIMEZONE_OFFSET) : 7)
-      body.updatedAt = now;
       try {
-        const updatedCourse = await Course.findByIdAndUpdate(shortcodeToObjectId(params.id), body, {
-          new: true,
-          runValidators: true,
-        });
+        const now = getDateWithTimezone(
+          env.TIMEZONE_OFFSET ? parseInt(env.TIMEZONE_OFFSET) : 7
+        );
+        
+        const updatedCourse = await Course.findByIdAndUpdate(
+          shortcodeToObjectId(params.id),
+          { ...body, updatedAt: now },
+          { new: true, runValidators: true }
+        );
+        
         if (!updatedCourse) {
           set.status = 404;
           return { message: "Course not found" };
         }
-        set.status = 200;
+        
         return {
           message: "Course updated successfully",
           course: updatedCourse,
@@ -116,6 +151,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     {
       params: t.Object({ id: t.String() }),
       body: t.Partial(courseBodySchema),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
       detail: {
         tags: ["Courses"],
         description: "Update a course by its ID (partial update supported)",
@@ -127,12 +163,16 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     "/:id",
     async ({ params, set }) => {
       try {
-        const deletedCourse = await Course.findByIdAndDelete(shortcodeToObjectId(params?.id));
+        const courseId = shortcodeToObjectId(params.id);
+        const deletedCourse = await Course.findByIdAndDelete(courseId);
+        
         if (!deletedCourse) {
           set.status = 404;
           return { message: "Course not found" };
         }
+        
         await Enrollment.deleteMany({ courseId: params.id });
+        
         return {
           message: "Course and related enrollments deleted successfully",
         };
@@ -143,6 +183,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     },
     {
       params: t.Object({ id: t.String() }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
       detail: {
         tags: ["Courses"],
         description: "Delete a course by its ID",
@@ -150,7 +191,6 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
       },
     }
   )
-  // Nested route to get all enrollments for a specific course
   .get(
     "/:id/enrollments",
     async ({ params, set }) => {
@@ -158,10 +198,12 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
         const enrollments = await Enrollment.find({
           courseId: params.id,
         }).populate("courseId");
+        
         if (!enrollments.length) {
           set.status = 404;
           return { message: "No enrollments found for this course" };
         }
+        
         return { enrollments };
       } catch (error: any) {
         set.status = 500;
@@ -170,6 +212,10 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     },
     {
       params: t.Object({ id: t.String() }),
-      detail: { summary: "Get all enrollments for a specific course" },
+      detail: {
+        tags: ["Courses"],
+        description: "Get all enrollments for a specific course",
+        summary: "Get all enrollments for a specific course"
+      },
     }
   );
