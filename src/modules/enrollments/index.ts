@@ -207,4 +207,53 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
         description: "Delete an enrollment for a user in a course.",
       },
     },
-  );
+  )
+  // ...existing code...
+.get("/status/:c_id", async ({ params, authPlugin, set }) => {
+  try {
+    const { u_id = "" } = authPlugin || {};
+    const { c_id } = params;
+    
+    const courseId = shortcodeToObjectId(c_id).toString();
+    const enrollment = await EnrollmentService.getUserEnrollmentStatus(courseId, u_id);
+    
+    set.status = 200;
+    return {
+      success: true,
+      enrollment: {
+        isEnrolled: enrollment.isEnrolled,
+        role: enrollment.role,
+        enrollmentDate: enrollment.enrollmentDate
+      }
+    };
+  } catch (error) {
+    set.status = 400;
+    return {
+      success: false,
+      message: (error as Error).message
+    };
+  }
+}, {
+  params: t.Object({
+    c_id: t.String()
+  }),
+  response: {
+    200: t.Object({
+      success: t.Boolean(),
+      enrollment: t.Object({
+        isEnrolled: t.Boolean(),
+        role: t.Optional(t.String()),
+        enrollmentDate: t.Optional(t.Date())
+      })
+    }),
+    400: t.Object({
+      success: t.Boolean(),
+      message: t.String()
+    })
+  },
+  detail: {
+    tags: ["Enrollments"],
+    summary: "Get User Enrollment Status",
+    description: "Get the current user's enrollment status and role for a specific course."
+  }
+});

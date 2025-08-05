@@ -73,11 +73,11 @@ export class EnrollmentService {
       throw new Error("Failed to delete enrollment.");
     }
   }
-  static async getUserEnrollmentStatus(c_id: string, u_id: string): Promise<{ isEnrolled: boolean, role?: string }> {
+  static async getUserEnrollmentStatus(c_id: string, u_id: string): Promise<{ isEnrolled: boolean, role?: string, enrollmentDate?: Date }> {
     try {
-      const enrollment = await Enrollment.findOne({ c_id: c_id, u_id: u_id });
+      const enrollment = await Enrollment.findOne({ c_id, u_id });
       if (enrollment) {
-        return { isEnrolled: true, role: enrollment.u_role };
+        return { isEnrolled: true, role: enrollment.u_role, enrollmentDate: enrollment.enrollmentDate };
       }
       return { isEnrolled: false };
     } catch (error) {
