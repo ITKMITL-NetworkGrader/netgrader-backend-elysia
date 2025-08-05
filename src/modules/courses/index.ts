@@ -33,7 +33,8 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
         const enrollment = await EnrollmentService.createEnrollment(
           u_id, 
           "INSTRUCTOR", 
-          savedCourse._id.toString()
+          savedCourse._id.toString(),
+          body.password ?? undefined
         );
         
         if (!enrollment) {
