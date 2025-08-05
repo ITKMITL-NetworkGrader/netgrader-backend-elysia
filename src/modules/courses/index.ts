@@ -65,13 +65,15 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     "/",
     async ({ set }) => {
       try {
-        const courses = await Course.find({ visibility: "public" });
+        const courses = await Course.find({ visibility: "public" }).select("+password");
         
         set.status = 200;
         return { 
           courses: courses.map(course => ({
             ...course.toObject(),
-            _id: objectIdToShortcode(course._id)
+            _id: objectIdToShortcode(course._id),
+            requiresPassword: !!(course.password && course.password.trim() !== ''),
+            password: undefined
           }))
         };
       } catch (error: any) {
@@ -94,7 +96,8 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
         const { u_id } = authPlugin ?? { u_id: "" };
         const courseId = shortcodeToObjectId(params.id);
         
-        const course = await Course.findById(courseId);
+        // Find course and include password field to check if it exists
+        const course = await Course.findById(courseId).select('+password');
         if (!course) {
           set.status = 404;
           return { message: "Course not found" };
@@ -105,7 +108,22 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
           u_id
         );
         
-        return { course, ...enrollment };
+        // Create course object without exposing the actual password
+        const courseData = {
+          ...course.toObject(),
+          _id: objectIdToShortcode(course._id),
+          requiresPassword: !!(course.password && course.password.trim() !== ''),
+          password: undefined // Remove password from response
+        };
+        
+        return { 
+          course: courseData, 
+          enrollment: {
+            isEnrolled: enrollment.isEnrolled,
+            role: enrollment.role,
+            enrollmentDate: enrollment.enrollmentDate
+          }
+        };
       } catch (error: any) {
         set.status = 500;
         return { message: "Error fetching course", error: error.message };
@@ -113,9 +131,35 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     },
     {
       params: t.Object({ id: t.String() }),
+      response: {
+        200: t.Object({
+          course: t.Object({
+            _id: t.String(),
+            title: t.String(),
+            description: t.String(),
+            visibility: t.Union([t.Literal("public"), t.Literal("private")]),
+            created_by: t.String(),
+            createdAt: t.Date(),
+            updatedAt: t.Date(),
+            requiresPassword: t.Boolean()
+          }),
+          enrollment: t.Object({
+            isEnrolled: t.Boolean(),
+            role: t.Optional(t.String()),
+            enrollmentDate: t.Optional(t.Date())
+          })
+        }),
+        404: t.Object({
+          message: t.String()
+        }),
+        500: t.Object({
+          message: t.String(),
+          error: t.Optional(t.String())
+        })
+      },
       detail: {
         tags: ["Courses"],
-        description: "Get a single course by its ID",
+        description: "Get a single course by its ID with enrollment status",
         summary: "Get a single course by its ID",
       },
     }
