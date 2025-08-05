@@ -74,6 +74,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           id: (authResult.user._id as Types.ObjectId).toString(),
           u_id: authResult.user.u_id,
           fullName: authResult.user.fullName,
+          role: authResult.user.role,
           lastLogin: authResult.user.lastLogin,
         },
       };
@@ -94,6 +95,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
               id: t.String(),
               u_id: t.String(),
               fullName: t.String(),
+              role: t.String(),
               lastLogin: t.Date(),
             })
           ),
