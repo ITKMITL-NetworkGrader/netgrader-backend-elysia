@@ -56,6 +56,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       const payload: JWTPayload = {
         u_id: authResult.user.u_id,
         fullName: authResult.user.fullName,
+        role: authResult.user.role,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
       };
