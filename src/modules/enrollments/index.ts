@@ -35,8 +35,46 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
       const { c_id } = body;
       const { u_id } = authPlugin ?? { u_id: "" };
       const user = await User.findOne({ u_id }, "role");
+      
+      if (!user) {
+        set.status = 401;
+        return {
+          success: false,
+          message: "User not found."
+        };
+      }
+
+      let enrollmentRole: string;
+
+      // If user is ADMIN, they MUST specify a role
+      if (user.role === "ADMIN") {
+        if (!body.role) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "Admin must specify a role to enroll in the course."
+          };
+        }
+        enrollmentRole = body.role;
+      } else {
+        // If user is not ADMIN, they CANNOT specify a role - use their default role
+        if (body.role) {
+          set.status = 403;
+          return {
+            success: false,
+            message: "Only admins can specify enrollment roles."
+          };
+        }
+        enrollmentRole = user.role;
+      }
+
       try {
-        const enrollment = await EnrollmentService.createEnrollment(u_id, user?.role || "", shortcodeToObjectId(c_id).toString());
+        const enrollment = await EnrollmentService.createEnrollment(
+          u_id, 
+          enrollmentRole, 
+          shortcodeToObjectId(c_id).toString(), 
+          body.password ?? undefined
+        );
         set.status = 201;
         return {
           success: true,
@@ -54,9 +92,11 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
     {
       body: t.Object({
         c_id: t.String(),
+        password: t.Optional(t.String()),
+        role: t.Optional(t.String())
       }),
       response: {
-        200: t.Object({
+        201: t.Object({
           success: t.Boolean(),
           message: t.String(),
           enrollment: t.Object({
@@ -64,10 +104,19 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
             c_id: t.String(),
             u_role: t.String(),
             enrollmentDate: t.Date(),
-          })}),
+          })
+        }),
         400: t.Object({
           success: t.Boolean(),
-            message: t.String(),
+          message: t.String(),
+        }),
+        401: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+        403: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
         }),
       },
       detail: {
