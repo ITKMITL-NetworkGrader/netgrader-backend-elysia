@@ -9,6 +9,7 @@ import { connectDatabase } from "./config/database.js";
 export type JWTPayload = {
     u_id: string;
     fullName?: string;
+    role: string;
     iat: number;
     exp: number;
 }
