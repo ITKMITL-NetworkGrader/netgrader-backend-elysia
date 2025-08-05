@@ -6,41 +6,45 @@ import { shortcodeToObjectId } from "../courses/services";
 
 export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
   .use(authPlugin)
-  .get("/", async ({ set }) => {
-    try {
-      const enrollments = await EnrollmentService.getAllEnrollments();
-      set.status = 200;
-      return {
-        success: true,
-        message: "Enrollments fetched successfully.",
-        enrollments,
-      };
-    } catch (error) {
-      set.status = 400;
-      return {
-        success: false,
-        message: (error as Error).message,
-      };
-    }
-  },{
-    detail: {
-      tags: ["Enrollments"],
-      summary: "Get All Enrollments",
-      description: "Fetch all enrollments in the system.",
+  .get(
+    "/",
+    async ({ set }) => {
+      try {
+        const enrollments = await EnrollmentService.getAllEnrollments();
+        set.status = 200;
+        return {
+          success: true,
+          message: "Enrollments fetched successfully.",
+          enrollments,
+        };
+      } catch (error) {
+        set.status = 400;
+        return {
+          success: false,
+          message: (error as Error).message,
+        };
+      }
     },
-  })
+    {
+      detail: {
+        tags: ["Enrollments"],
+        summary: "Get All Enrollments",
+        description: "Fetch all enrollments in the system.",
+      },
+    }
+  )
   .post(
     "/",
     async ({ body, set, authPlugin }) => {
       const { c_id } = body;
       const { u_id } = authPlugin ?? { u_id: "" };
       const user = await User.findOne({ u_id }, "role");
-      
+
       if (!user) {
         set.status = 401;
         return {
           success: false,
-          message: "User not found."
+          message: "User not found.",
         };
       }
 
@@ -52,7 +56,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
           set.status = 400;
           return {
             success: false,
-            message: "Admin must specify a role to enroll in the course."
+            message: "Admin must specify a role to enroll in the course.",
           };
         }
         enrollmentRole = body.role;
@@ -62,7 +66,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
           set.status = 403;
           return {
             success: false,
-            message: "Only admins can specify enrollment roles."
+            message: "Only admins can specify enrollment roles.",
           };
         }
         enrollmentRole = user.role;
@@ -70,9 +74,9 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
 
       try {
         const enrollment = await EnrollmentService.createEnrollment(
-          u_id, 
-          enrollmentRole, 
-          shortcodeToObjectId(c_id).toString(), 
+          u_id,
+          enrollmentRole,
+          shortcodeToObjectId(c_id).toString(),
           body.password ?? undefined
         );
         set.status = 201;
@@ -93,7 +97,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
       body: t.Object({
         c_id: t.String(),
         password: t.Optional(t.String()),
-        role: t.Optional(t.String())
+        role: t.Optional(t.String()),
       }),
       response: {
         201: t.Object({
@@ -104,7 +108,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
             c_id: t.String(),
             u_role: t.String(),
             enrollmentDate: t.Date(),
-          })
+          }),
         }),
         400: t.Object({
           success: t.Boolean(),
@@ -123,14 +127,17 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
         tags: ["Enrollments"],
         summary: "Create Enrollment",
         description: "Create a new enrollment for a user in a course.",
-    }}
+      },
+    }
   )
   .get(
     "/me",
     async ({ authPlugin, set }) => {
       const { u_id = "" } = authPlugin || {};
       try {
-        const enrollments = await EnrollmentService.getEnrollmentsByUserId(u_id);
+        const enrollments = await EnrollmentService.getEnrollmentsByUserId(
+          u_id
+        );
         set.status = 200;
         if (enrollments.length === 0) {
           return {
@@ -152,29 +159,31 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
       }
     },
     {
-        response: {
-            200: t.Object({
-            success: t.Boolean(),
-            message: t.String(),
-            enrollments: t.Array(t.Optional(
-                t.Object({
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          enrollments: t.Array(
+            t.Optional(
+              t.Object({
                 u_id: t.String(),
                 c_id: t.String(),
                 u_role: t.String(),
                 enrollmentDate: t.Date(),
-                }))
-            ),
-            }),
-            400: t.Object({
-            success: t.Boolean(),
-            message: t.String(),
-            }),
-        },
-        detail: {
-            tags: ["Enrollments"],
-            summary: "Get User Enrollments",
-            description: "Fetch all enrollments for the authenticated user.",
-        },
+              })
+            )
+          ),
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+      },
+      detail: {
+        tags: ["Enrollments"],
+        summary: "Get User Enrollments",
+        description: "Fetch all enrollments for the authenticated user.",
+      },
     }
   )
   .get(
@@ -182,7 +191,9 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
     async ({ params }) => {
       const { c_id } = params;
       try {
-        const enrollments = await EnrollmentService.getEnrollmentsByCourseId(shortcodeToObjectId(c_id).toString());
+        const enrollments = await EnrollmentService.getEnrollmentsByCourseId(
+          shortcodeToObjectId(c_id).toString()
+        );
         return {
           success: true,
           enrollments,
@@ -195,31 +206,33 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
       }
     },
     {
-        params: t.Object({
-            c_id: t.String(),
-        }),
-        response: {
-            200: t.Object({
-            success: t.Boolean(),
-            enrollments: t.Array(t.Optional(
-                t.Object({
+      params: t.Object({
+        c_id: t.String(),
+      }),
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          enrollments: t.Array(
+            t.Optional(
+              t.Object({
                 u_id: t.String(),
-                c_id: t.String(),
+                fullName: t.String(),
                 u_role: t.String(),
                 enrollmentDate: t.Date(),
-                })
-            )),
-            }),
-            400: t.Object({
-            success: t.Boolean(),
-            message: t.String(),
-            }),
-        },
-        detail: {
-            tags: ["Enrollments"],
-            summary: "Get Course Enrollments",
-            description: "Fetch all enrollments for a specific course.",
-        },
+              })
+            )
+          ),
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+      },
+      detail: {
+        tags: ["Enrollments"],
+        summary: "Get Course Enrollments",
+        description: "Fetch all enrollments for a specific course.",
+      },
     }
   )
   .delete(
@@ -228,7 +241,10 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
       const { c_id } = body;
       const { u_id = "" } = authPlugin || {};
       try {
-        await EnrollmentService.deleteEnrollment(u_id, shortcodeToObjectId(c_id).toString());
+        await EnrollmentService.deleteEnrollment(
+          u_id,
+          shortcodeToObjectId(c_id).toString()
+        );
         set.status = 200; // No Content
         return { success: true, message: "Enrollment deleted successfully." };
       } catch (error) {
@@ -255,54 +271,62 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
         summary: "Delete Enrollment",
         description: "Delete an enrollment for a user in a course.",
       },
-    },
+    }
   )
   // ...existing code...
-.get("/status/:c_id", async ({ params, authPlugin, set }) => {
-  try {
-    const { u_id = "" } = authPlugin || {};
-    const { c_id } = params;
-    
-    const courseId = shortcodeToObjectId(c_id).toString();
-    const enrollment = await EnrollmentService.getUserEnrollmentStatus(courseId, u_id);
-    
-    set.status = 200;
-    return {
-      success: true,
-      enrollment: {
-        isEnrolled: enrollment.isEnrolled,
-        role: enrollment.role,
-        enrollmentDate: enrollment.enrollmentDate
+  .get(
+    "/status/:c_id",
+    async ({ params, authPlugin, set }) => {
+      try {
+        const { u_id = "" } = authPlugin || {};
+        const { c_id } = params;
+
+        const courseId = shortcodeToObjectId(c_id).toString();
+        const enrollment = await EnrollmentService.getUserEnrollmentStatus(
+          courseId,
+          u_id
+        );
+
+        set.status = 200;
+        return {
+          success: true,
+          enrollment: {
+            isEnrolled: enrollment.isEnrolled,
+            role: enrollment.role,
+            enrollmentDate: enrollment.enrollmentDate,
+          },
+        };
+      } catch (error) {
+        set.status = 400;
+        return {
+          success: false,
+          message: (error as Error).message,
+        };
       }
-    };
-  } catch (error) {
-    set.status = 400;
-    return {
-      success: false,
-      message: (error as Error).message
-    };
-  }
-}, {
-  params: t.Object({
-    c_id: t.String()
-  }),
-  response: {
-    200: t.Object({
-      success: t.Boolean(),
-      enrollment: t.Object({
-        isEnrolled: t.Boolean(),
-        role: t.Optional(t.String()),
-        enrollmentDate: t.Optional(t.Date())
-      })
-    }),
-    400: t.Object({
-      success: t.Boolean(),
-      message: t.String()
-    })
-  },
-  detail: {
-    tags: ["Enrollments"],
-    summary: "Get User Enrollment Status",
-    description: "Get the current user's enrollment status and role for a specific course."
-  }
-});
+    },
+    {
+      params: t.Object({
+        c_id: t.String(),
+      }),
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          enrollment: t.Object({
+            isEnrolled: t.Boolean(),
+            role: t.Optional(t.String()),
+            enrollmentDate: t.Optional(t.Date()),
+          }),
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+      },
+      detail: {
+        tags: ["Enrollments"],
+        summary: "Get User Enrollment Status",
+        description:
+          "Get the current user's enrollment status and role for a specific course.",
+      },
+    }
+  );

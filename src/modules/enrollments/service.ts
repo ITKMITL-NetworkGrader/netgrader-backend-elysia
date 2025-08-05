@@ -1,6 +1,13 @@
 import { Enrollment, IEnrollment } from "./model";
 import { Course, ICourse } from "../courses/model";
 
+interface CourseMember {
+  u_id: string;
+  fullName: string;
+  u_role: "INSTRUCTOR" | "STUDENT" | "TA";
+  enrollmentDate: Date;
+}
+
 export class EnrollmentService {
   static async getAllEnrollments(): Promise<IEnrollment[]> {
     try {
@@ -26,26 +33,29 @@ export class EnrollmentService {
     }
 
     // Find the course and include password field for validation
-    const course = await Course.findById(c_id).select('+password');
+    const course = await Course.findById(c_id).select("+password");
     if (!course) {
       throw new Error("Course not found");
     }
 
     // Check if course requires password and validate it
-    if (course.password && course.password.trim() !== '') {
+    if (course.password && course.password.trim() !== "") {
       if (!password) {
         throw new Error("Course requires a password to enroll");
       }
 
       // Use promise-based password comparison
       const isPasswordValid = await new Promise<boolean>((resolve, reject) => {
-        course.comparePassword(password, (err: Error | null, isMatch?: boolean) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(isMatch || false);
+        course.comparePassword(
+          password,
+          (err: Error | null, isMatch?: boolean) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(isMatch || false);
+            }
           }
-        });
+        );
       });
 
       if (!isPasswordValid) {
@@ -79,14 +89,14 @@ export class EnrollmentService {
     }
   }
 
-  static async getEnrollmentsByCourseId(c_id: string): Promise<IEnrollment[]> {
+  static async getEnrollmentsByCourseId(c_id: string): Promise<CourseMember[]> {
     const courseExists = await Course.exists({ _id: c_id });
     if (!courseExists) {
       throw new Error("Course does not exist.");
     }
     try {
-      const enrollments = await Enrollment.find({ c_id: c_id });
-      return enrollments;
+      const members = await this.getCourseMembers(c_id)
+      return members;
     } catch (error) {
       console.error("Error fetching enrollments by course ID:", error);
       throw new Error("Failed to fetch enrollments.");
@@ -126,5 +136,30 @@ export class EnrollmentService {
       console.error("Error checking user enrollment status:", error);
       throw new Error("Failed to check enrollment status.");
     }
+  }
+
+  private static async getCourseMembers(c_id: string): Promise<CourseMember[]> {
+    const members = await Enrollment.aggregate([
+      { $match: { c_id } },
+      {
+        $lookup: {
+          from: "users", // collection name in MongoDB (usually lowercase plural)
+          localField: "u_id",
+          foreignField: "u_id",
+          as: "userInfo",
+        },
+      },
+      { $unwind: "$userInfo" },
+      {
+        $project: {
+          _id: 0,
+          u_id: 1,
+          fullName: "$userInfo.fullName",
+          u_role: 1,
+          enrollmentDate: 1,
+        },
+      },
+    ]);
+    return members as CourseMember[];
   }
 }
