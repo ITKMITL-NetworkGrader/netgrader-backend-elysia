@@ -39,7 +39,12 @@ export class EnrollmentService {
     }
 
     // Check if course requires password and validate it
-    if (course.password && course.password.trim() !== "") {
+    // Skip password validation if:
+    // 1. Course creator is auto-enrolling as instructor, OR
+    // 2. Course doesn't have a password
+    const isCreatorEnrolling = u_role === "INSTRUCTOR" && course.created_by === u_id;
+    
+    if (course.password && course.password.trim() !== "" && !isCreatorEnrolling) {
       if (!password) {
         throw new Error("Course requires a password to enroll");
       }

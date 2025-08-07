@@ -10,7 +10,7 @@ import { objectIdToShortcode, shortcodeToObjectId } from "./services";
 const courseBodySchema = t.Object({
   title: t.String(),
   description: t.String(),
-  password: t.Optional(t.String()),
+  password: t.Optional(t.Union([t.String(), t.Null()])),
   visibility: t.Union([t.Literal("public"), t.Literal("private")]),
   createdAt: t.Optional(t.Date()),
   updatedAt: t.Optional(t.Date()),
@@ -23,18 +23,23 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     async ({ body, set, authPlugin }) => {
       try {
         const { u_id } = authPlugin ?? { u_id: "" };
+        
         const newCourse = new Course({
           ...body,
           created_by: u_id
         });
         
-        const savedCourse = await newCourse.save();
+        console.log("Creating course:", newCourse);
         
+        const savedCourse = await newCourse.save();
+        console.log("Course saved:", savedCourse);
+        
+        // Create instructor enrollment - no password needed for course creator
         const enrollment = await EnrollmentService.createEnrollment(
           u_id, 
           "INSTRUCTOR", 
-          savedCourse._id.toString(),
-          body.password ?? undefined
+          savedCourse._id.toString()
+          // Don't pass password for course creator - they should auto-enroll
         );
         
         if (!enrollment) {
@@ -45,9 +50,15 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
         set.status = 201;
         return { 
           message: "Course created successfully", 
-          course: savedCourse 
+          course: {
+            ...savedCourse.toObject(),
+            _id: objectIdToShortcode(savedCourse._id),
+            requiresPassword: !!(savedCourse.password && savedCourse.password.trim() !== ''),
+            password: undefined // Never expose password in response
+          }
         };
       } catch (error: any) {
+        console.error("Error creating course:", error);
         set.status = 400;
         return { message: "Error creating course", error: error.message };
       }
@@ -173,11 +184,21 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
           env.TIMEZONE_OFFSET ? parseInt(env.TIMEZONE_OFFSET) : 7
         );
         
-        const updatedCourse = await Course.findByIdAndUpdate(
-          shortcodeToObjectId(params.id),
-          { ...body, updatedAt: now },
-          { new: true, runValidators: true }
+        // Filter out undefined values - only update fields that are explicitly provided
+        const updateData = Object.fromEntries(
+          Object.entries({ ...body, updatedAt: now })
+            .filter(([_, value]) => value !== undefined)
         );
+        
+        const courseId = shortcodeToObjectId(params.id);
+        
+        // Use findByIdAndUpdate with $set to only update provided fields
+        // The pre-update middleware will handle password hashing
+        const updatedCourse = await Course.findByIdAndUpdate(
+          courseId,
+          { $set: updateData },
+          { new: true, runValidators: true }
+        ).select('+password'); // Include password to check if it exists
         
         if (!updatedCourse) {
           set.status = 404;
@@ -186,7 +207,12 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
         
         return {
           message: "Course updated successfully",
-          course: updatedCourse,
+          course: {
+            ...updatedCourse.toObject(),
+            _id: objectIdToShortcode(updatedCourse._id),
+            requiresPassword: !!(updatedCourse.password && updatedCourse.password.trim() !== ''),
+            password: undefined // Never expose password in response
+          },
         };
       } catch (error: any) {
         set.status = 400;
@@ -216,7 +242,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
           return { message: "Course not found" };
         }
         
-        await Enrollment.deleteMany({ courseId: params.id });
+        await Enrollment.deleteMany({ c_id: params.id });
         
         return {
           message: "Course and related enrollments deleted successfully",
@@ -263,4 +289,22 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
         summary: "Get all enrollments for a specific course"
       },
     }
-  );
+  )
+  .get("/created", async ({ authPlugin, set }) => {
+    try {
+      const { u_id } = authPlugin ?? { u_id: "" };
+      const courses = await Course.find({ created_by: u_id }).select("+password");
+      
+      return {
+        courses: courses.map(course => ({
+          ...course.toObject(),
+          _id: objectIdToShortcode(course._id),
+          requiresPassword: !!(course.password && course.password.trim() !== ''),
+          password: undefined // Never expose password in response
+        }))
+      };
+    } catch (error: any) {
+      set.status = 500;
+      return { message: "Error fetching created courses", error: error.message };
+    }
+  });
