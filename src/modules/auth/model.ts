@@ -5,7 +5,7 @@ export interface IUser extends Document {
   u_id: string;
   password?: string;
   fullName: string;
-  role: "ADMIN" | "STUDENT" | "VIEWER";
+  role: "ADMIN" | "STUDENT" | "INSTRUCTOR";
   ldapAuthenticated: boolean;
   createdAt: Date;
   updatedAt: Date;

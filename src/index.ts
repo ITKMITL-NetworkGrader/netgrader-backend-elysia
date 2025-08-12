@@ -9,7 +9,7 @@ import { connectDatabase } from "./config/database.js";
 export type JWTPayload = {
     u_id: string;
     fullName?: string;
-    u_role: "ADMIN" | "STUDENT" | "VIEWER";
+    role: string;
     iat: number;
     exp: number;
 }
@@ -22,7 +22,12 @@ declare module 'elysia' {
 await connectDatabase();
 const app = new Elysia()
 .use(swagger())
-.use(cors())
+.use(cors({
+  origin: env.FRONTEND_ORIGIN,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+  allowedHeaders: ["Content-Type", "ACCEPT", "Authorization"],
+  credentials: true,
+}))
 .use(authPlugin)
 .use(routes)
 .get("/", () => "Hello Elysia")
