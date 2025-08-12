@@ -5,6 +5,7 @@ import { gradingRoutes } from "./grading";
 import { websocket } from "./websocket";
 import { aiRoutes } from "./ai";
 import { enrollmentRoutes } from "./enrollments";
+import { labRoutes } from "./labs";
 
 export const routes = new Elysia()
 .group("/v0", (app) => app
@@ -13,6 +14,6 @@ export const routes = new Elysia()
     .use(authRoutes)
     .use(gradingRoutes)
     .use(enrollmentRoutes)
-    // .use(aiRoutes)
     .use(aiRoutes)
+    .use(labRoutes)
 )
