@@ -26,43 +26,41 @@ export const gradingRoutes = new Elysia({ prefix: "/grading" })
         part: t.Object({
           part_id: t.String(),
           title: t.String(),
-          plays: t.Array(
-            t.Object({
-              play_id: t.String(),
-              source_device: t.String(),
-              target_device: t.String(),
-              ansible_tasks: t.Array(
-                t.Object({
-                  task_id: t.String(),
-                  template_name: t.String(),
-                  parameters: t.Record(t.String(), t.Any()),
-                  test_cases: t.Array(
-                    t.Object({
-                      comparison_type: t.String(),
-                      expected_result: t.Any(),
-                    })
-                  ),
-                  points: t.Number(),
-                })
-              ),
-            })
-          ),
+          play: t.Object({
+            play_id: t.String(),
+            source_device: t.String(),
+            target_device: t.String(),
+            ansible_tasks: t.Array(
+              t.Object({
+                task_id: t.String(),
+                name: t.Optional(t.String()),
+                template_name: t.String(),
+                parameters: t.Record(t.String(), t.Any()),
+                test_cases: t.Array(
+                  t.Object({
+                    comparison_type: t.String(),
+                    expected_result: t.Any(),
+                  })
+                ),
+                points: t.Number(),
+              })
+            ),
+          }),
         }),
         devices: t.Array(
           t.Object({
             id: t.String(),
             ip_address: t.String(),
             ansible_connection: t.String(),
-            credentials: t.Optional(t.Object({
-              ansible_user: t.String(),
-              ansible_password: t.String(),
-              ansible_network_os: t.String(),
-            })),
-            platform: t.String(),
+            credentials: t.Record(t.String(), t.String()),
+            platform: t.Optional(t.String()),
+            jump_host: t.Optional(t.String()),
+            ssh_args: t.Optional(t.String()),
+            use_persistent_connection: t.Optional(t.Boolean({ default: false})),
           })
         ),
         ip_mappings: t.Record(t.String(), t.String()),
-        callback_url: t.Optional(t.String()),
+        callback_url: t.String(),
       }),
       detail: {
         tags: ["Grading"],

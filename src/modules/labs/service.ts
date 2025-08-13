@@ -1,4 +1,4 @@
-import { LabModel, Lab, LabPart, IPlay, IAnsibleTask } from "./model";
+import { LabModel, ILab, ILabPart, IPlay, IAnsibleTask } from "./model";
 import { getDateWithTimezone } from "../../utils/helpers";
 import { env } from "process";
 
@@ -27,22 +27,22 @@ export class LabService {
   /**
    * Process plays to auto-generate missing play_ids and task_ids
    */
-  private static processPlays(plays: IPlay[]): IPlay[] {
-    return plays.map(play => ({
+  private static processPlay(play: IPlay): IPlay {
+    return {
       ...play,
       play_id: play.play_id || this.generateId('play'),
       ansible_tasks: this.processAnsibleTasks(play.ansible_tasks)
-    }));
+    };
   }
 
   /**
    * Process lab parts to auto-generate missing part_ids, play_ids, and task_ids
    */
-  private static processLabParts(parts: LabPart[]): LabPart[] {
+  private static processLabParts(parts: ILabPart[]): ILabPart[] {
     return parts.map(part => ({
       ...part,
       part_id: part.part_id || this.generateId('part'),
-      plays: this.processPlays(part.plays)
+      play: this.processPlay(part.play)
     }));
   }
 
@@ -63,7 +63,7 @@ export class LabService {
     return {
       ...partData,
       part_id: partData.part_id || this.generateId('part'),
-      plays: this.processPlays(partData.plays || [])
+      play: this.processPlay(partData.play)
     };
   }
 
@@ -177,7 +177,7 @@ export class LabService {
 
       // If parts are being updated, process them for ID generation
       if (filteredData.parts && Array.isArray(filteredData.parts)) {
-        filteredData.parts = this.processLabParts(filteredData.parts as LabPart[]);
+        filteredData.parts = this.processLabParts(filteredData.parts as ILabPart[]);
       }
 
       filteredData.updatedAt = getDateWithTimezone(
@@ -262,9 +262,9 @@ export class LabService {
         return { error: "Lab part not found", lab: null };
       }
 
-      // Process update data for ID generation if plays are being updated
-      if (updateData.plays) {
-        updateData.plays = this.processPlays(updateData.plays);
+      // Process update data for ID generation if play is being updated
+      if (updateData.play) {
+        updateData.play = this.processPlay(updateData.play);
       }
 
       // Update the part

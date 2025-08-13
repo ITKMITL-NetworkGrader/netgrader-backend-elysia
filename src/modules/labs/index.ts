@@ -5,10 +5,17 @@ import { authPlugin, requireRole } from "../../plugins/plugins";
 import { getDateWithTimezone } from "../../utils/helpers";
 import { env } from "process";
 
-// Define schemas for validation matching frontend interface
+// Define schemas for validation matching the new model interface
 const TestCaseSchema = t.Object({
   description: t.Optional(t.String()),
-  comparison_type: t.String(),
+  comparison_type: t.Union([
+    t.Literal('equals'),
+    t.Literal('contains'), 
+    t.Literal('regex'),
+    t.Literal('success'),
+    t.Literal('ssh_success'),
+    t.Literal('greater_than')
+  ]),
   expected_result: t.Any()
 });
 
@@ -17,18 +24,15 @@ const AnsibleTaskSchema = t.Object({
   name: t.String(),
   template_name: t.String(),
   parameters: t.Optional(t.Record(t.String(), t.Any())),
-  test_cases: t.Optional(t.Array(TestCaseSchema)),
-  points: t.Number()
+  test_cases: t.Array(TestCaseSchema),
+  points: t.Number({ minimum: 0 })
 });
 
 const PlaySchema = t.Object({
   play_id: t.Optional(t.String()),
-  name: t.String(),
-  description: t.Optional(t.String()),
   source_device: t.String(),
-  target_device: t.Optional(t.String()),
-  total_points: t.Number(),
-  ansible_tasks: t.Array(AnsibleTaskSchema)
+  target_device: t.String(),
+  ansible_tasks: t.Array(AnsibleTaskSchema, { minItems: 1 })
 });
 
 const IpVariableMappingSchema = t.Object({
@@ -37,11 +41,11 @@ const IpVariableMappingSchema = t.Object({
   example: t.Optional(t.String())
 });
 
-const IpSchema = t.Object({
+const IpConfigSchema = t.Object({
   scope: t.Union([t.Literal("lab"), t.Literal("part")]),
   baseNetwork: t.String(),
   subnetMask: t.Number(),
-  allocationStrategy: t.Union([t.Literal("sequential"), t.Literal("random")]),
+  allocationStrategy: t.Union([t.Literal("group_based"), t.Literal("student_id_based")]),
   reservedSubnets: t.Optional(t.Array(t.String())),
   variablesMapping: t.Array(IpVariableMappingSchema)
 });
@@ -51,15 +55,30 @@ const DeviceIpMappingSchema = t.Object({
   ipVariable: t.String()
 });
 
+const DeviceCredentialsSchema = t.Object({
+  ansible_user: t.String(),
+  ansible_password: t.String()
+});
+
+const DeviceSchema = t.Object({
+  id: t.String(),
+  ip_address: t.String(),
+  ansible_connection: t.String(),
+  credentials: DeviceCredentialsSchema,
+  platform: t.Optional(t.Union([t.String(), t.Null()])),
+  jump_host: t.Optional(t.Union([t.String(), t.Null()])),
+  ssh_args: t.Optional(t.Union([t.String(), t.Null()])),
+  use_persistent_connection: t.Boolean()
+});
+
 const LabPartSchema = t.Object({
   part_id: t.Optional(t.String()), // Make optional for auto-generation
   title: t.String(),
-  textMd: t.String(), // Changed from instructionMd to textMd
+  textMd: t.String(),
   order: t.Number(),
   total_points: t.Number(),
-  ipSchema: t.Optional(t.Union([IpSchema, t.Null()])),
-  deviceIpMapping: t.Optional(t.Union([t.Array(DeviceIpMappingSchema), t.Null()])),
-  plays: t.Array(PlaySchema)
+  ipSchema: t.Optional(IpConfigSchema),
+  play: PlaySchema
 });
 
 const LabBodySchema = t.Object({
@@ -68,8 +87,9 @@ const LabBodySchema = t.Object({
   description: t.String(),
   courseId: t.String(),
   groupsRequired: t.Boolean(),
-  ipSchema: t.Optional(IpSchema),
+  ipSchema: t.Optional(IpConfigSchema),
   deviceIpMapping: t.Optional(t.Array(DeviceIpMappingSchema)),
+  devices: t.Optional(t.Array(DeviceSchema)),
   parts: t.Array(LabPartSchema)
 });
 
