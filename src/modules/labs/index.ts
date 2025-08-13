@@ -12,9 +12,14 @@ const TestCaseSchema = t.Object({
     t.Literal('equals'),
     t.Literal('contains'), 
     t.Literal('regex'),
+    t.Literal('range'),
+    t.Literal('exists'),
+    t.Literal('not_exists'),
+    t.Literal('count'),
     t.Literal('success'),
     t.Literal('ssh_success'),
-    t.Literal('greater_than')
+    t.Literal('greater_than'),
+    t.Literal('less_than')
   ]),
   expected_result: t.Any()
 });
@@ -32,7 +37,7 @@ const PlaySchema = t.Object({
   play_id: t.Optional(t.String()),
   source_device: t.String(),
   target_device: t.String(),
-  ansible_tasks: t.Array(AnsibleTaskSchema, { minItems: 1 })
+  ansible_tasks: t.Array(AnsibleTaskSchema, { default: [] })
 });
 
 const IpVariableMappingSchema = t.Object({
