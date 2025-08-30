@@ -1,9 +1,9 @@
 import { Elysia, t } from "elysia";
 import { channel, QUEUE_NAME } from "../../config/rabbitmq";
 
-export const gradingRoutes = new Elysia({ prefix: "/grading" })
+export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   .post(
-    "/submit",
+    "/",
     async ({ body, set }) => {
       if (!channel) {
         set.status = 503;
@@ -145,6 +145,7 @@ export const gradingRoutes = new Elysia({ prefix: "/grading" })
           console.log(
             `   ${status_emoji} ${test_name}: ${test_message} (${test_points}/${test_possible} pts)`
           );
+          console.log(JSON.stringify(test_result.debug_info, null, 2));
         }
       }
       set.status = 200;
@@ -166,6 +167,7 @@ export const gradingRoutes = new Elysia({ prefix: "/grading" })
               points_possible: t.Number(),
               execution_time: t.Optional(t.Number()),
               raw_output: t.Optional(t.String()),
+              debug_info: t.Optional(t.Record(t.String(), t.Any()))
             })
           )
         ),
