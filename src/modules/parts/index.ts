@@ -20,19 +20,6 @@ const PartUpdateSchema = t.Object({
   prerequisites: t.Optional(t.Array(t.String(), { description: "Array of prerequisite part IDs" }))
 });
 
-const PartResponseSchema = t.Object({
-  id: t.Optional(t.String()),
-  lab_id: t.String(),
-  title: t.String(),
-  textMd: t.Optional(t.String()),
-  order: t.Number(),
-  totalPoints: t.Number(),
-  prerequisites: t.Optional(t.Array(t.String())),
-  createdBy: t.String(),
-  createdAt: t.Date(),
-  updatedAt: t.Date()
-});
-
 export const partRoutes = new Elysia({ prefix: "/parts" })
   .use(authPlugin)
   
