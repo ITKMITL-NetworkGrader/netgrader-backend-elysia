@@ -2,17 +2,14 @@ import { Elysia, t } from "elysia";
 import { LabService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 
-// Simple schemas
+// Simple schemas for the normalized lab model
 const LabBodySchema = t.Object({
   title: t.String(),
-  type: t.String(),
-  description: t.String(),
+  type: t.Optional(t.Union([t.Literal("lab"), t.Literal("exam")])),
+  description: t.Optional(t.String()),
   courseId: t.String(),
-  groupsRequired: t.Boolean(),
-  ipSchema: t.Optional(t.Any()),
-  deviceIpMapping: t.Optional(t.Any()),
-  devices: t.Optional(t.Any()),
-  parts: t.Array(t.Any())
+  network_id: t.String(), // Reference to LabNetwork ObjectId
+  groupsRequired: t.Optional(t.Boolean())
 });
 
 export const labRoutes = new Elysia({ prefix: "/labs" })
@@ -134,6 +131,201 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
       detail: {
         tags: ["Labs"],
         summary: "Get Lab by ID"
+      }
+    }
+  )
+
+  // Update lab
+  .put(
+    "/:id",
+    async ({ params, body, set }) => {
+      try {
+        const updatedLab = await LabService.updateLab(params.id, body);
+
+        if (!updatedLab) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Lab not found"
+          };
+        }
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Lab updated successfully",
+          data: updatedLab
+        };
+      } catch (error) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "Error updating lab",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      body: t.Partial(LabBodySchema),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: {
+        tags: ["Labs"],
+        summary: "Update Lab"
+      }
+    }
+  )
+
+  // Delete lab
+  .delete(
+    "/:id",
+    async ({ params, set }) => {
+      try {
+        const deletedLab = await LabService.deleteLab(params.id);
+
+        if (!deletedLab) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Lab not found"
+          };
+        }
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Lab deleted successfully",
+          data: deletedLab
+        };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error deleting lab",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: {
+        tags: ["Labs"],
+        summary: "Delete Lab"
+      }
+    }
+  )
+
+  // Get labs by course
+  .get(
+    "/course/:courseId",
+    async ({ params, set, query }) => {
+      try {
+        const { page = "1", limit = "10" } = query;
+        const pageNum = parseInt(page as string);
+        const limitNum = parseInt(limit as string);
+
+        const result = await LabService.getLabsByCourse(params.courseId, pageNum, limitNum);
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Labs fetched successfully",
+          data: result
+        };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error fetching labs for course",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ courseId: t.String() }),
+      query: t.Object({
+        page: t.Optional(t.String()),
+        limit: t.Optional(t.String())
+      }),
+      detail: {
+        tags: ["Labs"],
+        summary: "Get Labs by Course"
+      }
+    }
+  )
+
+  // Get lab with full details including network
+  .get(
+    "/:id/details",
+    async ({ params, set }) => {
+      try {
+        const lab = await LabService.getLabWithDetails(params.id);
+        
+        if (!lab) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Lab not found"
+          };
+        }
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Lab details fetched successfully",
+          data: lab
+        };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error fetching lab details",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      detail: {
+        tags: ["Labs"],
+        summary: "Get Lab with Full Details",
+        description: "Get lab with populated network information"
+      }
+    }
+  )
+
+  // Get lab statistics
+  .get(
+    "/stats/overview",
+    async ({ set, query }) => {
+      try {
+        const { courseId } = query;
+        
+        const stats = await LabService.getLabStatistics(courseId);
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Lab statistics fetched successfully",
+          data: stats
+        };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error fetching lab statistics",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      query: t.Object({
+        courseId: t.Optional(t.String())
+      }),
+      detail: {
+        tags: ["Labs"],
+        summary: "Get Lab Statistics"
       }
     }
   );
