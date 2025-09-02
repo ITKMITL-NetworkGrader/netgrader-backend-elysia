@@ -158,7 +158,7 @@ export class PartService {
       return {
         ...updatedPart.toObject(),
         id: updatedPart._id?.toString(),
-        lab_id: updatedPart.lab_id.toString(),
+        lab_id: updatedPart.labId.toString(),
         prerequisites: updatedPart.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
         _id: undefined
       };

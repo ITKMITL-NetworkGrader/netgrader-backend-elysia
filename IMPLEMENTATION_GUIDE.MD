@@ -26,13 +26,13 @@ This system follows MongoDB best practices by applying selective embedding to ba
 5. **Computed Data Strategy**: Runtime calculation with smart caching instead of redundant storage
 
 ### Design Trade-offs
-- **Chose**: 7 collections with selective embedding
+- **Chose**: 8 collections with selective embedding
 - **Over**: 15+ normalized collections (too many joins)
 - **Over**: 3 collections with heavy embedding (document size issues)
 
 ---
 
-## Core Collections (7 Total)
+## Core Collections (8 Total)
 
 ## 1. Collection: `users`
 
@@ -165,7 +165,7 @@ interface ILab extends Document {
     };
     devices: Array<{
       deviceId: string;        // "router1", "pc1"
-      templateId: ObjectId;    // Ref: templates._id
+      templateId: ObjectId;    // Ref: device_templates._id
       displayName: string;     // "Router 1"
       ipVariables: Array<{
         name: string;          // "mgmt_ip", "lan_ip"
@@ -225,7 +225,7 @@ interface ILabPart extends Document {
     taskId: string;        // Unique within part
     name: string;
     description?: string;
-    templateId: ObjectId;  // Ref: templates._id
+    templateId: ObjectId;  // Ref: task_templates._id
     
     // Execution Configuration
     executionDevice: string;     // Device ID from lab.network.devices
@@ -237,10 +237,8 @@ interface ILabPart extends Document {
     // Grading Configuration
     testCases: Array<{
       name: string;
-      condition: string;         // Ansible condition
+      condition: string;
       points: number;
-      weight: number;
-      timeoutSeconds: number;
     }>;
     
     order: number;
@@ -307,14 +305,6 @@ interface ISubmission extends Document {
     completedAt?: Date;
     executionTimeMs: number;
     
-    // Output Data
-    ansibleOutput?: {
-      stdout: string;
-      stderr: string;
-      facts: Record<string, any>;
-      unreachable: boolean;
-    };
-    
     // Test Case Results
     testResults: Array<{
       name: string;
@@ -355,64 +345,34 @@ interface ISubmission extends Document {
 
 ---
 
-## 7. Collection: `templates`
+## 7. Collection: `task_templates`
 
 ### Purpose
-Unified template system for both Ansible tasks and device configurations.
+Reusable Ansible-based automation templates for network configuration and testing tasks.
 
 ### Schema
 ```typescript
-interface ITemplate extends Document {
+interface ITaskTemplate extends Document {
   _id: ObjectId;
-  templateId: string;      // Unique identifier
-  name: string;
-  type: 'task' | 'device';
-  version: string;         // Semantic versioning
+  templateId: string;      // Unique identifier (e.g., "cisco_ospf_basic")
+  name: string;            // Display name
   
-  // Task Template Fields
-  category?: string;       // "connectivity", "routing", "security"
-  ansibleContent?: string; // Base64 encoded playbook
-  parameterSchema?: {      // JSON Schema for validation
-    type: 'object';
-    properties: Record<string, any>;
-    required: string[];
-  };
-  defaultTestCases?: Array<{
-    name: string;
-    condition: string;
-    points: number;
+  // Template Content
+  description: string;     // What this template does
+  
+  // Parameter Validation
+  parameterSchema: Array<{
+	name: string;
+	type: string;
+	description?: string;
+	required: boolean;
+  }>
+  
+  // Default Test Cases
+  defaultTestCases: Array<{
+    comparison_type: string;          // "Type of comparison: equals, contains, regex, success, ssh_success, greater_than"
+    expected_result: any;     // Expected value/result for comparison
   }>;
-  
-  // Device Template Fields  
-  platform?: string;       // "cisco_ios", "linux", "windows"
-  deviceType?: string;     // "router", "switch", "server", "pc"
-  defaultConfig?: {
-    interfaces: Array<{
-      name: string;        // "GigabitEthernet0/0"
-      type: string;        // "ethernet", "loopback"
-      defaultState: string; // "up", "down"
-    }>;
-    credentials: {
-      defaultUsername: string;
-      defaultPassword: string;
-      requiresEnable: boolean;
-    };
-    connectionParams: {
-      protocol: 'ssh' | 'telnet';
-      port: number;
-      timeout: number;
-    };
-  };
-  
-  // Metadata
-  description: string;
-  documentation?: string;   // Usage instructions
-  tags: string[];
-  isActive: boolean;
-  deprecatedAt?: Date;
-  replacedBy?: ObjectId;    // Ref: templates._id
-  
-  createdBy: ObjectId;      // Ref: users._id
   createdAt: Date;
   updatedAt: Date;
 }
@@ -420,12 +380,56 @@ interface ITemplate extends Document {
 
 ### Indexes
 ```javascript
-{ templateId: 1, version: -1 }           // version management
-{ type: 1, isActive: 1, name: 1 }        // template browsing
-{ platform: 1, deviceType: 1 }          // device template filtering
-{ tags: 1 }                              // tag-based search
+{ templateId: 1 }           // unique
+```
+---
+
+## 8. Collection: `device_templates`
+
+### Purpose
+Device configuration templates defining network device characteristics and connection parameters.
+
+### Schema
+```typescript
+interface IDeviceTemplate extends Document {
+  _id: ObjectId;
+  name: string;            // Display name
+  
+  // Device Classification
+  deviceType: 'router' | 'switch' | 'server';
+  platform: string;       // "cisco_ios", "linux"  
+  // Network Interfaces
+  defaultInterfaces: Array<{
+    name: string;          // "GigabitEthernet0/1", "eth0"
+    type: 'ethernet' | 'serial' | 'loopback' | 'tunnel' | 'vlan';
+    description?: string;
+    isManagement?: boolean; // True for management interfaces
+  }>;
+  
+  // Connection Configuration
+  connectionParams: {
+    defaultSSHPort: number;
+    alternativePorts?: number[];
+    
+    // Authentication Templates
+    authentication: {
+      usernameTemplate: string;    // "admin", "student{index}", "user{lab_id}"
+      passwordTemplate: string;    // "cisco", "pass{index}", "{student_id}"
+      enablePasswordTemplate?: string; // For Cisco devices
+    };
+  };  
+  // Documentation
+  description: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
 ```
 
+### Indexes
+```javascript
+{ templateId: 1 }                        // unique identifier
+{ platform: 1, deviceType: 1 }          // platform filtering
+```
 ---
 
 ## Data Relationships and Workflow
@@ -436,7 +440,8 @@ users (1) ←→ (M) enrollments ←→ (1) courses
 courses (1) ←→ (M) labs
 labs (1) ←→ (M) lab_parts
 lab_parts (1) ←→ (M) submissions
-templates (1) ←→ (M) [lab_parts.tasks, labs.network.devices]
+task_templates (1) ←→ (M) [lab_parts.tasks]
+device_templates (1) ←→ (M) [labs.network.devices]
 ```
 
 ### IP Address Allocation Strategy
@@ -485,6 +490,7 @@ sequenceDiagram
     Student->>Frontend: Submit Lab Part
     Frontend->>API: POST /submissions
     API->>Database: Create submission record
+    API->>API: Calculate student IPs
     API->>Queue: Add to grading queue
     API->>Frontend: Return submission ID
     
@@ -554,19 +560,25 @@ db.submissions.find({
 
 ### Redis Cache Layers
 
-1. **Template Cache** (1 hour TTL)
+1. **Task Template Cache** (1 hour TTL)
    ```javascript
-   key: `template:${templateId}:${version}`
-   value: Complete template document
+   key: `task_template:${templateId}:${version}`
+   value: Complete task template document
    ```
 
-2. **Student IP Cache** (Lab duration TTL)
+2. **Device Template Cache** (1 hour TTL)
+   ```javascript
+   key: `device_template:${templateId}`
+   value: Complete device template document
+   ```
+
+3. **Student IP Cache** (Lab duration TTL)
    ```javascript
    key: `ips:${labId}:${studentId}`
    value: Calculated IP assignments
    ```
 
-3. **Course Permissions Cache** (15 minutes TTL)
+4. **Course Permissions Cache** (15 minutes TTL)
    ```javascript
    key: `perms:${userId}:${courseId}`
    value: User role and permissions
@@ -618,48 +630,11 @@ labSchema.pre('save', function() {
 
 ### Data Protection
 - Passwords hashed with bcrypt (12 rounds)
-- Ansible templates stored as base64 to prevent code injection
-- Input validation on all parameters passed to Ansible
+- Input validation on all parameters passed to Nornir grading service
 
 ### Network Security
 - Student devices isolated in separate subnets
 - No persistent connections to lab devices
 - Credentials generated per session with limited lifetime
-
----
-
-## Migration and Backup Strategy
-
-### Database Migrations
-```typescript
-// Example migration: Add new field to all labs
-db.labs.updateMany(
-  { 'settings.gradingTimeout': { $exists: false } },
-  { $set: { 'settings.gradingTimeout': 30 } }
-);
-```
-
-### Backup Strategy
-- Full daily backups of all collections
-- Point-in-time recovery capability
-- Submission data archived after semester completion
-- Template versions maintained for reproducibility
-
----
-
-## Monitoring and Metrics
-
-### Key Metrics
-- Submission processing time distribution
-- Failed submission rate by template
-- Student IP allocation conflicts
-- Template usage analytics
-- System capacity utilization
-
-### Alerting
-- Queue depth > 100 submissions
-- Average processing time > 5 minutes
-- Failed submission rate > 5%
-- Database connection pool exhaustion
 
 ---
