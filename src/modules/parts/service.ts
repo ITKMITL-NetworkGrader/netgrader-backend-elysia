@@ -13,19 +13,22 @@ export class PartService {
   static async createPart(partData: any, createdBy: string) {
     try {
       // Validate that the lab exists
-      const labExists = await Lab.findById(partData.lab_id);
+      const labExists = await Lab.findById(partData.labId);
       if (!labExists) {
-        throw new Error(`Lab with ID ${partData.lab_id} does not exist`);
+        throw new Error(`Lab with ID ${partData.labId} does not exist`);
       }
 
       const newPart = new LabPart({
-        lab_id: partData.lab_id,
+        labId: partData.labId,
+        partId: partData.partId,
         title: partData.title,
-        textMd: partData.textMd,
+        description: partData.description,
+        instructions: partData.instructions,
         order: partData.order,
-        totalPoints: partData.totalPoints,
+        tasks: partData.tasks || [],
+        task_groups: partData.task_groups || [],
         prerequisites: (partData.prerequisites || []).filter((prereq: string) => prereq && prereq.trim() !== ''),
-        createdBy
+        totalPoints: partData.totalPoints
       });
 
       const savedPart = await newPart.save();
@@ -45,18 +48,18 @@ export class PartService {
    * Get all parts with filtering and pagination
    */
   static async getAllParts(filters: {
-    lab_id?: string;
+    labId?: string;
     createdBy?: string;
     page?: number;
     limit?: number;
   } = {}) {
     try {
-      const { lab_id, createdBy, page = 1, limit = 10 } = filters;
+      const { labId, createdBy, page = 1, limit = 10 } = filters;
       const skip = (page - 1) * limit;
 
       // Build query filter
       const filter: any = {};
-      if (lab_id) filter.lab_id = lab_id;
+      if (labId) filter.labId = labId;
       if (createdBy) filter.createdBy = createdBy;
 
       const [parts, total] = await Promise.all([
@@ -72,7 +75,7 @@ export class PartService {
       const transformedParts = parts.map(part => ({
         ...part,
         id: part._id?.toString(),
-        lab_id: part.lab_id.toString(),
+        labId: part.labId.toString(),
         prerequisites: part.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
         _id: undefined
       }));
@@ -107,7 +110,7 @@ export class PartService {
       return {
         ...part,
         id: part._id?.toString(),
-        lab_id: part.lab_id.toString(),
+        labId: part.labId.toString(),
         prerequisites: part.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
         _id: undefined
       };
@@ -127,7 +130,7 @@ export class PartService {
       );
 
       // Only allow updating specific fields
-      const allowedFields = ['title', 'textMd', 'order', 'totalPoints', 'prerequisites'];
+      const allowedFields = ['partId', 'title', 'description', 'instructions', 'order', 'tasks', 'task_groups', 'prerequisites', 'totalPoints'];
       const updateFields: any = {};
       
       allowedFields.forEach(field => {
@@ -145,8 +148,7 @@ export class PartService {
         id,
         { $set: updateFields },
         { new: true, runValidators: true }
-      )
-      .populate('lab_id', 'title type');
+      );
 
       if (!updatedPart) {
         return null;
@@ -180,7 +182,7 @@ export class PartService {
         ...deletedPart.toObject(),
         id: deletedPart._id?.toString(),
         prerequisites: deletedPart.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
-        lab_id: deletedPart.lab_id?.toString(),
+        labId: deletedPart.labId?.toString(),
         _id: undefined
       };
     } catch (error) {
@@ -196,19 +198,19 @@ export class PartService {
       const skip = (page - 1) * limit;
 
       const [parts, total] = await Promise.all([
-        LabPart.find({ lab_id: labId })
+        LabPart.find({ labId: labId })
           .skip(skip)
           .limit(limit)
           .sort({ order: 1 })
           .lean(),
-        LabPart.countDocuments({ lab_id: labId })
+        LabPart.countDocuments({ labId: labId })
       ]);
 
       // Transform data to match frontend interface
       const transformedParts = parts.map(part => ({
         ...part,
         id: part._id?.toString(),
-        lab_id: part.lab_id.toString(),
+        labId: part.labId.toString(),
         prerequisites: part.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
         _id: undefined
       }));
@@ -232,7 +234,7 @@ export class PartService {
    */
   static async getPartStatistics(labId?: string) {
     try {
-      const filter = labId ? { lab_id: labId } : {};
+      const filter = labId ? { labId: labId } : {};
 
       const [
         totalParts,

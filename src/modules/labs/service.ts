@@ -14,13 +14,14 @@ export class LabService {
   static async createLab(labData: any, createdBy: string) {
     try {
       const newLab = new Lab({
+        courseId: shortcodeToObjectId(labData.courseId),
         title: labData.title,
         description: labData.description,
         type: labData.type || 'lab',
-        courseId: shortcodeToObjectId(labData.courseId),
-        network_id: labData.network_id, // Convert string to ObjectId
-        createdBy,
-        groupsRequired: labData.groupsRequired || false
+        network: labData.network,
+        createdBy: shortcodeToObjectId(createdBy),
+        publishedAt: labData.publishedAt,
+        dueDate: labData.dueDate
       });
 
       const savedLab = await newLab.save();
@@ -58,7 +59,6 @@ export class LabService {
 
       const [labs, total] = await Promise.all([
         Lab.find(filter)
-          .populate('network_id', 'name baseNetwork subnetMask') // Populate network info
           .skip(skip)
           .limit(limit)
           .sort({ createdAt: -1 })
@@ -92,9 +92,7 @@ export class LabService {
    */
   static async getLabById(id: string) {
     try {
-      const lab = await Lab.findById(id)
-        .populate('network_id') // Populate full network details
-        .lean();
+      const lab = await Lab.findById(id).lean();
       
       if (!lab) {
         return null;
@@ -122,7 +120,7 @@ export class LabService {
       );
 
       // Only allow updating specific fields
-      const allowedFields = ['title', 'description', 'type', 'courseId', 'network_id', 'groupsRequired'];
+      const allowedFields = ['title', 'description', 'type', 'courseId', 'network', 'publishedAt', 'dueDate'];
       const updateFields: any = {};
       
       allowedFields.forEach(field => {
@@ -139,7 +137,7 @@ export class LabService {
         id,
         { $set: updateFields },
         { new: true, runValidators: true }
-      ).populate('network_id');
+      );
 
       if (!updatedLab) {
         return null;
@@ -177,7 +175,6 @@ export class LabService {
 
       const [labs, total] = await Promise.all([
         Lab.find({ courseId })
-          .populate('network_id', 'name baseNetwork subnetMask')
           .skip(skip)
           .limit(limit)
           .sort({ createdAt: -1 })
@@ -241,12 +238,7 @@ export class LabService {
    */
   static async getLabWithDetails(id: string) {
     try {
-      const lab = await Lab.findById(id)
-        .populate({
-          path: 'network_id',
-          model: 'LabNetwork'
-        })
-        .lean();
+      const lab = await Lab.findById(id).lean();
       
       if (!lab) {
         return null;

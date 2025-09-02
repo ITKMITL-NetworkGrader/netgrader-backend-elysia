@@ -2,14 +2,37 @@ import { Elysia, t } from "elysia";
 import { LabService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 
-// Simple schemas for the normalized lab model
+// Updated schemas for the embedded network model
 const LabBodySchema = t.Object({
-  title: t.String(),
-  type: t.Optional(t.Union([t.Literal("lab"), t.Literal("exam")])),
-  description: t.Optional(t.String()),
   courseId: t.String(),
-  network_id: t.String(), // Reference to LabNetwork ObjectId
-  groupsRequired: t.Optional(t.Boolean())
+  title: t.String(),
+  description: t.Optional(t.String()),
+  type: t.Optional(t.Union([t.Literal("lab"), t.Literal("exam")])),
+  network: t.Object({
+    name: t.String(),
+    topology: t.Object({
+      baseNetwork: t.String(),
+      subnetMask: t.Number(),
+      allocationStrategy: t.Union([t.Literal("student_id_based"), t.Literal("group_based")])
+    }),
+    devices: t.Array(t.Object({
+      deviceId: t.String(),
+      templateId: t.String(),
+      displayName: t.String(),
+      ipVariables: t.Array(t.Object({
+        name: t.String(),
+        hostOffset: t.Number(),
+        interface: t.Optional(t.String())
+      })),
+      credentials: t.Object({
+        usernameTemplate: t.String(),
+        passwordTemplate: t.String(),
+        enablePassword: t.Optional(t.String())
+      })
+    }))
+  }),
+  publishedAt: t.Optional(t.Date()),
+  dueDate: t.Optional(t.Date())
 });
 
 export const labRoutes = new Elysia({ prefix: "/labs" })
