@@ -8,6 +8,8 @@ import { enrollmentRoutes } from "./enrollments";
 import { labRoutes } from "./labs";
 import { networkRoutes } from "./networks";
 import { partRoutes } from "./parts";
+import { taskTemplateRoutes } from "./task-templates";
+import { deviceTemplateRoutes } from "./device-templates";
 
 export const routes = new Elysia()
 .group("/v0", (app) => app
@@ -20,4 +22,6 @@ export const routes = new Elysia()
     .use(labRoutes)
     .use(partRoutes)
     .use(networkRoutes)
+    .use(taskTemplateRoutes)
+    .use(deviceTemplateRoutes)
 )

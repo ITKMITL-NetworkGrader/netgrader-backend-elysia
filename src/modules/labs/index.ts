@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
 import { LabService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
+import { IpAllocationService } from "../../services/ip-allocation";
 
 // Updated schemas for the embedded network model
 const LabBodySchema = t.Object({
@@ -349,6 +350,51 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
       detail: {
         tags: ["Labs"],
         summary: "Get Lab Statistics"
+      }
+    }
+  )
+
+  // Get IP assignments for a student in a lab
+  .get(
+    "/:id/ip-assignments/:studentId",
+    async ({ params, set }) => {
+      try {
+        const lab = await LabService.getLabById(params.id);
+        
+        if (!lab) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Lab not found"
+          };
+        }
+
+        const ipAssignments = await IpAllocationService.calculateStudentIPs(lab as any, params.studentId as any);
+        
+        set.status = 200;
+        return {
+          success: true,
+          message: "IP assignments calculated successfully",
+          data: ipAssignments
+        };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error calculating IP assignments",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ 
+        id: t.String(),
+        studentId: t.String()
+      }),
+      detail: {
+        tags: ["Labs"],
+        summary: "Get IP Assignments for Student",
+        description: "Calculate IP assignments for a specific student in a lab"
       }
     }
   );

@@ -5,6 +5,7 @@ import { env } from "process";
 import { authPlugin } from "./plugins/plugins.js";
 import { routes } from "./modules/index.js";
 import { connectDatabase } from "./config/database.js";
+import { connectRedis } from "./config/redis.js";
 
 export type JWTPayload = {
     u_id: string;
@@ -20,6 +21,7 @@ declare module 'elysia' {
     }
 }
 await connectDatabase();
+await connectRedis();
 const app = new Elysia()
 .use(swagger())
 .use(cors({
