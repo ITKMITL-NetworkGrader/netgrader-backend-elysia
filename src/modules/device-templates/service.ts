@@ -86,7 +86,7 @@ export class DeviceTemplateService {
    */
   static async getDeviceTemplateById(id: string) {
     try {
-      // Check cache first
+      // Check cache first using consistent MongoDB _id as key
       const cached = await CacheService.getDeviceTemplate(id);
       if (cached) {
         return cached;
@@ -104,7 +104,7 @@ export class DeviceTemplateService {
         _id: undefined
       };
 
-      // Cache the result
+      // Cache the result using MongoDB _id as key for consistency
       await CacheService.setDeviceTemplate(id, result);
 
       return result;
@@ -160,6 +160,9 @@ export class DeviceTemplateService {
         return null;
       }
 
+      // Invalidate cache after successful update
+      await CacheService.clearCachePattern(`device_template:${id}`);
+
       return {
         ...updatedTemplate.toObject(),
         id: updatedTemplate._id?.toString(),
@@ -180,6 +183,9 @@ export class DeviceTemplateService {
       if (!deletedTemplate) {
         return null;
       }
+
+      // Invalidate cache after successful deletion
+      await CacheService.clearCachePattern(`device_template:${id}`);
 
       return {
         ...deletedTemplate.toObject(),

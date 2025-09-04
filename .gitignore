@@ -42,3 +42,4 @@ package-lock.json
 **/*.bun
 
 .env
+docker-compose.yml

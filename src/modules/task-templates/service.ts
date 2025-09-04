@@ -159,6 +159,9 @@ export class TaskTemplateService {
         return null;
       }
 
+      // Invalidate cache after successful update
+      await CacheService.clearCachePattern(`task_template:${updatedTemplate.templateId}`);
+
       return {
         ...updatedTemplate.toObject(),
         id: updatedTemplate._id?.toString(),
@@ -179,6 +182,9 @@ export class TaskTemplateService {
       if (!deletedTemplate) {
         return null;
       }
+
+      // Invalidate cache after successful deletion
+      await CacheService.clearCachePattern(`task_template:${deletedTemplate.templateId}`);
 
       return {
         ...deletedTemplate.toObject(),

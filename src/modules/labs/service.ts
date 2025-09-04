@@ -2,6 +2,9 @@ import { Lab, ILab } from "./model";
 import { getDateWithTimezone } from "../../utils/helpers";
 import { env } from "process";
 import { shortcodeToObjectId } from "../courses/services";
+import { Types } from "mongoose";
+import { User } from "../auth/model";
+import { IpAllocationService } from "../../services/ip-allocation";
 
 /**
  * Lab Service - Business logic for lab operations
@@ -13,13 +16,19 @@ export class LabService {
    */
   static async createLab(labData: any, createdBy: string) {
     try {
+      // Find user by u_id and get their MongoDB _id
+      const user = await User.findOne({ u_id: createdBy });
+      if (!user) {
+        throw new Error(`User not found with u_id: ${createdBy}`);
+      }
+
       const newLab = new Lab({
         courseId: shortcodeToObjectId(labData.courseId),
         title: labData.title,
         description: labData.description,
         type: labData.type || 'lab',
         network: labData.network,
-        createdBy: shortcodeToObjectId(createdBy),
+        createdBy: user._id,
         publishedAt: labData.publishedAt,
         dueDate: labData.dueDate
       });
@@ -143,6 +152,11 @@ export class LabService {
         return null;
       }
 
+      // If network configuration changed, clear related IP cache
+      if (updateFields.network) {
+        await IpAllocationService.clearLabIPCache(id);
+      }
+
       // Transform response to match frontend interface
       return {
         ...updatedLab.toObject(),
@@ -160,6 +174,12 @@ export class LabService {
   static async deleteLab(id: string) {
     try {
       const deletedLab = await Lab.findByIdAndDelete(id);
+      
+      if (deletedLab) {
+        // Clear related IP cache when lab is deleted
+        await IpAllocationService.clearLabIPCache(id);
+      }
+      
       return deletedLab;
     } catch (error) {
       throw new Error(`Error deleting lab: ${(error as Error).message}`);

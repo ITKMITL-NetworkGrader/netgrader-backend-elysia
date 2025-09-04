@@ -75,7 +75,7 @@ export class PartService {
       const transformedParts = parts.map(part => ({
         ...part,
         id: part._id?.toString(),
-        labId: part.labId.toString(),
+        labId: part.labId?.toString(),
         prerequisites: part.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
         _id: undefined
       }));
@@ -110,7 +110,7 @@ export class PartService {
       return {
         ...part,
         id: part._id?.toString(),
-        labId: part.labId.toString(),
+        labId: part.labId?.toString(),
         prerequisites: part.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
         _id: undefined
       };
@@ -158,7 +158,7 @@ export class PartService {
       return {
         ...updatedPart.toObject(),
         id: updatedPart._id?.toString(),
-        lab_id: updatedPart.labId.toString(),
+        lab_id: updatedPart.labId?.toString(),
         prerequisites: updatedPart.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
         _id: undefined
       };
@@ -210,7 +210,7 @@ export class PartService {
       const transformedParts = parts.map(part => ({
         ...part,
         id: part._id?.toString(),
-        labId: part.labId.toString(),
+        labId: part.labId?.toString(),
         prerequisites: part.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
         _id: undefined
       }));
