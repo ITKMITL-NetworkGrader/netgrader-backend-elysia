@@ -86,6 +86,7 @@ const labSchema = new Schema<ILab>({
       }
     },
     devices: [{
+      _id: false,
       deviceId: {
         type: String,
         required: true
@@ -100,6 +101,7 @@ const labSchema = new Schema<ILab>({
         required: true
       },
       ipVariables: [{
+        _id: false,
         name: {
           type: String,
           required: true
