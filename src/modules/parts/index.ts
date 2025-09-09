@@ -7,23 +7,20 @@ const PartCreateSchema = t.Object({
   labId: t.String({ description: "Lab ID this part belongs to" }),
   partId: t.String({ description: "Human-readable ID within lab" }),
   title: t.String({ description: "Part title" }),
-  description: t.Optional(t.String({ description: "Part description in Markdown" })),
+  description: t.String({ description: "Part description in Markdown", default: "" }),
   instructions: t.String({ description: "Student instructions in Markdown" }),
   order: t.Number({ description: "Part order within lab" }),
   tasks: t.Array(t.Object({
     taskId: t.String(),
     name: t.String(),
-    description: t.Optional(t.String()),
+    description: t.String({ default: "" }),
     templateId: t.String(),
     executionDevice: t.String(),
-    targetDevices: t.Array(t.String()),
+    targetDevices: t.Array(t.String(), { default: [] }),
     parameters: t.Record(t.String(), t.Any()),
     testCases: t.Array(t.Object({
-      name: t.String(),
-      condition: t.String(),
-      points: t.Number(),
-      weight: t.Number(),
-      timeoutSeconds: t.Number()
+      comparison_type: t.String({ description: "Type of comparison: equals, contains, regex, success, ssh_success, greater_than" }),
+      expected_result: t.Any({ description: "Expected value/result for comparison" })
     })),
     order: t.Number(),
     points: t.Number()
@@ -31,13 +28,13 @@ const PartCreateSchema = t.Object({
   task_groups: t.Array(t.Object({
     group_id: t.String(),
     title: t.String(),
-    description: t.Optional(t.String()),
+    description: t.String({ default: "" }),
     group_type: t.Union([t.Literal("all_or_nothing"), t.Literal("proportional")]),
     points: t.Number(),
     continue_on_failure: t.Boolean(),
     timeout_seconds: t.Number()
-  })),
-  prerequisites: t.Optional(t.Array(t.String(), { description: "Array of prerequisite part IDs" })),
+  }), { default: [] }),
+  prerequisites: t.Array(t.String(), { description: "Array of prerequisite part IDs", default: [] }),
   totalPoints: t.Number({ description: "Total points for this part" })
 });
 
@@ -50,31 +47,28 @@ const PartUpdateSchema = t.Object({
   tasks: t.Optional(t.Array(t.Object({
     taskId: t.String(),
     name: t.String(),
-    description: t.Optional(t.String()),
+    description: t.String({ default: "" }),
     templateId: t.String(),
     executionDevice: t.String(),
-    targetDevices: t.Array(t.String()),
+    targetDevices: t.Array(t.String(), { default: [] }),
     parameters: t.Record(t.String(), t.Any()),
     testCases: t.Array(t.Object({
-      name: t.String(),
-      condition: t.String(),
-      points: t.Number(),
-      weight: t.Number(),
-      timeoutSeconds: t.Number()
+      comparison_type: t.String({ description: "Type of comparison: equals, contains, regex, success, ssh_success, greater_than" }),
+      expected_result: t.Any({ description: "Expected value/result for comparison" })
     })),
     order: t.Number(),
     points: t.Number()
   }))),
-  task_groups: t.Optional(t.Array(t.Object({
+  task_groups: t.Array(t.Object({
     group_id: t.String(),
     title: t.String(),
-    description: t.Optional(t.String()),
+    description: t.String({ default: "" }),
     group_type: t.Union([t.Literal("all_or_nothing"), t.Literal("proportional")]),
     points: t.Number(),
     continue_on_failure: t.Boolean(),
     timeout_seconds: t.Number()
-  }))),
-  prerequisites: t.Optional(t.Array(t.String())),
+  }), { default: [] }),
+  prerequisites: t.Array(t.String(), { default: [] }),
   totalPoints: t.Optional(t.Number())
 });
 

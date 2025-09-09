@@ -24,11 +24,8 @@ export interface ILabPart extends Document {
     
     // Grading Configuration
     testCases: Array<{
-      name: string;
-      condition: string;         // Ansible condition
-      points: number;
-      weight: number;
-      timeoutSeconds: number;
+      comparison_type: string;  // Type of comparison: equals, contains, regex, success, ssh_success, greater_than
+      expected_result: any;     // Expected value/result for comparison 
     }>;
     
     order: number;
@@ -122,24 +119,12 @@ const labPartSchema = new Schema<ILabPart>({
     
     // Grading Configuration
     testCases: [{
-      name: {
+      comparison_type: {
         type: String,
         required: true
       },
-      condition: {
-        type: String,
-        required: true
-      },
-      points: {
-        type: Number,
-        required: true
-      },
-      weight: {
-        type: Number,
-        required: true
-      },
-      timeoutSeconds: {
-        type: Number,
+      expected_result: {
+        type: Schema.Types.Mixed,
         required: true
       }
     }],

@@ -7,7 +7,7 @@ import { IpAllocationService } from "../../services/ip-allocation";
 const LabBodySchema = t.Object({
   courseId: t.String(),
   title: t.String(),
-  description: t.Optional(t.String()),
+  description: t.String({ default: "" }),
   type: t.Optional(t.Union([t.Literal("lab"), t.Literal("exam")])),
   network: t.Object({
     name: t.String(),
@@ -28,7 +28,7 @@ const LabBodySchema = t.Object({
       credentials: t.Object({
         usernameTemplate: t.String(),
         passwordTemplate: t.String(),
-        enablePassword: t.Optional(t.String())
+        enablePassword: t.String({ default: "" })
       })
     }))
   }),
