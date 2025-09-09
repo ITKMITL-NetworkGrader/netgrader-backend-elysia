@@ -1,5 +1,10 @@
 import { Elysia, t } from "elysia";
 import { channel, QUEUE_NAME } from "../../config/rabbitmq";
+import { SubmissionService } from "./service";
+import { IGradingResult } from "./model";
+import { IPGenerator } from "./ip-generator";
+import { LabService } from "../labs/service";
+import { PartService } from "../parts/service";
 
 export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   .post(
@@ -12,72 +17,119 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           message: "Service unavailable, RabbitMQ channel not initialized.",
         };
       }
-      const jobPayload = JSON.stringify(body);
-      channel.sendToQueue(QUEUE_NAME, Buffer.from(jobPayload), {
-        persistent: true,
-      });
-      return { status: "success", message: "Job submitted to queue" };
+
+      try {
+        // Fetch lab data
+        const lab = await LabService.getLabById(body.lab_id);
+        if (!lab) {
+          set.status = 404;
+          return {
+            status: "error",
+            message: `Lab not found with ID: ${body.lab_id}`
+          };
+        }
+
+        // Find the specific part
+        const parts = await PartService.getPartsByLab(body.lab_id);
+        const part = parts.parts.find(p => p.partId === body.part_id);
+        if (!part) {
+          set.status = 404;
+          return {
+            status: "error",
+            message: `Part not found with ID: ${body.part_id} in lab ${body.lab_id}`
+          };
+        }
+
+        // Generate job ID if not provided
+        const jobId = body.job_id || `${body.student_id}-${body.lab_id}-${body.part_id}-${Date.now()}`;
+
+        // Generate complete job payload from lab and part data
+        const jobPayload = await IPGenerator.generateJobFromLab(
+          lab as any, // Cast to ILab type (services return transformed data)
+          part as any, // Cast to ILabPart type
+          body.student_id,
+          jobId,
+          body.callback_url
+        );
+        console.log("Generated Job Payload:", JSON.stringify(jobPayload, null, 2));
+        // Create submission record
+        const submission = await SubmissionService.createSubmission({
+          jobId: jobPayload.job_id,
+          studentId: body.student_id,
+          labId: body.lab_id,
+          partId: body.part_id,
+          ipMappings: jobPayload.ip_mappings,
+          callbackUrl: body.callback_url
+        });
+
+        // Send job to queue
+        // channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
+        //   persistent: true,
+        // });
+
+        return { 
+          status: "success", 
+          message: "Job submitted to queue",
+          submission_id: submission._id,
+          job_id: jobPayload.job_id,
+          generated_devices: jobPayload.devices.length,
+          ip_mappings: Object.keys(jobPayload.ip_mappings).length,
+          job_payload: jobPayload
+        };
+      } catch (error) {
+        console.error("Error generating submission:", error);
+        set.status = 500;
+        return {
+          status: "error",
+          message: `Failed to generate submission: ${(error as Error).message}`
+        };
+      }
     },
     {
       body: t.Object({
-        job_id: t.String(),
         student_id: t.String(),
         lab_id: t.String(),
-        part: t.Object({
-          part_id: t.String(),
-          title: t.String(),
-          play: t.Object({
-            play_id: t.String(),
-            source_device: t.String(),
-            target_device: t.String(),
-            ansible_tasks: t.Array(
-              t.Object({
-                task_id: t.String(),
-                name: t.Optional(t.String()),
-                template_name: t.String(),
-                parameters: t.Record(t.String(), t.Any()),
-                test_cases: t.Array(
-                  t.Object({
-                    comparison_type: t.String(),
-                    expected_result: t.Any(),
-                  })
-                ),
-                points: t.Number(),
-              })
-            ),
-          }),
-        }),
-        devices: t.Array(
-          t.Object({
-            id: t.String(),
-            ip_address: t.String(),
-            ansible_connection: t.String(),
-            credentials: t.Record(t.String(), t.String()),
-            platform: t.Optional(t.String()),
-            jump_host: t.Optional(t.String()),
-            ssh_args: t.Optional(t.String()),
-            use_persistent_connection: t.Optional(t.Boolean({ default: false})),
-          })
-        ),
-        ip_mappings: t.Record(t.String(), t.String()),
-        callback_url: t.String(),
+        part_id: t.String(),
+        job_id: t.Optional(t.String()),
+        callback_url: t.String()
       }),
       detail: {
         tags: ["Grading"],
-        summary: "Submit Grading Job",
-        description:
-          "Submit a grading job to the RabbitMQ queue for processing.",
-      },
+        summary: "Generate and Submit Grading Job",
+        description: "Generate a grading job from lab and part configuration, then submit to queue."
+      }
     }
   )
   .post(
     "/started",
     async ({ body, set }) => {
-      console.log(`Job Started: ${JSON.stringify(body, null, 2)}`);
-      return { status: "received", message: "Job started successfully" };
+      try {
+        const jobId = body.job_id;
+        if (!jobId) {
+          set.status = 400;
+          return { status: "error", message: "Missing job_id" };
+        }
+
+        const submission = await SubmissionService.markJobStarted(jobId);
+        if (!submission) {
+          set.status = 404;
+          return { status: "error", message: "Submission not found" };
+        }
+
+        console.log(`Job Started: ${jobId}`);
+        return { status: "received", message: "Job started successfully" };
+      } catch (error) {
+        console.error("Error updating job start status:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to update job status" };
+      }
     },
     {
-      body: t.Any(),
+      body: t.Object({
+        job_id: t.String(),
+        status: t.Optional(t.String()),
+        message: t.Optional(t.String())
+      }),
       detail: {
         tags: ["Grading"],
         summary: "Job Started",
@@ -88,21 +140,38 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   .post(
     "/progress",
     async ({ body, set }) => {
-      const progress = body.percentage ?? 0;
-      const message = body.message ?? "";
-      const job_id = body.job_id ?? "";
-      const current_test = body.current_test ?? "";
+      try {
+        const jobId = body.job_id;
+        if (!jobId) {
+          set.status = 400;
+          return { status: "error", message: "Missing job_id" };
+        }
 
-      console.log(
-        `Progress for job ${job_id}: ${progress}% - ${message} (Current Test: ${current_test})`
-      );
-      set.status = 200;
-      return {
-        status: "success",
-        message: `Progress updated for job ${job_id}`,
-        progress,
-        current_test,
-      };
+        const submission = await SubmissionService.updateProgress(jobId, {
+          message: body.message || "",
+          current_test: body.current_test,
+          tests_completed: body.tests_completed || 0,
+          total_tests: body.total_tests || 0,
+          percentage: body.percentage || 0
+        });
+
+        if (!submission) {
+          set.status = 404;
+          return { status: "error", message: "Submission not found" };
+        }
+
+        console.log(`Progress for job ${jobId}: ${body.percentage || 0}% - ${body.message || ""}`);
+        return {
+          status: "success",
+          message: `Progress updated for job ${jobId}`,
+          progress: body.percentage || 0,
+          current_test: body.current_test || "",
+        };
+      } catch (error) {
+        console.error("Error updating progress:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to update progress" };
+      }
     },
     {
       body: t.Object({
@@ -121,65 +190,140 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
       },
     }
   )
-  .post("/notify", async ({ body }) => {}, {
-    body: t.Object({
-      message: t.String(),
-    }),
-  })
   .post(
     "/result",
     async ({ body, set }) => {
-      const { job_id, status, total_points_earned, total_points_possible } =
-        body;
-      console.log(
-        `Final Result for job ${job_id}: Status - ${status}, Points Earned - ${total_points_earned}/${total_points_possible}`
-      );
-      if (Array.isArray(body.test_results)) {
-        for (const test_result of body.test_results) {
-          const test_name = test_result.test_name ?? "";
-          const test_status = test_result.status ?? "";
-          const test_message = test_result.message ?? "";
-          const test_points = test_result.points_earned ?? 0;
-          const test_possible = test_result.points_possible ?? 0;
-          const status_emoji = test_status === "passed" ? "✅" : "❌";
-          console.log(
-            `   ${status_emoji} ${test_name}: ${test_message} (${test_points}/${test_possible} pts)`
-          );
-          console.log(JSON.stringify(test_result.debug_info, null, 2));
+      try {
+        const jobId = body.job_id;
+        if (!jobId) {
+          set.status = 400;
+          return { status: "error", message: "Missing job_id" };
         }
+
+        const submission = await SubmissionService.storeGradingResult(jobId, body as IGradingResult);
+        if (!submission) {
+          set.status = 404;
+          return { status: "error", message: "Submission not found" };
+        }
+
+        console.log(`Final Result for job ${jobId}: Status - ${body.status}, Points Earned - ${body.total_points_earned}/${body.total_points_possible}`);
+        
+        if (Array.isArray(body.test_results)) {
+          for (const test_result of body.test_results) {
+            const status_emoji = test_result.status === "passed" ? "✅" : "❌";
+            console.log(
+              `   ${status_emoji} ${test_result.test_name}: ${test_result.message} (${test_result.points_earned}/${test_result.points_possible} pts)`
+            );
+          }
+        }
+
+        return { 
+          status: "received", 
+          message: "Grading result stored successfully",
+          submission_id: submission._id
+        };
+      } catch (error) {
+        console.error("Error storing grading result:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to store grading result" };
       }
-      set.status = 200;
-      return { status: "received" };
     },
     {
       body: t.Object({
-        job_id: t.Optional(t.String()),
-        status: t.Optional(t.String()),
-        total_points_earned: t.Optional(t.Number()),
-        total_points_possible: t.Optional(t.Number()),
-        test_results: t.Optional(
-          t.Array(
-            t.Object({
-              test_name: t.String(),
-              status: t.String(),
-              message: t.String(),
-              points_earned: t.Number(),
-              points_possible: t.Number(),
-              execution_time: t.Optional(t.Number()),
-              raw_output: t.Optional(t.String()),
-              debug_info: t.Optional(t.Record(t.String(), t.Any()))
-            })
-          )
+        job_id: t.String(),
+        status: t.Union([t.Literal("running"), t.Literal("completed"), t.Literal("failed"), t.Literal("cancelled")]),
+        total_points_earned: t.Number(),
+        total_points_possible: t.Number(),
+        test_results: t.Array(
+          t.Object({
+            test_name: t.String(),
+            status: t.Union([t.Literal("passed"), t.Literal("failed"), t.Literal("error")]),
+            message: t.String(),
+            points_earned: t.Number(),
+            points_possible: t.Number(),
+            execution_time: t.Number(),
+            test_case_results: t.Optional(t.Array(t.Any())),
+            extracted_data: t.Optional(t.Record(t.String(), t.Any())),
+            raw_output: t.Optional(t.String()),
+            debug_info: t.Optional(t.Any()),
+            group_id: t.Optional(t.String())
+          })
         ),
-        total_execution_time: t.Optional(t.Number()),
+        group_results: t.Optional(t.Array(t.Any())),
+        total_execution_time: t.Number(),
         error_message: t.Optional(t.String()),
-        created_at: t.Optional(t.String()),
-        compleated_at: t.Optional(t.String()),
+        created_at: t.String(),
+        completed_at: t.Optional(t.String()),
+        cancelled_reason: t.Optional(t.String())
       }),
       detail: {
         tags: ["Grading"],
         summary: "Job Result",
         description: "Receive the final result of a grading job.",
       },
+    }
+  )
+  .get(
+    "/:jobId",
+    async ({ params, set }) => {
+      try {
+        const submission = await SubmissionService.getSubmissionByJobId(params.jobId);
+        if (!submission) {
+          set.status = 404;
+          return { status: "error", message: "Submission not found" };
+        }
+        return { status: "success", data: submission };
+      } catch (error) {
+        console.error("Error fetching submission:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to fetch submission" };
+      }
+    },
+    {
+      params: t.Object({
+        jobId: t.String()
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get Submission",
+        description: "Get submission details by job ID."
+      }
+    }
+  )
+  .get(
+    "/student/:studentId",
+    async ({ params, query, set }) => {
+      try {
+        const submissions = await SubmissionService.getSubmissionsByStudent(
+          params.studentId,
+          {
+            labId: query.labId,
+            status: query.status,
+            limit: query.limit ? parseInt(query.limit) : undefined,
+            offset: query.offset ? parseInt(query.offset) : undefined
+          }
+        );
+        return { status: "success", data: submissions };
+      } catch (error) {
+        console.error("Error fetching student submissions:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to fetch submissions" };
+      }
+    },
+    {
+      params: t.Object({
+        studentId: t.String()
+      }),
+      query: t.Object({
+        labId: t.Optional(t.String()),
+        status: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String())
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get Student Submissions",
+        description: "Get submissions for a specific student."
+      }
     }
   );

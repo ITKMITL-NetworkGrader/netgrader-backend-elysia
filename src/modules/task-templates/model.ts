@@ -1,7 +1,7 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
 export interface ITaskTemplate extends Document {
-  templateId: string;      // Unique identifier (e.g., "cisco_ospf_basic")
+  templateId?: string;      // Unique identifier (e.g., "cisco_ospf_basic")
   name: string;            // Display name
   
   // Template Content
@@ -73,6 +73,8 @@ const taskTemplateSchema = new Schema<ITaskTemplate>({
 });
 
 // Indexes as specified in implementation guide
+taskTemplateSchema.path('parameterSchema').schema.set('_id', false);
+taskTemplateSchema.path('defaultTestCases').schema.set('_id', false);
 taskTemplateSchema.index({ templateId: 1 }, { unique: true }); // unique
 
 export const TaskTemplate = model<ITaskTemplate>('TaskTemplate', taskTemplateSchema, 'task_templates');
