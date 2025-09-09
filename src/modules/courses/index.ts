@@ -5,7 +5,7 @@ import { EnrollmentService } from "../enrollments/service";
 import { getDateWithTimezone } from "../../utils/helpers.js";
 import { env } from "process";
 import { authPlugin, requireRole } from "../../plugins/plugins";
-import { objectIdToShortcode, shortcodeToObjectId } from "./services";
+import { ObjectId } from 'mongodb';
 
 const courseBodySchema = t.Object({
   title: t.String(),
@@ -52,7 +52,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
           message: "Course created successfully", 
           course: {
             ...savedCourse.toObject(),
-            _id: objectIdToShortcode(savedCourse._id),
+            _id: savedCourse._id.toString(),
             requiresPassword: !!(savedCourse.password && savedCourse.password.trim() !== ''),
             password: undefined // Never expose password in response
           }
@@ -83,7 +83,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
         return { 
           courses: courses.map(course => ({
             ...course.toObject(),
-            _id: objectIdToShortcode(course._id),
+            _id: course._id.toString(),
             requiresPassword: !!(course.password && course.password.trim() !== ''),
             password: undefined
           }))
@@ -106,7 +106,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     async ({ params, set, authPlugin }) => {
       try {
         const { u_id } = authPlugin ?? { u_id: "" };
-        const courseId = shortcodeToObjectId(params.id);
+        const courseId = new ObjectId(params.id);
         
         // Find course and include password field to check if it exists
         const course = await Course.findById(courseId).select('+password');
@@ -123,7 +123,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
         // Create course object without exposing the actual password
         const courseData = {
           ...course.toObject(),
-          _id: objectIdToShortcode(course._id),
+          _id: course._id.toString(),
           requiresPassword: !!(course.password && course.password.trim() !== ''),
           password: undefined // Remove password from response
         };
@@ -190,7 +190,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
             .filter(([_, value]) => value !== undefined)
         );
         
-        const courseId = shortcodeToObjectId(params.id);
+        const courseId = new ObjectId(params.id);
         
         // Use findByIdAndUpdate with $set to only update provided fields
         // The pre-update middleware will handle password hashing
@@ -209,7 +209,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
           message: "Course updated successfully",
           course: {
             ...updatedCourse.toObject(),
-            _id: objectIdToShortcode(updatedCourse._id),
+            _id: updatedCourse._id.toString(),
             requiresPassword: !!(updatedCourse.password && updatedCourse.password.trim() !== ''),
             password: undefined // Never expose password in response
           },
@@ -234,7 +234,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
     "/:id",
     async ({ params, set }) => {
       try {
-        const courseId = shortcodeToObjectId(params.id);
+        const courseId = new ObjectId(params.id);
         const deletedCourse = await Course.findByIdAndDelete(courseId);
         
         if (!deletedCourse) {
@@ -298,7 +298,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
       return {
         courses: courses.map(course => ({
           ...course.toObject(),
-          _id: objectIdToShortcode(course._id),
+          _id: course._id.toString(),
           requiresPassword: !!(course.password && course.password.trim() !== ''),
           password: undefined // Never expose password in response
         }))

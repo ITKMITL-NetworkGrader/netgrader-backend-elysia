@@ -1,8 +1,8 @@
 import { Lab, ILab } from "./model";
 import { getDateWithTimezone } from "../../utils/helpers";
 import { env } from "process";
-import { shortcodeToObjectId } from "../courses/services";
 import { Types } from "mongoose";
+import { ObjectId } from "mongodb";
 import { User } from "../auth/model";
 import { IpAllocationService } from "../../services/ip-allocation";
 
@@ -23,7 +23,7 @@ export class LabService {
       }
 
       const newLab = new Lab({
-        courseId: shortcodeToObjectId(labData.courseId),
+        courseId: new ObjectId(labData.courseId),
         title: labData.title,
         description: labData.description,
         type: labData.type || 'lab',
@@ -191,15 +191,16 @@ export class LabService {
    */
   static async getLabsByCourse(courseId: string, page: number = 1, limit: number = 10) {
     try {
+      const courseObjectId = new ObjectId(courseId);
       const skip = (page - 1) * limit;
 
       const [labs, total] = await Promise.all([
-        Lab.find({ courseId })
+        Lab.find({ courseId: courseObjectId })
           .skip(skip)
           .limit(limit)
           .sort({ createdAt: -1 })
           .lean(),
-        Lab.countDocuments({ courseId })
+        Lab.countDocuments({ courseId: courseObjectId })
       ]);
 
       // Transform data to match frontend interface
