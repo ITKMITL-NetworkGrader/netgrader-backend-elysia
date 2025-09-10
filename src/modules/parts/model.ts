@@ -100,7 +100,10 @@ const labPartSchema = new Schema<ILabPart>({
       required: true,
       ref: 'Template'
     },
-    
+    group_id: {
+      type: String,
+      required: false
+    },
     // Execution Configuration
     executionDevice: {
       type: String,

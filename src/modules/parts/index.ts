@@ -50,6 +50,7 @@ const PartUpdateSchema = t.Object({
     name: t.String(),
     description: t.String({ default: "" }),
     templateId: t.String(),
+    group_id: t.Optional(t.String({ description: "Optional grouping for grading" })),
     executionDevice: t.String(),
     targetDevices: t.Array(t.String(), { default: [] }),
     parameters: t.Record(t.String(), t.Any()),
