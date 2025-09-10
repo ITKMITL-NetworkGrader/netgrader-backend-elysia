@@ -22,6 +22,7 @@ export interface ILab extends Document {
         name: string;          // "mgmt_ip", "lan_ip"
         hostOffset: number;    // 1, 10, 254
         interface?: string;    // "eth0", "g0/1"
+        fullIp?: string;       // Full IP address if defined, bypasses hostOffset calculation
       }>;
       credentials: {
         usernameTemplate: string;
@@ -111,6 +112,10 @@ const labSchema = new Schema<ILab>({
           required: true
         },
         interface: {
+          type: String,
+          required: false
+        },
+        fullIp: {
           type: String,
           required: false
         }

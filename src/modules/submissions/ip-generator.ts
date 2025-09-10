@@ -5,7 +5,7 @@ import { TaskTemplateService } from '../task-templates/service';
 interface GeneratedDevice {
   id: string;
   ip_address: string;
-  ansible_connection: string;
+  connection_type: string;
   credentials: Record<string, string>;
   platform: string;
   role: string;
@@ -13,9 +13,14 @@ interface GeneratedDevice {
 
 export class IPGenerator {
   /**
-   * Generate IP address from base network and host offset
+   * Generate IP address from base network and host offset, or use fullIp if provided
    */
-  static generateIP(baseNetwork: string, hostOffset: number): string {
+  static generateIP(baseNetwork: string, hostOffset: number, fullIp?: string): string {
+    // If fullIp is defined, use it directly
+    if (fullIp) {
+      return fullIp;
+    }
+    
     const [networkPart] = baseNetwork.split('/');
     const octets = networkPart.split('.').map(Number);
     
@@ -74,6 +79,7 @@ export class IPGenerator {
       const managementIP = this.generateIP(
         lab.network.topology.baseNetwork,
         managementInterface.hostOffset,
+        managementInterface.fullIp
       );
 
       const platform = this.determinePlatform(labDevice);
@@ -81,12 +87,12 @@ export class IPGenerator {
       const device: GeneratedDevice = {
         id: labDevice.deviceId,
         ip_address: managementIP,
-        ansible_connection: 'ssh',
+        connection_type: 'ssh',
         credentials: {
-          ansible_user: labDevice.credentials.usernameTemplate,
-          ansible_password: labDevice.credentials.passwordTemplate,
+          username: labDevice.credentials.usernameTemplate,
+          password: labDevice.credentials.passwordTemplate,
           ...(labDevice.credentials.enablePassword && {
-            ansible_enable_pass: labDevice.credentials.enablePassword
+            enable_pass: labDevice.credentials.enablePassword
           })
         },
         platform,
@@ -110,6 +116,7 @@ export class IPGenerator {
         const ip = this.generateIP(
           lab.network.topology.baseNetwork,
           ipVar.hostOffset,
+          ipVar.fullIp
         );
         
         // Create mapping with device.interface format
@@ -190,7 +197,7 @@ export class IPGenerator {
       part: {
         part_id: part.partId,
         title: part.title,
-        ansible_tasks: transformedTasks,
+        network_tasks: transformedTasks,
         groups: part.task_groups || []
       },
       devices,

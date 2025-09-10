@@ -14,7 +14,7 @@ export interface ILabPart extends Document {
     name: string;
     description?: string;
     templateId: Types.ObjectId;  // Ref: templates._id
-    
+    group_id?: string; // Optional grouping for grading
     // Execution Configuration
     executionDevice: string;     // Device ID from lab.network.devices
     targetDevices: string[];     // Device IDs for multi-device tasks
