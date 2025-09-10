@@ -91,7 +91,6 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
     },
     {
       body: t.Object({
-        student_id: t.String(),
         lab_id: t.String(),
         part_id: t.String(),
         job_id: t.Optional(t.String()),
@@ -245,19 +244,19 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
             points_earned: t.Number(),
             points_possible: t.Number(),
             execution_time: t.Number(),
-            test_case_results: t.Optional(t.Array(t.Any())),
+            test_case_results: t.Array(t.Any()),
             extracted_data: t.Optional(t.Record(t.String(), t.Any())),
             raw_output: t.Optional(t.String()),
-            debug_info: t.Optional(t.Any()),
-            group_id: t.Optional(t.String())
+            debug_info: t.Union([t.Any(), t.Null()]),
+            group_id: t.Union([t.String(), t.Null()])
           })
         ),
-        group_results: t.Optional(t.Array(t.Any())),
+        group_results: t.Array(t.Any()),
         total_execution_time: t.Number(),
-        error_message: t.Optional(t.String()),
+        error_message: t.String(),
         created_at: t.String(),
         completed_at: t.Optional(t.String()),
-        cancelled_reason: t.Optional(t.String())
+        cancelled_reason: t.Union([t.String(), t.Null()])
       }),
       detail: {
         tags: ["Grading"],
