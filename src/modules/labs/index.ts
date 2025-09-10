@@ -22,7 +22,7 @@ const LabBodySchema = t.Object({
       displayName: t.String(),
       ipVariables: t.Array(t.Object({
         name: t.String(),
-        hostOffset: t.Number(),
+        hostOffset: t.Optional(t.Number()),
         interface: t.Optional(t.String()),
         fullIp: t.Optional(t.String())
       })),

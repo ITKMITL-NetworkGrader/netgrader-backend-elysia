@@ -15,10 +15,15 @@ export class IPGenerator {
   /**
    * Generate IP address from base network and host offset, or use fullIp if provided
    */
-  static generateIP(baseNetwork: string, hostOffset: number, fullIp?: string): string {
+  static generateIP(baseNetwork: string, hostOffset?: number, fullIp?: string): string {
     // If fullIp is defined, use it directly
     if (fullIp) {
       return fullIp;
+    }
+    
+    // hostOffset is required when fullIp is not provided
+    if (hostOffset === undefined) {
+      throw new Error('Either fullIp or hostOffset must be provided');
     }
     
     const [networkPart] = baseNetwork.split('/');

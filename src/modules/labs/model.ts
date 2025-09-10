@@ -20,7 +20,7 @@ export interface ILab extends Document {
       displayName: string;     // "Router 1"
       ipVariables: Array<{
         name: string;          // "mgmt_ip", "lan_ip"
-        hostOffset: number;    // 1, 10, 254
+        hostOffset?: number;   // 1, 10, 254 - optional when fullIp is defined
         interface?: string;    // "eth0", "g0/1"
         fullIp?: string;       // Full IP address if defined, bypasses hostOffset calculation
       }>;
@@ -109,7 +109,7 @@ const labSchema = new Schema<ILab>({
         },
         hostOffset: {
           type: Number,
-          required: true
+          required: false
         },
         interface: {
           type: String,
