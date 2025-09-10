@@ -8,19 +8,18 @@ export class SubmissionService {
    */
   static async createSubmission(data: {
     jobId: string;
-    studentId: string | Types.ObjectId;
+    studentId: string;
     labId: string | Types.ObjectId;
     partId: string;
     ipMappings: Record<string, string>;
     callbackUrl: string;
     attempt?: number;
   }): Promise<ISubmission> {
-    const studentObjectId = new Types.ObjectId(data.studentId);
     const labObjectId = new Types.ObjectId(data.labId);
     
     // Find the highest attempt number for this student/lab/part combination
     const latestSubmission = await Submission.findOne({
-      studentId: studentObjectId,
+      studentId: data.studentId,
       labId: labObjectId,
       partId: data.partId
     }).sort({ attempt: -1 });
@@ -29,7 +28,7 @@ export class SubmissionService {
 
     const submission = new Submission({
       jobId: data.jobId,
-      studentId: studentObjectId,
+      studentId: data.studentId,
       labId: labObjectId,
       partId: data.partId,
       ipMappings: data.ipMappings,
@@ -122,7 +121,7 @@ export class SubmissionService {
    * Get submissions by student
    */
   static async getSubmissionsByStudent(
-    studentId: string | Types.ObjectId,
+    studentId: string,
     options?: {
       labId?: string | Types.ObjectId;
       status?: string;
@@ -130,7 +129,7 @@ export class SubmissionService {
       offset?: number;
     }
   ): Promise<ISubmission[]> {
-    const query: any = { studentId: new Types.ObjectId(studentId) };
+    const query: any = { studentId };
     
     if (options?.labId) {
       query.labId = new Types.ObjectId(options.labId);
@@ -175,12 +174,12 @@ export class SubmissionService {
    * Get latest submission for student/lab/part combination
    */
   static async getLatestSubmission(
-    studentId: string | Types.ObjectId,
+    studentId: string,
     labId: string | Types.ObjectId,
     partId: string
   ): Promise<ISubmission | null> {
     return await Submission.findOne({
-      studentId: new Types.ObjectId(studentId),
+      studentId,
       labId: new Types.ObjectId(labId),
       partId
     })

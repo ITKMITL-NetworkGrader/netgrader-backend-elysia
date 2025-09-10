@@ -73,7 +73,7 @@ export interface IProgressUpdate {
 
 export interface ISubmission extends Document {
   jobId: string;
-  studentId: Types.ObjectId;
+  studentId: string;
   labId: Types.ObjectId;
   partId: string;
   
@@ -179,9 +179,8 @@ const submissionSchema = new Schema<ISubmission>({
     index: true
   },
   studentId: {
-    type: Schema.Types.ObjectId,
+    type: String,
     required: true,
-    ref: 'User'
   },
   labId: {
     type: Schema.Types.ObjectId,

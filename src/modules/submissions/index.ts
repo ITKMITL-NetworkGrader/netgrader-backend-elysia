@@ -5,11 +5,15 @@ import { IGradingResult } from "./model";
 import { IPGenerator } from "./ip-generator";
 import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
+import { env } from "process";
+import { authPlugin } from "../../plugins/plugins";
 
 export const submissionRoutes = new Elysia({ prefix: "/submissions" })
+  .use(authPlugin)
   .post(
     "/",
-    async ({ body, set }) => {
+    async ({ body, set, authPlugin }) => {
+      const { u_id } = authPlugin ?? { u_id: "" };
       if (!channel) {
         set.status = 503;
         return {
@@ -39,27 +43,27 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
             message: `Part not found with ID: ${body.part_id} in lab ${body.lab_id}`
           };
         }
-
+        const callback_url = env.CALLBACK_URL || "http://localhost:4000/v0/submissions";
         // Generate job ID if not provided
-        const jobId = body.job_id || `${body.student_id}-${body.lab_id}-${body.part_id}-${Date.now()}`;
+        const jobId = body.job_id || `${u_id}-${body.lab_id}-${body.part_id}-${Date.now()}`;
 
         // Generate complete job payload from lab and part data
         const jobPayload = await IPGenerator.generateJobFromLab(
           lab as any, // Cast to ILab type (services return transformed data)
           part as any, // Cast to ILabPart type
-          body.student_id,
+          u_id,
           jobId,
-          body.callback_url
+          callback_url
         );
         console.log("Generated Job Payload:", JSON.stringify(jobPayload, null, 2));
         // Create submission record
         const submission = await SubmissionService.createSubmission({
           jobId: jobPayload.job_id,
-          studentId: body.student_id,
+          studentId: u_id,
           labId: body.lab_id,
           partId: body.part_id,
           ipMappings: jobPayload.ip_mappings,
-          callbackUrl: body.callback_url
+          callbackUrl: callback_url
         });
 
         // Send job to queue
@@ -91,7 +95,6 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         lab_id: t.String(),
         part_id: t.String(),
         job_id: t.Optional(t.String()),
-        callback_url: t.String()
       }),
       detail: {
         tags: ["Grading"],
