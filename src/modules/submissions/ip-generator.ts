@@ -1,6 +1,7 @@
 import { ILab } from '../labs/model';
 import { ILabPart } from '../parts/model';
 import { TaskTemplateService } from '../task-templates/service';
+import { DeviceTemplateService } from '../device-templates/service';
 
 interface GeneratedDevice {
   id: string;
@@ -52,25 +53,22 @@ export class IPGenerator {
   }
 
   /**
-   * Determine device platform from device info
+   * Get device platform from device template
    */
-  static determinePlatform(device: ILab['network']['devices'][0]): string {
-    const deviceName = device.displayName.toLowerCase();
-    
-    if (deviceName.includes('router') || deviceName.includes('switch')) {
-      return 'cisco_ios';
+  static async getPlatformFromTemplate(templateId: string): Promise<string> {
+    try {
+      const template = await DeviceTemplateService.getDeviceTemplateById(templateId);
+      return template?.platform || 'cisco_ios'; // Default fallback
+    } catch (error) {
+      console.warn(`Failed to get platform from template ${templateId}, using default:`, error);
+      return 'cisco_ios'; // Default fallback
     }
-    if (deviceName.includes('ubuntu') || deviceName.includes('linux')) {
-      return 'linux';
-    }
-    
-    return 'cisco_ios'; // Default fallback
   }
 
   /**
    * Generate devices array for grading job
    */
-  static generateDevices(lab: ILab): GeneratedDevice[] {
+  static async generateDevices(lab: ILab): Promise<GeneratedDevice[]> {
     const devices: GeneratedDevice[] = [];
 
     for (const labDevice of lab.network.devices) {
@@ -87,7 +85,7 @@ export class IPGenerator {
         managementInterface.fullIp
       );
 
-      const platform = this.determinePlatform(labDevice);
+      const platform = await this.getPlatformFromTemplate(labDevice.templateId.toString());
 
       const device: GeneratedDevice = {
         id: labDevice.deviceId,
@@ -169,7 +167,7 @@ export class IPGenerator {
     jobId: string,
     callbackUrl: string
   ): Promise<any> {
-    const devices = this.generateDevices(lab);
+    const devices = await this.generateDevices(lab);
     const ipMappings = this.generateIPMappings(lab);
 
     // Transform tasks to use generated IPs and resolve template names
@@ -187,9 +185,7 @@ export class IPGenerator {
         parameters: this.transformTaskParameters(task.parameters, ipMappings),
         test_cases: task.testCases.map(tc => ({
           comparison_type: tc.comparison_type,
-          expected_result: tc.expected_result.toLowerCase() === "true" ? true :
-              tc.expected_result.toLowerCase() === "false" ? false :
-              tc.expected_result
+          expected_result: tc.expected_result
         })),
         points: task.points,
       };
