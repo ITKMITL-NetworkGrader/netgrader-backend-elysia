@@ -2,13 +2,19 @@ import { Elysia, t } from "elysia";
 import { PartService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 
+// Rich content schema
+const RichContentSchema = t.Object({
+  html: t.String(),
+  json: t.Any()
+});
+
 // Updated schemas for embedded tasks model
 const PartCreateSchema = t.Object({
   labId: t.String({ description: "Lab ID this part belongs to" }),
   partId: t.String({ description: "Human-readable ID within lab" }),
   title: t.String({ description: "Part title" }),
-  description: t.String({ description: "Part description in Markdown", default: "" }),
-  instructions: t.String({ description: "Student instructions in Markdown" }),
+  description: t.String({ default: "" }),
+  instructions: t.Union([RichContentSchema, t.String()]), // Accept both rich content and plain HTML string
   order: t.Number({ description: "Part order within lab" }),
   tasks: t.Array(t.Object({
     taskId: t.String(),
@@ -35,15 +41,15 @@ const PartCreateSchema = t.Object({
     continue_on_failure: t.Boolean(),
     timeout_seconds: t.Number()
   }), { default: [] }),
-  prerequisites: t.Array(t.String(), { description: "Array of prerequisite part IDs", default: [] }),
+  prerequisites: t.Array(t.String(), { default: [] }),
   totalPoints: t.Number({ description: "Total points for this part" })
 });
 
 const PartUpdateSchema = t.Object({
   partId: t.Optional(t.String()),
   title: t.Optional(t.String()),
-  description: t.Optional(t.String()),
-  instructions: t.Optional(t.String()),
+  description: t.String({ default: "" }),
+  instructions: t.Optional(t.Union([RichContentSchema, t.String()])), // Accept both rich content and plain HTML string
   order: t.Optional(t.Number()),
   tasks: t.Optional(t.Array(t.Object({
     taskId: t.String(),
@@ -313,6 +319,171 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
         tags: ["Parts"],
         summary: "Get part statistics",
         description: "Get statistics about parts (optionally filtered by lab)"
+      }
+    }
+  )
+
+  // Auto-save functionality
+  .post(
+    "/:id/auto-save",
+    async ({ params, body, set }) => {
+      try {
+        const { labId, content, field } = body;
+
+        const result = await PartService.autoSavePart(
+          params.id,
+          labId,
+          content,
+          field
+        );
+
+        set.status = 200;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { error: (error as Error).message };
+      }
+    },
+    {
+      params: t.Object({
+        id: t.String({ description: "Part ID" })
+      }),
+      body: t.Object({
+        labId: t.String(),
+        content: RichContentSchema,
+        field: t.String({ description: "Field name (instructions, description, etc.)" })
+      }),
+      response: {
+        500: t.Object({ error: t.String() })
+      },
+      detail: {
+        tags: ["Parts"],
+        summary: "Auto-save rich content",
+        description: "Auto-save functionality for rich content fields"
+      }
+    }
+  )
+
+  // Load auto-saved content
+  .get(
+    "/:id/auto-save/:field",
+    async ({ params, query, set }) => {
+      try {
+        const { partId, field } = params;
+        const { labId } = query;
+
+        const result = await PartService.loadAutoSave(
+          partId,
+          labId as string,
+          field
+        );
+
+        set.status = result.success ? 200 : 404;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { error: (error as Error).message };
+      }
+    },
+    {
+      params: t.Object({
+        id: t.String({ description: "Part ID" }),
+        field: t.String({ description: "Field name (instructions, description, etc.)" })
+      }),
+      query: t.Object({
+        labId: t.String()
+      }),
+      response: {
+        404: t.Object({ success: t.Boolean(), message: t.String() }),
+        500: t.Object({ error: t.String() })
+      },
+      detail: {
+        tags: ["Parts"],
+        summary: "Load auto-saved content",
+        description: "Retrieve auto-saved content for a specific field"
+      }
+    }
+  )
+
+  // Get part with auto-save status
+  .get(
+    "/:id/with-autosave",
+    async ({ params, query, set }) => {
+      try {
+        const { partId } = params;
+        const { labId } = query;
+
+        const part = await PartService.getPartWithAutoSave(
+          partId,
+          labId as string
+        );
+        
+        if (!part) {
+          set.status = 404;
+          return { error: "Part not found" };
+        }
+
+        set.status = 200;
+        return part;
+      } catch (error) {
+        set.status = 500;
+        return { error: (error as Error).message };
+      }
+    },
+    {
+      params: t.Object({
+        id: t.String({ description: "Part ID" })
+      }),
+      query: t.Object({
+        labId: t.String()
+      }),
+      response: {
+        404: t.Object({ error: t.String() }),
+        500: t.Object({ error: t.String() })
+      },
+      detail: {
+        tags: ["Parts"],
+        summary: "Get part with auto-save status",
+        description: "Retrieve part data along with auto-save status information"
+      }
+    }
+  )
+
+  // Asset cleanup
+  .post(
+    "/:id/cleanup-assets",
+    async ({ params, body, set }) => {
+      try {
+        const { labId, currentAssets } = body;
+
+        const result = await PartService.cleanupAssets(
+          params.id,
+          labId,
+          currentAssets
+        );
+
+        set.status = 200;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { error: (error as Error).message };
+      }
+    },
+    {
+      params: t.Object({
+        id: t.String({ description: "Part ID" })
+      }),
+      body: t.Object({
+        labId: t.String(),
+        currentAssets: t.Array(t.String(), { description: "Array of currently used asset IDs" })
+      }),
+      response: {
+        500: t.Object({ error: t.String() })
+      },
+      detail: {
+        tags: ["Parts"],
+        summary: "Clean up unused assets",
+        description: "Remove unused assets from part"
       }
     }
   );

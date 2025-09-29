@@ -1,6 +1,7 @@
 import { LabPart, ILabPart } from "./model";
 import { Lab } from "../labs/model";
 import { Types } from "mongoose";
+import { processRichContent, estimateReadingTime } from "../../utils/rich-content";
 
 /**
  * Part Service - Business logic for lab part operations
@@ -18,17 +19,56 @@ export class PartService {
         throw new Error(`Lab with ID ${partData.labId} does not exist`);
       }
 
+      // Process rich content for instructions only
+      let processedInstructions;
+      
+      if (typeof partData.instructions === 'string') {
+        // Backward compatibility: convert plain HTML string to rich content
+        processedInstructions = {
+          html: partData.instructions,
+          json: { type: 'doc', content: [] }, // Empty TipTap JSON
+          plainText: partData.instructions.replace(/<[^>]*>/g, '').trim(),
+          metadata: {
+            wordCount: 0,
+            characterCount: partData.instructions.length,
+            estimatedReadingTime: 1,
+            lastModified: new Date(),
+            hasImages: partData.instructions.includes('<img'),
+            hasCodeBlocks: partData.instructions.includes('<code>') || partData.instructions.includes('<pre>'),
+            headingStructure: []
+          }
+        };
+      } else {
+        // New format: process rich content normally
+        processedInstructions = processRichContent(
+          partData.instructions.html,
+          partData.instructions.json
+        );
+      }
+
       const newPart = new LabPart({
         labId: partData.labId,
         partId: partData.partId,
         title: partData.title,
-        description: partData.description,
-        instructions: partData.instructions,
+        description: partData.description || "",
+        instructions: processedInstructions,
         order: partData.order,
-        tasks: partData.tasks || [],
-        task_groups: partData.task_groups || [],
+        tasks: (partData.tasks || []).map((task: any) => ({
+          ...task,
+          description: task.description || ""
+        })),
+        task_groups: (partData.task_groups || []).map((group: any) => ({
+          ...group,
+          description: group.description || ""
+        })),
         prerequisites: (partData.prerequisites || []).filter((prereq: string) => prereq && prereq.trim() !== ''),
-        totalPoints: partData.totalPoints
+        totalPoints: partData.totalPoints,
+        metadata: {
+          wordCount: processedInstructions.metadata.wordCount,
+          estimatedReadingTime: processedInstructions.metadata.estimatedReadingTime,
+          lastModified: new Date(),
+          version: 1
+        }
       });
 
       const savedPart = await newPart.save();
@@ -138,11 +178,65 @@ export class PartService {
           if (field === 'prerequisites' && Array.isArray(filteredData[field])) {
             // Filter out empty strings from prerequisites
             updateFields[field] = filteredData[field].filter((prereq: string) => prereq && prereq.trim() !== '');
+          } else if (field === 'instructions' && filteredData[field]) {
+            // Process rich content for instructions
+            if (typeof filteredData[field] === 'string') {
+              // Backward compatibility: convert plain HTML string to rich content
+              updateFields[field] = {
+                html: filteredData[field] as string,
+                json: { type: 'doc', content: [] },
+                plainText: (filteredData[field] as string).replace(/<[^>]*>/g, '').trim(),
+                metadata: {
+                  wordCount: 0,
+                  characterCount: (filteredData[field] as string).length,
+                  estimatedReadingTime: 1,
+                  lastModified: new Date(),
+                  hasImages: (filteredData[field] as string).includes('<img'),
+                  hasCodeBlocks: (filteredData[field] as string).includes('<code>') || (filteredData[field] as string).includes('<pre>'),
+                  headingStructure: []
+                }
+              };
+            } else {
+              // New format: process rich content normally
+              const richContent = filteredData[field] as { html: string; json: any };
+              updateFields[field] = processRichContent(
+                richContent.html,
+                richContent.json
+              );
+            }
+          } else if (field === 'tasks' && Array.isArray(filteredData[field])) {
+            // Ensure task descriptions have default empty strings
+            updateFields[field] = filteredData[field].map((task: any) => ({
+              ...task,
+              description: task.description || ""
+            }));
+          } else if (field === 'task_groups' && Array.isArray(filteredData[field])) {
+            // Ensure task group descriptions have default empty strings
+            updateFields[field] = filteredData[field].map((group: any) => ({
+              ...group,
+              description: group.description || ""
+            }));
           } else {
             updateFields[field] = filteredData[field];
           }
         }
       });
+
+      // Update metadata if content changed
+      if (updateFields.instructions || updateFields.description || updateFields.tasks || updateFields.task_groups) {
+        const currentPart = await LabPart.findById(id);
+        if (currentPart) {
+          const instructionsWordCount = updateFields.instructions?.metadata?.wordCount || (currentPart.instructions as any)?.metadata?.wordCount || 0;
+          
+          updateFields.metadata = {
+            ...(currentPart.metadata || {}),
+            wordCount: instructionsWordCount,
+            estimatedReadingTime: estimateReadingTime(instructionsWordCount),
+            lastModified: new Date(),
+            version: ((currentPart.metadata as any)?.version || 1) + 1
+          };
+        }
+      }
 
       const updatedPart = await LabPart.findByIdAndUpdate(
         id,
@@ -158,7 +252,7 @@ export class PartService {
       return {
         ...updatedPart.toObject(),
         id: updatedPart._id?.toString(),
-        lab_id: updatedPart.labId?.toString(),
+        labId: updatedPart.labId?.toString(),
         prerequisites: updatedPart.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
         _id: undefined
       };
@@ -259,6 +353,145 @@ export class PartService {
       };
     } catch (error) {
       throw new Error(`Error fetching part statistics: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Auto-save functionality for rich content
+   */
+  static async autoSavePart(partId: string, labId: string, content: any, field: string) {
+    try {
+      const processedContent = processRichContent(content.html, content.json);
+
+      const autoSaveData = {
+        [`metadata.autoSave.${field}`]: processedContent,
+        'metadata.autoSave.timestamp': new Date()
+      };
+
+      await LabPart.updateOne(
+        { _id: partId, labId: labId },
+        { $set: autoSaveData }
+      );
+
+      return {
+        success: true,
+        timestamp: new Date(),
+        wordCount: processedContent.metadata.wordCount
+      };
+    } catch (error) {
+      throw new Error(`Auto-save failed: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Load auto-saved content
+   */
+  static async loadAutoSave(partId: string, labId: string, field: string) {
+    try {
+      const part = await LabPart.findOne(
+        { _id: partId, labId: labId },
+        { [`metadata.autoSave.${field}`]: 1, 'metadata.autoSave.timestamp': 1 }
+      );
+
+      if (!part || !part.metadata?.autoSave) {
+        return {
+          success: false,
+          message: 'No auto-save data found'
+        };
+      }
+
+      const autoSaveData = (part.metadata.autoSave as any)[field];
+      const timestamp = part.metadata.autoSave.timestamp;
+
+      if (!autoSaveData) {
+        return {
+          success: false,
+          message: `No auto-save data found for field: ${field}`
+        };
+      }
+
+      return {
+        success: true,
+        content: autoSaveData,
+        timestamp: timestamp,
+        wordCount: autoSaveData.metadata?.wordCount || 0
+      };
+    } catch (error) {
+      throw new Error(`Failed to load auto-save: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Get part with auto-save status
+   */
+  static async getPartWithAutoSave(partId: string, labId: string) {
+    try {
+      const part = await LabPart.findOne({ _id: partId, labId: labId }).lean();
+      
+      if (!part) {
+        return null;
+      }
+
+      const hasAutoSave = part.metadata?.autoSave && Object.keys(part.metadata.autoSave).length > 1; // more than just timestamp
+      const autoSaveTimestamp = part.metadata?.autoSave?.timestamp;
+      const lastModified = part.metadata?.lastModified;
+      
+      const isAutoSaveNewer = hasAutoSave && autoSaveTimestamp && lastModified && 
+        new Date(autoSaveTimestamp) > new Date(lastModified);
+
+      return {
+        ...part,
+        id: part._id?.toString(),
+        labId: part.labId?.toString(),
+        prerequisites: part.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
+        _id: undefined,
+        autoSaveStatus: {
+          hasAutoSave,
+          isAutoSaveNewer,
+          autoSaveTimestamp,
+          lastModified
+        }
+      };
+    } catch (error) {
+      throw new Error(`Error fetching part with auto-save: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Clean up unused assets
+   */
+  static async cleanupAssets(partId: string, labId: string, currentAssets: string[]) {
+    try {
+      // Get current part
+      const part = await LabPart.findOne({ _id: partId, labId: labId });
+
+      if (!part) {
+        throw new Error('Part not found');
+      }
+
+      // Find assets that are no longer referenced
+      const existingAssets = part.assets || [];
+      const unusedAssets = existingAssets.filter(
+        (asset: any) => !currentAssets.includes(asset.id)
+      );
+
+      // Remove unused assets from database
+      if (unusedAssets.length > 0) {
+        await LabPart.updateOne(
+          { _id: partId, labId: labId },
+          { $pull: { assets: { id: { $in: unusedAssets.map((a: any) => a.id) } } } }
+        );
+
+        // TODO: Delete files from MinIO/storage
+        // await deleteAssetsFromStorage(unusedAssets)
+      }
+
+      return {
+        success: true,
+        cleanedAssets: unusedAssets.length
+      };
+    } catch (error) {
+      throw new Error(`Asset cleanup failed: ${(error as Error).message}`);
     }
   }
 }

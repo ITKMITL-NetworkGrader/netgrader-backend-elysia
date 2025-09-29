@@ -1,11 +1,12 @@
 import { Schema, model, Document, Types } from 'mongoose';
+import { RichContent } from '../../utils/rich-content';
 
 export interface ILabPart extends Document {
   labId: Types.ObjectId;         // Ref: labs._id
   partId: string;          // Human-readable ID within lab
   title: string;
   description?: string;    // Markdown content
-  instructions: string;    // Student instructions (Markdown)
+  instructions: RichContent;    // Student instructions with TipTap JSON
   order: number;           // Display sequence
   
   // Embedded Tasks (1-10 per part typically)
@@ -43,10 +44,47 @@ export interface ILabPart extends Document {
   
   // Part Configuration
   prerequisites: string[];       // Part IDs that must be completed first
-  totalPoints: number;          // Sum of task points  
+  totalPoints: number;          // Sum of task points
+  metadata: {
+    wordCount: number;
+    estimatedReadingTime: number;
+    lastModified: Date;
+    version: number;
+    autoSave?: {
+      timestamp: Date;
+      [field: string]: RichContent | Date;
+    };
+  };
+  assets?: Array<{
+    id: string;
+    url: string;
+    type: string;
+    size: number;
+    uploadedAt: Date;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const RichContentSchema = new Schema({
+  html: { type: String, required: true },
+  json: { type: Schema.Types.Mixed, required: true },
+  plainText: { type: String, required: true },
+  metadata: {
+    wordCount: { type: Number, required: true },
+    characterCount: { type: Number, required: true },
+    estimatedReadingTime: { type: Number, required: true },
+    lastModified: { type: Date, required: true },
+    hasImages: { type: Boolean, required: true },
+    hasCodeBlocks: { type: Boolean, required: true },
+    headingStructure: [{
+      _id: false,
+      level: { type: Number, required: true },
+      text: { type: String, required: true },
+      id: { type: String, required: true }
+    }]
+  }
+}, { _id: false });
 
 const labPartSchema = new Schema<ILabPart>({
   labId: {
@@ -71,9 +109,8 @@ const labPartSchema = new Schema<ILabPart>({
     trim: true
   },
   instructions: {
-    type: String,
-    required: true,
-    maxlength: 10000
+    type: RichContentSchema,
+    required: true
   },
   order: {
     type: Number,
@@ -93,7 +130,8 @@ const labPartSchema = new Schema<ILabPart>({
     },
     description: {
       type: String,
-      required: false
+      required: false,
+      default: ""
     },
     templateId: {
       type: Schema.Types.ObjectId,
@@ -153,7 +191,8 @@ const labPartSchema = new Schema<ILabPart>({
     },
     description: {
       type: String,
-      required: false
+      required: false,
+      default: ""
     },
     group_type: {
       type: String,
@@ -184,14 +223,34 @@ const labPartSchema = new Schema<ILabPart>({
     type: Number,
     required: true,
     min: 0
-  }
+  },
+  metadata: {
+    wordCount: { type: Number, required: true },
+    estimatedReadingTime: { type: Number, required: true },
+    lastModified: { type: Date, required: true },
+    version: { type: Number, required: true, default: 1 },
+    autoSave: {
+      type: Schema.Types.Mixed,
+      required: false
+    }
+  },
+  assets: [{
+    _id: false,
+    id: { type: String, required: true },
+    url: { type: String, required: true },
+    type: { type: String, required: true },
+    size: { type: Number, required: true },
+    uploadedAt: { type: Date, required: true }
+  }]
 }, {
   timestamps: true
 });
 
 // Indexes as specified in implementation guide
 labPartSchema.index({ labId: 1, order: 1 });              // lab part sequence
-labPartSchema.index({ labId: 1, partId: 1 });             // unique part identification
+labPartSchema.index({ labId: 1, partId: 1 }, { unique: true }); // unique part identification
 labPartSchema.index({ 'tasks.templateId': 1 });           // template usage
+labPartSchema.index({ 'tasks.group_id': 1 });             // task group queries
+labPartSchema.index({ 'metadata.lastModified': -1 });     // recent updates
 
 export const LabPart = model<ILabPart>('LabPart', labPartSchema, 'lab_parts');
