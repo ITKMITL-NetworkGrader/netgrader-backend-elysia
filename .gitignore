@@ -43,3 +43,6 @@ package-lock.json
 
 .env
 docker-compose.yml
+CLAUDE.md
+.claude
+.playwright-mcp
