@@ -5,7 +5,7 @@ import { env } from "process";
 import { authPlugin } from "./plugins/plugins.js";
 import { routes } from "./modules/index.js";
 import { connectDatabase } from "./config/database.js";
-import { connectRedis, gracefulShutdown } from "./config/redis.js";
+// import { connectRedis, gracefulShutdown } from "./config/redis.js";
 
 export type JWTPayload = {
     u_id: string;
@@ -21,7 +21,7 @@ declare module 'elysia' {
     }
 }
 await connectDatabase();
-await connectRedis();
+// await connectRedis();
 const app = new Elysia()
 .use(swagger())
 .use(cors({
@@ -40,14 +40,14 @@ console.log(
 );
 
 // Graceful shutdown handling
-process.on('SIGINT', async () => {
-  console.log('\n🛑 Received SIGINT, shutting down gracefully...');
-  await gracefulShutdown();
-  process.exit(0);
-});
+// process.on('SIGINT', async () => {
+//   console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+//   await gracefulShutdown();
+//   process.exit(0);
+// });
 
-process.on('SIGTERM', async () => {
-  console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
-  await gracefulShutdown();
-  process.exit(0);
-});
+// process.on('SIGTERM', async () => {
+//   console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+//   await gracefulShutdown();
+//   process.exit(0);
+// });
