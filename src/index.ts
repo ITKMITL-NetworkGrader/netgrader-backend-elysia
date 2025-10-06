@@ -21,7 +21,7 @@ declare module 'elysia' {
     }
 }
 await connectDatabase();
-await connectRedis();
+// await connectRedis();
 const app = new Elysia()
 .use(swagger())
 .use(cors({
@@ -40,14 +40,14 @@ console.log(
 );
 
 // Graceful shutdown handling
-process.on('SIGINT', async () => {
-  console.log('\n🛑 Received SIGINT, shutting down gracefully...');
-  await gracefulShutdown();
-  process.exit(0);
-});
+// process.on('SIGINT', async () => {
+//   console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+//   await gracefulShutdown();
+//   process.exit(0);
+// });
 
-process.on('SIGTERM', async () => {
-  console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
-  await gracefulShutdown();
-  process.exit(0);
-});
+// process.on('SIGTERM', async () => {
+//   console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+//   await gracefulShutdown();
+//   process.exit(0);
+// });
