@@ -2,8 +2,9 @@ import { Elysia, t } from "elysia";
 import { LabService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 import { IpAllocationService } from "../../services/ip-allocation";
+import { VlanValidator } from "../../utils/vlan-validator";
 
-// Updated schemas for the embedded network model
+// Updated schemas for the embedded network model with VLAN support
 const LabBodySchema = t.Object({
   courseId: t.String(),
   title: t.String(),
@@ -13,18 +14,51 @@ const LabBodySchema = t.Object({
     name: t.String(),
     topology: t.Object({
       baseNetwork: t.String(),
-      subnetMask: t.Number(),
+      subnetMask: t.Number({ minimum: 8, maximum: 30 }),
       allocationStrategy: t.Union([t.Literal("student_id_based"), t.Literal("group_based")])
     }),
+    vlanConfiguration: t.Optional(t.Object({
+      mode: t.Union([t.Literal("fixed_vlan"), t.Literal("lecturer_group"), t.Literal("calculated_vlan")]),
+      vlanCount: t.Number({ minimum: 1, maximum: 10 }),
+      vlans: t.Array(t.Object({
+        id: t.String(),
+        vlanId: t.Optional(t.Number({ minimum: 1, maximum: 4094 })),
+        calculationMultiplier: t.Optional(t.Number()),
+        baseNetwork: t.String(),
+        subnetMask: t.Number({ minimum: 8, maximum: 30 }),
+        groupModifier: t.Optional(t.Number()),
+        isStudentGenerated: t.Boolean()
+      }))
+    })),
     devices: t.Array(t.Object({
       deviceId: t.String(),
       templateId: t.String(),
       displayName: t.String(),
       ipVariables: t.Array(t.Object({
         name: t.String(),
-        hostOffset: t.Optional(t.Number()),
         interface: t.Optional(t.String()),
-        fullIp: t.Optional(t.String())
+        inputType: t.Union([
+          t.Literal("fullIP"),
+          t.Literal("studentManagement"),
+          t.Literal("studentVlan0"),
+          t.Literal("studentVlan1"),
+          t.Literal("studentVlan2"),
+          t.Literal("studentVlan3"),
+          t.Literal("studentVlan4"),
+          t.Literal("studentVlan5"),
+          t.Literal("studentVlan6"),
+          t.Literal("studentVlan7"),
+          t.Literal("studentVlan8"),
+          t.Literal("studentVlan9")
+        ]),
+        fullIp: t.Optional(t.String()),
+        isManagementInterface: t.Optional(t.Boolean()),
+        isVlanInterface: t.Optional(t.Boolean()),
+        vlanIndex: t.Optional(t.Number({ minimum: 0, maximum: 9 })),
+        interfaceOffset: t.Optional(t.Number({ minimum: 1, maximum: 50 })),
+        isStudentGenerated: t.Optional(t.Boolean()),
+        description: t.Optional(t.String()),
+        readonly: t.Optional(t.Boolean())
       })),
       credentials: t.Object({
         usernameTemplate: t.String(),
@@ -34,6 +68,8 @@ const LabBodySchema = t.Object({
     }))
   }),
   publishedAt: t.Optional(t.Date()),
+  availableFrom: t.Optional(t.Date()),
+  availableUntil: t.Optional(t.Date()),
   dueDate: t.Optional(t.Date())
 });
 
@@ -93,7 +129,49 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
     async ({ body, set, authPlugin }) => {
       try {
         const { u_id } = authPlugin ?? { u_id: "" };
-        
+
+        // Validate VLAN configuration if present
+        if (body.network.vlanConfiguration) {
+          const vlanValidation = VlanValidator.validateVlanConfiguration(body.network.vlanConfiguration);
+          if (!vlanValidation.valid) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "VLAN configuration validation failed",
+              errors: vlanValidation.errors
+            };
+          }
+
+          // Validate IP variables
+          for (const device of body.network.devices) {
+            for (const ipVar of device.ipVariables) {
+              const ipVarValidation = VlanValidator.validateIPVariable(
+                ipVar,
+                body.network.vlanConfiguration
+              );
+              if (!ipVarValidation.valid) {
+                set.status = 400;
+                return {
+                  success: false,
+                  message: `IP variable validation failed for device '${device.deviceId}', variable '${ipVar.name}'`,
+                  errors: ipVarValidation.errors
+                };
+              }
+            }
+          }
+
+          // Check for duplicate IP configurations
+          const duplicateCheck = VlanValidator.checkDuplicateIPs(body.network.devices);
+          if (!duplicateCheck.valid) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "Duplicate IP configuration detected",
+              errors: duplicateCheck.errors
+            };
+          }
+        }
+
         const savedLab = await LabService.createLab(body, u_id);
 
         set.status = 201;

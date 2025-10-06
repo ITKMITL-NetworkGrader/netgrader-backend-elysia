@@ -14,41 +14,57 @@ interface GeneratedDevice {
 
 export class IPGenerator {
   /**
-   * Generate IP address from base network and host offset, or use fullIp if provided
+   * Generate IP address based on inputType
+   * NOTE: This is for IP variable REFERENCES resolution in task parameters
+   * Student-specific IPs (Management, VLAN) are calculated by FRONTEND
    */
-  static generateIP(baseNetwork: string, hostOffset?: number, fullIp?: string): string {
-    // If fullIp is defined, use it directly
-    if (fullIp) {
-      return fullIp;
+  static generateIP(ipVariable: {
+    inputType: string;
+    fullIp?: string;
+    isManagementInterface?: boolean;
+    isVlanInterface?: boolean;
+    vlanIndex?: number;
+    interfaceOffset?: number;
+  }): string {
+    // For fullIP type, use it directly
+    if (ipVariable.inputType === 'fullIP' && ipVariable.fullIp) {
+      return ipVariable.fullIp;
     }
-    
-    // hostOffset is required when fullIp is not provided
-    if (hostOffset === undefined) {
-      throw new Error('Either fullIp or hostOffset must be provided');
+
+    // For student-generated IPs (Management, VLAN), return a placeholder
+    // These will be calculated by the frontend or provided by backend during lab execution
+    if (
+      ipVariable.inputType === 'studentManagement' ||
+      ipVariable.inputType.startsWith('studentVlan')
+    ) {
+      // Return placeholder - actual IP will be resolved during task execution
+      // Format: ${inputType}:${vlanIndex}:${interfaceOffset}
+      if (ipVariable.isVlanInterface && ipVariable.vlanIndex !== undefined) {
+        return `\${${ipVariable.inputType}:${ipVariable.vlanIndex}:${ipVariable.interfaceOffset || 1}}`;
+      } else if (ipVariable.isManagementInterface) {
+        return `\${${ipVariable.inputType}}`;
+      }
     }
-    
-    const [networkPart] = baseNetwork.split('/');
-    const octets = networkPart.split('.').map(Number);
-    
-    // For student-based allocation, you might want to add student ID offset
-    // For now, using simple host offset
-    octets[3] = hostOffset;
-    
-    return octets.join('.');
+
+    throw new Error(`Unable to generate IP for inputType: ${ipVariable.inputType}`);
   }
 
   /**
    * Find management interface for a device
    */
   static findManagementInterface(device: ILab['network']['devices'][0]) {
-    // Option 1: Convention-based detection for management interfaces
-    const managementByName = device.ipVariables.find(ip => 
+    // Look for isManagementInterface flag first
+    const managementByFlag = device.ipVariables.find(ip => ip.isManagementInterface === true);
+    if (managementByFlag) return managementByFlag;
+
+    // Fallback: Convention-based detection for management interfaces
+    const managementByName = device.ipVariables.find(ip =>
       /^(mgmt|management|oob)/i.test(ip.name) ||
       (ip.interface && /management|mgmt/i.test(ip.interface))
     );
     if (managementByName) return managementByName;
 
-    // Option 2: Use first interface as fallback
+    // Last resort: Use first interface as fallback
     return device.ipVariables[0] || null;
   }
 
@@ -79,11 +95,7 @@ export class IPGenerator {
         continue;
       }
 
-      const managementIP = this.generateIP(
-        lab.network.topology.baseNetwork,
-        managementInterface.hostOffset,
-        managementInterface.fullIp
-      );
+      const managementIP = this.generateIP(managementInterface);
 
       const platform = await this.getPlatformFromTemplate(labDevice.templateId.toString());
 
@@ -110,19 +122,16 @@ export class IPGenerator {
 
   /**
    * Generate IP mappings for task parameters
+   * Returns mapping of device.variableName to IP address (or placeholder for student-generated)
    */
   static generateIPMappings(lab: ILab): Record<string, string> {
     const mappings: Record<string, string> = {};
 
     for (const device of lab.network.devices) {
       for (const ipVar of device.ipVariables) {
-        const ip = this.generateIP(
-          lab.network.topology.baseNetwork,
-          ipVar.hostOffset,
-          ipVar.fullIp
-        );
-        
-        // Create mapping with device.interface format
+        const ip = this.generateIP(ipVar);
+
+        // Create mapping with device.variableName format (e.g., "router1.loopback0")
         const key = `${device.deviceId}.${ipVar.name}`;
         mappings[key] = ip;
       }

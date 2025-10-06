@@ -129,9 +129,9 @@ export class LabService {
       );
 
       // Only allow updating specific fields
-      const allowedFields = ['title', 'description', 'type', 'courseId', 'network', 'publishedAt', 'dueDate'];
+      const allowedFields = ['title', 'description', 'type', 'courseId', 'network', 'publishedAt', 'availableFrom', 'availableUntil', 'dueDate'];
       const updateFields: any = {};
-      
+
       allowedFields.forEach(field => {
         if (filteredData[field] !== undefined) {
           updateFields[field] = filteredData[field];

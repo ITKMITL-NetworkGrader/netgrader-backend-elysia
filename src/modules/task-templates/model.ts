@@ -10,7 +10,7 @@ export interface ITaskTemplate extends Document {
   // Parameter Validation
   parameterSchema: Array<{
     name: string;
-    type: string;
+    type: 'string' | 'number' | 'boolean' | 'ip_address' | string;  // Added ip_address type for IP parameter feature
     description?: string;
     required: boolean;
   }>;
