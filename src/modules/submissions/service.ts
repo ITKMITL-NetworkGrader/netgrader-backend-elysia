@@ -1,5 +1,7 @@
 import { Types } from 'mongoose';
 import { Submission, ISubmission, IGradingResult, IProgressUpdate } from './model';
+import { StudentLabSessionService } from '../student-lab-sessions/service';
+import { PartService } from '../parts/service';
 
 export class SubmissionService {
   
@@ -85,6 +87,7 @@ export class SubmissionService {
 
   /**
    * Store final grading result
+   * Releases IP ONLY when ALL parts of the lab are completed with 100% score
    */
   static async storeGradingResult(jobId: string, gradingResult: IGradingResult): Promise<ISubmission | null> {
     const updateData: Partial<ISubmission> = {
@@ -101,11 +104,95 @@ export class SubmissionService {
       updateData.status = 'cancelled';
     }
 
-    return await Submission.findOneAndUpdate(
+    const submission = await Submission.findOneAndUpdate(
       { jobId },
       updateData,
       { new: true }
     );
+
+    // Release IP ONLY if ALL parts of the lab are completed with 100%
+    if (submission && gradingResult.status === 'completed') {
+      const isPerfectScore = gradingResult.total_points_earned === gradingResult.total_points_possible &&
+                            gradingResult.total_points_possible > 0;
+
+      if (isPerfectScore) {
+        try {
+          // Check if ALL parts are now 100%
+          const allPartsCompleted = await this.areAllPartsCompleted(
+            submission.studentId,
+            submission.labId as Types.ObjectId
+          );
+
+          if (allPartsCompleted) {
+            // Delete session to release IP
+            await StudentLabSessionService.deleteSession(
+              submission.studentId,
+              submission.labId as Types.ObjectId
+            );
+            console.log(`[Session Released] Student ${submission.studentId} completed ALL parts of lab ${submission.labId} - IP released`);
+          } else {
+            console.log(`[Session Active] Student ${submission.studentId} completed part ${submission.partId}, but other parts remain - IP kept`);
+          }
+        } catch (error) {
+          console.error('Error checking/releasing student lab session:', error);
+          // Don't fail the submission if session deletion fails
+        }
+      }
+    }
+
+    return submission;
+  }
+
+  /**
+   * Check if student has completed ALL parts of a lab with 100% score
+   * Handles multiple submissions per part (checks if at least ONE perfect submission exists per part)
+   */
+  private static async areAllPartsCompleted(
+    studentId: string,
+    labId: Types.ObjectId
+  ): Promise<boolean> {
+    try {
+      // Get all parts for this lab
+      const partsResponse = await PartService.getPartsByLab(labId.toString());
+      const totalParts = partsResponse.parts.length;
+
+      if (totalParts === 0) {
+        return false; // No parts defined
+      }
+
+      const partIds = partsResponse.parts.map(p => p.partId);
+
+      // For EACH part, check if there's at least ONE submission with 100%
+      const completedPartIds = new Set<string>();
+
+      for (const partId of partIds) {
+        const perfectSubmission = await Submission.findOne({
+          studentId,
+          labId,
+          partId,
+          status: 'completed',
+          $expr: {
+            $and: [
+              { $gt: ['$gradingResult.total_points_possible', 0] },
+              { $eq: ['$gradingResult.total_points_earned', '$gradingResult.total_points_possible'] }
+            ]
+          }
+        });
+
+        if (perfectSubmission) {
+          completedPartIds.add(partId);
+        }
+      }
+
+      const allCompleted = completedPartIds.size === totalParts;
+
+      console.log(`[Parts Check] Student ${studentId} - Lab ${labId}: ${completedPartIds.size}/${totalParts} parts completed`);
+
+      return allCompleted;
+    } catch (error) {
+      console.error('Error checking if all parts completed:', error);
+      return false; // Safe fallback: don't release IP on error
+    }
   }
 
   /**

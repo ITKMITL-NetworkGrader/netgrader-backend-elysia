@@ -2,6 +2,13 @@ import { ILab } from '../labs/model';
 import { ILabPart } from '../parts/model';
 import { TaskTemplateService } from '../task-templates/service';
 import { DeviceTemplateService } from '../device-templates/service';
+import { StudentLabSessionService } from '../student-lab-sessions/service';
+import { Types } from 'mongoose';
+import {
+  calculateStudentIdBasedIP,
+  calculateAdvancedStudentIP,
+  calculateStudentVLANs
+} from './ip-calculator';
 
 interface GeneratedDevice {
   id: string;
@@ -15,34 +22,72 @@ interface GeneratedDevice {
 export class IPGenerator {
   /**
    * Generate IP address based on inputType
-   * NOTE: This is for IP variable REFERENCES resolution in task parameters
-   * Student-specific IPs (Management, VLAN) are calculated by FRONTEND
+   * NOTE: This now calculates ACTUAL IPs for VLAN interfaces (not placeholders)
+   * Management IPs are resolved at submission time using StudentLabSession
    */
-  static generateIP(ipVariable: {
-    inputType: string;
-    fullIp?: string;
-    isManagementInterface?: boolean;
-    isVlanInterface?: boolean;
-    vlanIndex?: number;
-    interfaceOffset?: number;
-  }): string {
+  static generateIP(
+    ipVariable: {
+      inputType: string;
+      fullIp?: string;
+      isManagementInterface?: boolean;
+      isVlanInterface?: boolean;
+      vlanIndex?: number;
+      interfaceOffset?: number;
+    },
+    lab: ILab,
+    studentId: string,
+    managementIp?: string
+  ): string {
     // For fullIP type, use it directly
     if (ipVariable.inputType === 'fullIP' && ipVariable.fullIp) {
       return ipVariable.fullIp;
     }
 
-    // For student-generated IPs (Management, VLAN), return a placeholder
-    // These will be calculated by the frontend or provided by backend during lab execution
-    if (
-      ipVariable.inputType === 'studentManagement' ||
-      ipVariable.inputType.startsWith('studentVlan')
-    ) {
-      // Return placeholder - actual IP will be resolved during task execution
-      // Format: ${inputType}:${vlanIndex}:${interfaceOffset}
-      if (ipVariable.isVlanInterface && ipVariable.vlanIndex !== undefined) {
-        return `\${${ipVariable.inputType}:${ipVariable.vlanIndex}:${ipVariable.interfaceOffset || 1}}`;
-      } else if (ipVariable.isManagementInterface) {
-        return `\${${ipVariable.inputType}}`;
+    // For Management IPs, use the resolved IP from StudentLabSession
+    if (ipVariable.inputType === 'studentManagement' && ipVariable.isManagementInterface) {
+      if (managementIp) {
+        return managementIp;
+      }
+      // Fallback placeholder if not provided (shouldn't happen)
+      throw new Error('Management IP not provided for studentManagement interface');
+    }
+
+    // For VLAN IPs, calculate actual IP based on VLAN configuration
+    if (ipVariable.inputType.startsWith('studentVlan')) {
+      if (!ipVariable.isVlanInterface || ipVariable.vlanIndex === undefined) {
+        throw new Error(`Invalid VLAN interface configuration for ${ipVariable.inputType}`);
+      }
+
+      // Check if lab has VLAN configuration
+      if (!lab.network.vlanConfiguration || !lab.network.vlanConfiguration.vlans) {
+        throw new Error('Lab does not have VLAN configuration');
+      }
+
+      const vlan = lab.network.vlanConfiguration.vlans[ipVariable.vlanIndex];
+      if (!vlan) {
+        throw new Error(`VLAN at index ${ipVariable.vlanIndex} not found`);
+      }
+
+      const interfaceOffset = ipVariable.interfaceOffset || 1;
+
+      // Choose algorithm based on VLAN mode and configuration
+      if (vlan.calculationMultiplier !== undefined) {
+        // Use advanced algorithm for calculated VLANs
+        return calculateAdvancedStudentIP(
+          studentId,
+          {
+            baseNetwork: vlan.baseNetwork,
+            calculationMultiplier: vlan.calculationMultiplier
+          },
+          interfaceOffset
+        );
+      } else {
+        // Use basic student ID-based algorithm
+        return calculateStudentIdBasedIP(
+          vlan.baseNetwork,
+          studentId,
+          interfaceOffset
+        );
       }
     }
 
@@ -84,24 +129,33 @@ export class IPGenerator {
   /**
    * Generate devices array for grading job
    */
-  static async generateDevices(lab: ILab): Promise<GeneratedDevice[]> {
+  static async generateDevices(
+    lab: ILab,
+    studentId: string,
+    managementIp: string
+  ): Promise<GeneratedDevice[]> {
     const devices: GeneratedDevice[] = [];
 
     for (const labDevice of lab.network.devices) {
       const managementInterface = this.findManagementInterface(labDevice);
-      
+
       if (!managementInterface) {
         console.warn(`No management interface found for device ${labDevice.deviceId}`);
         continue;
       }
 
-      const managementIP = this.generateIP(managementInterface);
+      const resolvedManagementIP = this.generateIP(
+        managementInterface,
+        lab,
+        studentId,
+        managementIp
+      );
 
       const platform = await this.getPlatformFromTemplate(labDevice.templateId.toString());
 
       const device: GeneratedDevice = {
         id: labDevice.deviceId,
-        ip_address: managementIP,
+        ip_address: resolvedManagementIP,
         connection_type: 'ssh',
         credentials: {
           username: labDevice.credentials.usernameTemplate,
@@ -122,14 +176,18 @@ export class IPGenerator {
 
   /**
    * Generate IP mappings for task parameters
-   * Returns mapping of device.variableName to IP address (or placeholder for student-generated)
+   * Returns mapping of device.variableName to actual IP address
    */
-  static generateIPMappings(lab: ILab): Record<string, string> {
+  static generateIPMappings(
+    lab: ILab,
+    studentId: string,
+    managementIp: string
+  ): Record<string, string> {
     const mappings: Record<string, string> = {};
 
     for (const device of lab.network.devices) {
       for (const ipVar of device.ipVariables) {
-        const ip = this.generateIP(ipVar);
+        const ip = this.generateIP(ipVar, lab, studentId, managementIp);
 
         // Create mapping with device.variableName format (e.g., "router1.loopback0")
         const key = `${device.deviceId}.${ipVar.name}`;
@@ -141,25 +199,72 @@ export class IPGenerator {
   }
 
   /**
+   * Generate VLAN ID mappings for task parameters
+   * Returns mapping of vlanX to actual VLAN ID (e.g., {"vlan0": 134, "vlan1": 234})
+   */
+  static generateVLANMappings(lab: ILab, studentId: string): Record<string, number> {
+    const mappings: Record<string, number> = {};
+
+    // Only generate VLAN mappings if lab has VLAN configuration
+    if (!lab.network.vlanConfiguration || !lab.network.vlanConfiguration.vlans) {
+      return mappings;
+    }
+
+    const vlanConfig = lab.network.vlanConfiguration;
+    const vlanCount = vlanConfig.vlanCount;
+
+    // Generate VLAN IDs based on mode
+    if (vlanConfig.mode === 'calculated_vlan') {
+      // For calculated_vlan mode, calculate VLAN IDs per spec
+      const vlanIds = calculateStudentVLANs(studentId, vlanCount);
+
+      for (let i = 0; i < vlanIds.length; i++) {
+        mappings[`vlan${i}`] = vlanIds[i];
+      }
+    } else if (vlanConfig.mode === 'fixed_vlan') {
+      // For fixed_vlan mode, use the vlanId from configuration
+      for (let i = 0; i < vlanConfig.vlans.length; i++) {
+        const vlan = vlanConfig.vlans[i];
+        if (vlan.vlanId !== undefined) {
+          mappings[`vlan${i}`] = vlan.vlanId;
+        }
+      }
+    }
+    // Note: lecturer_group mode is for future group-based implementation
+
+    return mappings;
+  }
+
+  /**
    * Transform task parameters to replace IP variables with actual IPs
+   * Variable format: {{device.interface}} or {{variable}}
    */
   static transformTaskParameters(
-    parameters: Record<string, any>, 
-    ipMappings: Record<string, string>
+    parameters: Record<string, any>,
+    ipMappings: Record<string, string>,
+    vlanMappings?: Record<string, number>
   ): Record<string, any> {
     const transformed = { ...parameters };
 
     for (const [key, value] of Object.entries(transformed)) {
       if (typeof value === 'string') {
-        // Replace IP variable references like ${device.interface} or ${variable}
-        transformed[key] = value.replace(/\$\{([^}]+)\}/g, (match, varName) => {
-          return ipMappings[varName] || match;
+        // Replace IP variable references like {{device.interface}} or {{variable}}
+        let transformedValue = value.replace(/\{\{([^}]+)\}\}/g, (match, varName) => {
+          // Check IP mappings first
+          if (ipMappings[varName]) {
+            return ipMappings[varName];
+          }
+
+          // Check VLAN mappings (e.g., {{vlan0}}, {{vlan1}})
+          if (vlanMappings && vlanMappings[varName] !== undefined) {
+            return vlanMappings[varName].toString();
+          }
+
+          // If not found, return original match
+          return match;
         });
-        
-        // Direct variable replacement
-        if (ipMappings[value]) {
-          transformed[key] = ipMappings[value];
-        }
+
+        transformed[key] = transformedValue;
       }
     }
 
@@ -168,6 +273,7 @@ export class IPGenerator {
 
   /**
    * Complete job generation from lab and part data
+   * NOW RESOLVES MANAGEMENT IP AND CALCULATES ACTUAL VLAN IPs AT SUBMISSION TIME
    */
   static async generateJobFromLab(
     lab: ILab,
@@ -176,10 +282,21 @@ export class IPGenerator {
     jobId: string,
     callbackUrl: string
   ): Promise<any> {
-    const devices = await this.generateDevices(lab);
-    const ipMappings = this.generateIPMappings(lab);
+    // Get or create student lab session to get permanent Management IP
+    const labId = lab.id as Types.ObjectId;
+    const session = await StudentLabSessionService.getOrCreateSession(studentId, labId, lab);
+    const managementIp = session.managementIp;
 
-    // Transform tasks to use generated IPs and resolve template names
+    console.log(`[IP Resolution] Student ${studentId} - Lab ${labId} - Management IP: ${managementIp}`);
+
+    // Generate devices, IP mappings, and VLAN mappings
+    const devices = await this.generateDevices(lab, studentId, managementIp);
+    const ipMappings = this.generateIPMappings(lab, studentId, managementIp);
+    const vlanMappings = this.generateVLANMappings(lab, studentId);
+
+    console.log(`[VLAN Resolution] Student ${studentId} - VLAN IDs:`, vlanMappings);
+
+    // Transform tasks to use generated IPs/VLANs and resolve template names
     const transformedTasks = await Promise.all(part.tasks.map(async (task) => {
       // Fetch the actual template to get its templateId
       const template = await TaskTemplateService.getTaskTemplateById(task.templateId.toString());
@@ -191,7 +308,7 @@ export class IPGenerator {
         template_name: templateName,
         execution_device: task.executionDevice,
         target_devices: task.targetDevices || [],
-        parameters: this.transformTaskParameters(task.parameters, ipMappings),
+        parameters: this.transformTaskParameters(task.parameters, ipMappings, vlanMappings),
         test_cases: task.testCases.map(tc => ({
           comparison_type: tc.comparison_type,
           expected_result: tc.expected_result
@@ -212,6 +329,7 @@ export class IPGenerator {
       },
       devices,
       ip_mappings: ipMappings,
+      vlan_mappings: vlanMappings,
       callback_url: callbackUrl
     };
   }
