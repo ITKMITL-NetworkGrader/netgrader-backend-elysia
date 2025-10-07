@@ -296,8 +296,8 @@ export class IPGenerator {
     console.log(`[Lab Start] Student ${studentId} - Lab ${labId} - Management IP: ${managementIp}`);
 
     // Generate all IP mappings and VLAN mappings
-    const ipMappings = this.generateIPMappings(lab, studentId, managementIp);
-    const vlanMappings = this.generateVLANMappings(lab, studentId);
+    const ipMappings = IPGenerator.generateIPMappings(lab, studentId, managementIp);
+    const vlanMappings = IPGenerator.generateVLANMappings(lab, studentId);
 
     console.log(`[Lab Start] Student ${studentId} - Generated ${Object.keys(ipMappings).length} IP mappings, ${Object.keys(vlanMappings).length} VLAN mappings`);
 

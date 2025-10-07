@@ -175,6 +175,11 @@ export class StudentLabSessionService {
   /**
    * Calculate Management IP based on student index and lab network configuration
    * Uses enrollment-order algorithm and skips exempt IP ranges
+   *
+   * Algorithm:
+   * 1. Count how many exempt IPs exist BEFORE the student's position
+   * 2. Shift student's position by that count
+   * 3. This ensures students get unique sequential non-exempt IPs
    */
   private static async calculateManagementIP(
     lab: ILab,
@@ -182,27 +187,25 @@ export class StudentLabSessionService {
   ): Promise<string> {
     try {
       const baseIp = lab.network.topology.baseNetwork;
-      const subnetMask = lab.network.topology.subnetMask;
       const exemptRanges = lab.network.topology.exemptIpRanges;
 
       // Convert base IP to long integer
       const baseIpLong = this.ipToLong(baseIp);
 
-      // Calculate student subnet offset
-      const studentOffset = studentIndex * Math.pow(2, (32 - subnetMask));
+      // Management IP: Sequential assignment within the management network
+      // Start from baseIP + studentIndex
+      let offset = studentIndex;
+      let candidateIpLong = baseIpLong + offset;
+      let candidateIp = this.longToIp(candidateIpLong);
 
-      // Management IP is at the first host in student's subnet
-      // Typically: base + studentOffset + 1 (skip network address)
-      let managementIpLong = baseIpLong + studentOffset + 1;
-      let candidateIp = this.longToIp(managementIpLong);
-
-      // Skip exempt IPs with max attempts protection
+      // Skip exempt IPs by incrementing offset
       let attempts = 0;
       const maxAttempts = 1000;
 
       while (this.isIpInExemptRanges(candidateIp, exemptRanges) && attempts < maxAttempts) {
-        managementIpLong++;
-        candidateIp = this.longToIp(managementIpLong);
+        offset++;
+        candidateIpLong = baseIpLong + offset;
+        candidateIp = this.longToIp(candidateIpLong);
         attempts++;
       }
 
