@@ -13,6 +13,10 @@ export interface ILab extends Document {
       baseNetwork: string;     // "10.0.0.0" - Management network
       subnetMask: number;      // 24
       allocationStrategy: 'student_id_based' | 'group_based';
+      exemptIpRanges?: Array<{
+        start: string;         // IPv4 address (e.g., "10.0.0.1")
+        end?: string;          // Optional: IPv4 address for range end
+      }>;
     };
     // VLAN Configuration for multi-phase VLAN system
     vlanConfiguration?: {
@@ -119,6 +123,29 @@ const labSchema = new Schema<ILab>({
         type: String,
         enum: ['student_id_based', 'group_based'],
         required: true
+      },
+      exemptIpRanges: {
+        type: [{
+          _id: false,
+          start: {
+            type: String,
+            required: true,
+            validate: {
+              validator: (v: string) => /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(v),
+              message: 'Invalid IPv4 address format'
+            }
+          },
+          end: {
+            type: String,
+            required: false,
+            validate: {
+              validator: (v: string) => !v || /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(v),
+              message: 'Invalid IPv4 address format'
+            }
+          }
+        }],
+        required: false,
+        default: []
       }
     },
     vlanConfiguration: {

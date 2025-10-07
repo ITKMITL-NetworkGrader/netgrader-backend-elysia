@@ -174,7 +174,7 @@ export class StudentLabSessionService {
 
   /**
    * Calculate Management IP based on student index and lab network configuration
-   * Uses enrollment-order algorithm from ip-allocation.ts
+   * Uses enrollment-order algorithm and skips exempt IP ranges
    */
   private static async calculateManagementIP(
     lab: ILab,
@@ -183,6 +183,7 @@ export class StudentLabSessionService {
     try {
       const baseIp = lab.network.topology.baseNetwork;
       const subnetMask = lab.network.topology.subnetMask;
+      const exemptRanges = lab.network.topology.exemptIpRanges;
 
       // Convert base IP to long integer
       const baseIpLong = this.ipToLong(baseIp);
@@ -192,12 +193,71 @@ export class StudentLabSessionService {
 
       // Management IP is at the first host in student's subnet
       // Typically: base + studentOffset + 1 (skip network address)
-      const managementIpLong = baseIpLong + studentOffset + 1;
+      let managementIpLong = baseIpLong + studentOffset + 1;
+      let candidateIp = this.longToIp(managementIpLong);
 
-      return this.longToIp(managementIpLong);
+      // Skip exempt IPs with max attempts protection
+      let attempts = 0;
+      const maxAttempts = 1000;
+
+      while (this.isIpInExemptRanges(candidateIp, exemptRanges) && attempts < maxAttempts) {
+        managementIpLong++;
+        candidateIp = this.longToIp(managementIpLong);
+        attempts++;
+      }
+
+      if (attempts >= maxAttempts) {
+        const exemptCount = exemptRanges?.length || 0;
+        const totalExemptIps = exemptRanges?.reduce((sum, range) => {
+          if (range.end) {
+            return sum + (this.ipToLong(range.end) - this.ipToLong(range.start) + 1);
+          }
+          return sum + 1;
+        }, 0) || 0;
+
+        throw new Error(
+          `Unable to assign Management IP for student index ${studentIndex}. ` +
+          `Too many exempt ranges (${exemptCount} ranges, ${totalExemptIps} IPs exempt). ` +
+          `Please reduce exempt ranges or expand management network.`
+        );
+      }
+
+      // Log if IPs were skipped (for debugging)
+      if (attempts > 0) {
+        console.log(
+          `[IP Assignment] Student index ${studentIndex} skipped ${attempts} exempt IP(s), assigned ${candidateIp}`
+        );
+      }
+
+      return candidateIp;
     } catch (error) {
       throw new Error(`Error calculating management IP: ${(error as Error).message}`);
     }
+  }
+
+  /**
+   * Check if IP is in any exempt range
+   */
+  private static isIpInExemptRanges(
+    ip: string,
+    exemptRanges: Array<{ start: string; end?: string }> | undefined
+  ): boolean {
+    if (!exemptRanges || exemptRanges.length === 0) {
+      return false;
+    }
+
+    const ipNum = this.ipToLong(ip);
+
+    for (const range of exemptRanges) {
+      const startNum = this.ipToLong(range.start);
+      const endNum = range.end ? this.ipToLong(range.end) : startNum;
+
+      if (ipNum >= startNum && ipNum <= endNum) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -256,5 +316,131 @@ export class StudentLabSessionService {
       (long >>> 8) & 0xFF,
       long & 0xFF
     ].join('.');
+  }
+
+  /**
+   * Calculate available IP capacity considering exempt ranges
+   * Returns capacity information for validation
+   */
+  static async calculateIpCapacity(
+    lab: ILab
+  ): Promise<{
+    totalIps: number;
+    exemptCount: number;
+    available: number;
+    enrolledStudents: number;
+    sufficient: boolean;
+  }> {
+    try {
+      const { baseNetwork, subnetMask, exemptIpRanges } = lab.network.topology;
+
+      // Total usable IPs in management network (excluding network & broadcast)
+      const totalIps = Math.pow(2, 32 - subnetMask) - 2;
+
+      // Count exempt IPs
+      let exemptCount = 0;
+      if (exemptIpRanges && exemptIpRanges.length > 0) {
+        for (const range of exemptIpRanges) {
+          if (range.end) {
+            const startNum = this.ipToLong(range.start);
+            const endNum = this.ipToLong(range.end);
+            exemptCount += (endNum - startNum + 1);
+          } else {
+            exemptCount += 1;
+          }
+        }
+      }
+
+      // Count enrolled STUDENTS in this lab's course
+      const enrolledStudents = await Enrollment.countDocuments({
+        c_id: lab.courseId.toString(),
+        u_role: 'STUDENT'
+      });
+
+      const available = totalIps - exemptCount;
+      const sufficient = available >= enrolledStudents;
+
+      return {
+        totalIps,
+        exemptCount,
+        available,
+        enrolledStudents,
+        sufficient
+      };
+    } catch (error) {
+      throw new Error(`Error calculating IP capacity: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Find sessions that would conflict with new exempt ranges
+   */
+  static async findConflictingSessions(
+    labId: Types.ObjectId,
+    newExemptRanges: Array<{ start: string; end?: string }>
+  ): Promise<Array<{ studentId: string; managementIp: string }>> {
+    if (!newExemptRanges || newExemptRanges.length === 0) {
+      return [];
+    }
+
+    const activeSessions = await StudentLabSession.find({
+      labId,
+      status: 'active'
+    });
+
+    const conflicts: Array<{ studentId: string; managementIp: string }> = [];
+
+    for (const session of activeSessions) {
+      const ipNum = this.ipToLong(session.managementIp);
+
+      for (const range of newExemptRanges) {
+        const startNum = this.ipToLong(range.start);
+        const endNum = range.end ? this.ipToLong(range.end) : startNum;
+
+        if (ipNum >= startNum && ipNum <= endNum) {
+          conflicts.push({
+            studentId: session.studentId,
+            managementIp: session.managementIp
+          });
+          break; // No need to check other ranges for this session
+        }
+      }
+    }
+
+    return conflicts;
+  }
+
+  /**
+   * Reassign Management IPs for conflicted sessions
+   * Called when instructor confirms exempt range update that conflicts with active sessions
+   */
+  static async reassignConflictedIPs(
+    labId: Types.ObjectId,
+    lab: ILab,
+    conflictedStudentIds: string[]
+  ): Promise<number> {
+    let reassignedCount = 0;
+
+    for (const studentId of conflictedStudentIds) {
+      const session = await StudentLabSession.findOne({
+        studentId,
+        labId,
+        status: 'active'
+      });
+
+      if (!session) continue;
+
+      // Calculate new Management IP that avoids exempt ranges
+      const newManagementIp = await this.calculateManagementIP(lab, session.studentIndex);
+
+      // Update session with new IP
+      session.managementIp = newManagementIp;
+      session.lastAccessedAt = new Date();
+      await session.save();
+
+      reassignedCount++;
+    }
+
+    return reassignedCount;
   }
 }

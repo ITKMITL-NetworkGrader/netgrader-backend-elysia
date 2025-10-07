@@ -272,4 +272,108 @@ export class VlanValidator {
       errors
     };
   }
+
+  /**
+   * Validate exempt IP ranges for Management network
+   */
+  static validateExemptRanges(
+    exemptRanges: Array<{ start: string; end?: string }>,
+    baseNetwork: string,
+    subnetMask: number
+  ): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    // 1. Max 20 ranges
+    if (exemptRanges.length > 20) {
+      errors.push('Maximum 20 exempt ranges allowed');
+    }
+
+    // 2. Validate each range
+    for (let i = 0; i < exemptRanges.length; i++) {
+      const range = exemptRanges[i];
+
+      // Valid IPv4 format
+      if (!this.isValidIPv4(range.start)) {
+        errors.push(`Range ${i + 1}: Invalid start IP '${range.start}'`);
+        continue; // Skip further validation for this range
+      }
+
+      if (range.end && !this.isValidIPv4(range.end)) {
+        errors.push(`Range ${i + 1}: Invalid end IP '${range.end}'`);
+        continue;
+      }
+
+      // Range logic (start <= end)
+      if (range.end) {
+        const startNum = this.ipToNumber(range.start);
+        const endNum = this.ipToNumber(range.end);
+        if (startNum > endNum) {
+          errors.push(
+            `Range ${i + 1}: Invalid range ${range.start} - ${range.end} (start > end)`
+          );
+        }
+      }
+
+      // Within management network boundaries
+      if (!this.isIpInNetwork(range.start, baseNetwork, subnetMask)) {
+        errors.push(
+          `Range ${i + 1}: IP ${range.start} is outside management network ${baseNetwork}/${subnetMask}`
+        );
+      }
+
+      if (range.end && !this.isIpInNetwork(range.end, baseNetwork, subnetMask)) {
+        errors.push(
+          `Range ${i + 1}: IP ${range.end} is outside management network ${baseNetwork}/${subnetMask}`
+        );
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  /**
+   * Convert IP address to number for comparison
+   */
+  static ipToNumber(ip: string): number {
+    const parts = ip.split('.').map(Number);
+    return (parts[0] * 16777216) + (parts[1] * 65536) + (parts[2] * 256) + parts[3];
+  }
+
+  /**
+   * Check if IP is within network boundaries
+   */
+  static isIpInNetwork(ip: string, baseNetwork: string, subnetMask: number): boolean {
+    const ipNum = this.ipToNumber(ip);
+    const networkNum = this.ipToNumber(baseNetwork);
+    const maskBits = 0xFFFFFFFF << (32 - subnetMask);
+    return (ipNum & maskBits) === (networkNum & maskBits);
+  }
+
+  /**
+   * Check if IP is in any exempt range
+   */
+  static isIpInExemptRanges(
+    ip: string,
+    exemptRanges: Array<{ start: string; end?: string }> | undefined
+  ): boolean {
+    if (!exemptRanges || exemptRanges.length === 0) {
+      return false;
+    }
+
+    const ipNum = this.ipToNumber(ip);
+
+    for (const range of exemptRanges) {
+      const startNum = this.ipToNumber(range.start);
+      const endNum = range.end ? this.ipToNumber(range.end) : startNum;
+
+      if (ipNum >= startNum && ipNum <= endNum) {
+        return true;
+      }
+    }
+
+    return false;
+  }
 }
