@@ -94,4 +94,113 @@ export const sessionCleanupRoutes = new Elysia({ prefix: "/admin/sessions" })
         description: "Get current statistics about active, completed, and expiring sessions"
       }
     }
+  )
+  .get(
+    "/student/:studentId/lab/:labId",
+    async ({ params, set }) => {
+      try {
+        const { StudentLabSession } = await import("../student-lab-sessions/model");
+        const { Submission } = await import("../submissions/model");
+        const { PartService } = await import("../parts/service");
+        const { Types } = await import("mongoose");
+
+        const labObjectId = new Types.ObjectId(params.labId);
+
+        // Get session
+        const session = await StudentLabSession.findOne({
+          studentId: params.studentId,
+          labId: labObjectId,
+          status: "active"
+        });
+
+        if (!session) {
+          return {
+            status: "success",
+            data: {
+              hasActiveSession: false,
+              message: "No active session found for this student-lab combination"
+            }
+          };
+        }
+
+        // Get all parts for this lab
+        const partsResponse = await PartService.getPartsByLab(params.labId);
+        const totalParts = partsResponse.parts.length;
+        const partIds = partsResponse.parts.map(p => p.partId);
+
+        // Check completion status for each part
+        const partCompletionStatus = [];
+        let completedParts = 0;
+
+        for (const partId of partIds) {
+          const submissions = await Submission.find({
+            studentId: params.studentId,
+            labId: labObjectId,
+            partId,
+            status: "completed"
+          }).sort({ attempt: -1 });
+
+          const perfectSubmission = submissions.find(s =>
+            s.gradingResult &&
+            s.gradingResult.total_points_earned === s.gradingResult.total_points_possible &&
+            s.gradingResult.total_points_possible > 0
+          );
+
+          const hasCompleted = !!perfectSubmission;
+          if (hasCompleted) completedParts++;
+
+          partCompletionStatus.push({
+            partId,
+            completed: hasCompleted,
+            bestScore: perfectSubmission
+              ? `${perfectSubmission.gradingResult?.total_points_earned}/${perfectSubmission.gradingResult?.total_points_possible}`
+              : submissions.length > 0
+                ? `${submissions[0].gradingResult?.total_points_earned}/${submissions[0].gradingResult?.total_points_possible}`
+                : "No submissions",
+            attempts: submissions.length
+          });
+        }
+
+        return {
+          status: "success",
+          data: {
+            hasActiveSession: true,
+            session: {
+              sessionId: session._id,
+              managementIp: session.managementIp,
+              studentIndex: session.studentIndex,
+              status: session.status,
+              startedAt: session.startedAt,
+              lastAccessedAt: session.lastAccessedAt
+            },
+            progress: {
+              totalParts,
+              completedParts,
+              percentComplete: Math.round((completedParts / totalParts) * 100),
+              willReleaseIp: completedParts === totalParts,
+              parts: partCompletionStatus
+            }
+          }
+        };
+      } catch (error) {
+        console.error("Error fetching student session:", error);
+        set.status = 500;
+        return {
+          status: "error",
+          message: `Failed to fetch session: ${(error as Error).message}`
+        };
+      }
+    },
+    {
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      params: t.Object({
+        studentId: t.String(),
+        labId: t.String()
+      }),
+      detail: {
+        tags: ["Admin"],
+        summary: "Get student session details for a specific lab",
+        description: "Shows session status, IP assignment, and part completion progress. Useful for debugging IP release logic."
+      }
+    }
   );

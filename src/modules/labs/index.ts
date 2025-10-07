@@ -3,6 +3,7 @@ import { LabService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 import { IpAllocationService } from "../../services/ip-allocation";
 import { VlanValidator } from "../../utils/vlan-validator";
+import { IPGenerator } from "../submissions/ip-generator";
 
 // Updated schemas for the embedded network model with VLAN support
 const LabBodySchema = t.Object({
@@ -205,7 +206,7 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
     async ({ params, set }) => {
       try {
         const lab = await LabService.getLabById(params.id);
-        
+
         if (!lab) {
           set.status = 404;
           return {
@@ -234,6 +235,100 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
       detail: {
         tags: ["Labs"],
         summary: "Get Lab by ID"
+      }
+    }
+  )
+
+  // Start lab - Generate network configuration for student
+  .post(
+    "/:id/start",
+    async ({ params, set, authPlugin }) => {
+      try {
+        const { u_id } = authPlugin ?? { u_id: "" };
+
+        if (!u_id) {
+          set.status = 401;
+          return {
+            success: false,
+            message: "Authentication required"
+          };
+        }
+
+        // Fetch lab
+        const lab = await LabService.getLabById(params.id);
+
+        if (!lab) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Lab not found"
+          };
+        }
+
+        // Check if lab is published
+        // if (!lab.publishedAt) {
+        //   set.status = 403;
+        //   return {
+        //     success: false,
+        //     message: "Lab is not published yet"
+        //   };
+        // }
+
+        // // Check if lab is available (within availableFrom and availableUntil window)
+        // const now = new Date();
+        // if (lab.availableFrom && now < lab.availableFrom) {
+        //   set.status = 403;
+        //   return {
+        //     success: false,
+        //     message: "Lab is not available yet",
+        //     availableFrom: lab.availableFrom
+        //   };
+        // }
+
+        // if (lab.availableUntil && now > lab.availableUntil) {
+        //   set.status = 403;
+        //   return {
+        //     success: false,
+        //     message: "Lab is no longer available",
+        //     availableUntil: lab.availableUntil
+        //   };
+        // }
+
+        // Generate complete network configuration
+        const networkConfig = await IPGenerator.generateStudentNetworkConfiguration(lab, u_id);
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Lab started successfully",
+          data: {
+            labId: lab.id?.toString(),
+            labTitle: lab.title,
+            session: networkConfig.sessionInfo,
+            networkConfiguration: {
+              managementIp: networkConfig.managementIp,
+              ipMappings: networkConfig.ipMappings,
+              vlanMappings: networkConfig.vlanMappings
+            }
+          }
+        };
+      } catch (error) {
+        console.error('[Lab Start Error]', error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error starting lab",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      beforeHandle: requireRole(["STUDENT", "INSTRUCTOR", "ADMIN"]),
+      detail: {
+        tags: ["Labs"],
+        summary: "Start Lab - Generate Network Configuration",
+        description: "Creates/retrieves student lab session and generates all IP addresses (Management + VLAN) and VLAN IDs for the student to configure their devices"
       }
     }
   )

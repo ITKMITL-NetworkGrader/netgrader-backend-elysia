@@ -272,6 +272,48 @@ export class IPGenerator {
   }
 
   /**
+   * Generate complete network configuration for student when they START a lab
+   * Returns all IPs (Management + VLAN) and VLAN IDs for frontend display
+   */
+  static async generateStudentNetworkConfiguration(
+    lab: ILab,
+    studentId: string
+  ): Promise<{
+    managementIp: string;
+    ipMappings: Record<string, string>;
+    vlanMappings: Record<string, number>;
+    sessionInfo: {
+      sessionId: string;
+      status: string;
+      startedAt: Date;
+    };
+  }> {
+    // Get or create student lab session to get permanent Management IP
+    const labId = lab.id as Types.ObjectId;
+    const session = await StudentLabSessionService.getOrCreateSession(studentId, labId, lab);
+    const managementIp = session.managementIp;
+
+    console.log(`[Lab Start] Student ${studentId} - Lab ${labId} - Management IP: ${managementIp}`);
+
+    // Generate all IP mappings and VLAN mappings
+    const ipMappings = this.generateIPMappings(lab, studentId, managementIp);
+    const vlanMappings = this.generateVLANMappings(lab, studentId);
+
+    console.log(`[Lab Start] Student ${studentId} - Generated ${Object.keys(ipMappings).length} IP mappings, ${Object.keys(vlanMappings).length} VLAN mappings`);
+
+    return {
+      managementIp,
+      ipMappings,
+      vlanMappings,
+      sessionInfo: {
+        sessionId: session.id?.toString() || '',
+        status: session.status,
+        startedAt: session.startedAt
+      }
+    };
+  }
+
+  /**
    * Complete job generation from lab and part data
    * NOW RESOLVES MANAGEMENT IP AND CALCULATES ACTUAL VLAN IPs AT SUBMISSION TIME
    */
