@@ -1,0 +1,518 @@
+{
+  "description": "Test lab data for Exempt IP Ranges feature",
+  "note": "This file contains test scenarios for creating labs with exempt IP ranges",
+
+  "scenarios": [
+    {
+      "name": "Scenario 1: Single Gateway Exempt IP",
+      "description": "Exempt only the gateway IP (10.0.0.1)",
+      "endpoint": "POST /api/labs",
+      "payload": {
+        "courseId": "YOUR_COURSE_ID_HERE",
+        "title": "Test Lab - Gateway Exempt",
+        "description": "Testing single IP exemption for gateway",
+        "type": "lab",
+        "network": {
+          "name": "Basic Network with Gateway Exempt",
+          "topology": {
+            "baseNetwork": "10.0.0.0",
+            "subnetMask": 24,
+            "allocationStrategy": "student_id_based",
+            "exemptIpRanges": [
+              {
+                "start": "10.0.0.1"
+              }
+            ]
+          },
+          "devices": [
+            {
+              "deviceId": "router1",
+              "templateId": "YOUR_TEMPLATE_ID_HERE",
+              "displayName": "Router 1",
+              "ipVariables": [
+                {
+                  "name": "mgmt",
+                  "interface": "GigabitEthernet0/0",
+                  "inputType": "studentManagement",
+                  "isManagementInterface": true,
+                  "description": "Management interface"
+                }
+              ],
+              "credentials": {
+                "usernameTemplate": "admin",
+                "passwordTemplate": "cisco123",
+                "enablePassword": "cisco123"
+              }
+            }
+          ]
+        }
+      },
+      "expectedBehavior": {
+        "totalIps": 254,
+        "exemptIps": 1,
+        "availableIps": 253,
+        "studentWithIndex1ShouldGet": "10.0.0.2",
+        "note": "Student index 1 should skip 10.0.0.1 and get 10.0.0.2"
+      }
+    },
+
+    {
+      "name": "Scenario 2: Infrastructure Range Exempt",
+      "description": "Exempt IPs 10.0.0.1 through 10.0.0.10 for infrastructure",
+      "endpoint": "POST /api/labs",
+      "payload": {
+        "courseId": "YOUR_COURSE_ID_HERE",
+        "title": "Test Lab - Infrastructure Range Exempt",
+        "description": "Testing IP range exemption for infrastructure devices",
+        "type": "lab",
+        "network": {
+          "name": "Network with Infrastructure Range",
+          "topology": {
+            "baseNetwork": "10.0.0.0",
+            "subnetMask": 24,
+            "allocationStrategy": "student_id_based",
+            "exemptIpRanges": [
+              {
+                "start": "10.0.0.1",
+                "end": "10.0.0.10"
+              }
+            ]
+          },
+          "devices": [
+            {
+              "deviceId": "router1",
+              "templateId": "YOUR_TEMPLATE_ID_HERE",
+              "displayName": "Router 1",
+              "ipVariables": [
+                {
+                  "name": "mgmt",
+                  "interface": "GigabitEthernet0/0",
+                  "inputType": "studentManagement",
+                  "isManagementInterface": true,
+                  "description": "Management interface"
+                }
+              ],
+              "credentials": {
+                "usernameTemplate": "admin",
+                "passwordTemplate": "cisco123",
+                "enablePassword": "cisco123"
+              }
+            }
+          ]
+        }
+      },
+      "expectedBehavior": {
+        "totalIps": 254,
+        "exemptIps": 10,
+        "availableIps": 244,
+        "studentWithIndex1ShouldGet": "10.0.0.11",
+        "studentWithIndex5ShouldGet": "10.0.0.15",
+        "note": "Students should get IPs starting from 10.0.0.11"
+      }
+    },
+
+    {
+      "name": "Scenario 3: Multiple Exempt Ranges",
+      "description": "Multiple exempt ranges for different purposes",
+      "endpoint": "POST /api/labs",
+      "payload": {
+        "courseId": "YOUR_COURSE_ID_HERE",
+        "title": "Test Lab - Multiple Exempt Ranges",
+        "description": "Testing multiple exempt ranges: gateway, infrastructure, and reserved block",
+        "type": "lab",
+        "network": {
+          "name": "Network with Multiple Exempt Ranges",
+          "topology": {
+            "baseNetwork": "10.0.0.0",
+            "subnetMask": 24,
+            "allocationStrategy": "student_id_based",
+            "exemptIpRanges": [
+              {
+                "start": "10.0.0.1",
+                "comment": "Gateway"
+              },
+              {
+                "start": "10.0.0.5",
+                "end": "10.0.0.15",
+                "comment": "Infrastructure devices"
+              },
+              {
+                "start": "10.0.0.100",
+                "end": "10.0.0.150",
+                "comment": "Reserved block"
+              }
+            ]
+          },
+          "devices": [
+            {
+              "deviceId": "router1",
+              "templateId": "YOUR_TEMPLATE_ID_HERE",
+              "displayName": "Router 1",
+              "ipVariables": [
+                {
+                  "name": "mgmt",
+                  "interface": "GigabitEthernet0/0",
+                  "inputType": "studentManagement",
+                  "isManagementInterface": true,
+                  "description": "Management interface"
+                }
+              ],
+              "credentials": {
+                "usernameTemplate": "admin",
+                "passwordTemplate": "cisco123",
+                "enablePassword": "cisco123"
+              }
+            }
+          ]
+        }
+      },
+      "expectedBehavior": {
+        "totalIps": 254,
+        "exemptIps": 63,
+        "availableIps": 191,
+        "studentWithIndex1ShouldGet": "10.0.0.2",
+        "studentWithIndex5ShouldGet": "10.0.0.16",
+        "note": "Students should skip all exempt ranges"
+      }
+    },
+
+    {
+      "name": "Scenario 4: No Exempt Ranges (Control)",
+      "description": "Normal lab without any exempt ranges for comparison",
+      "endpoint": "POST /api/labs",
+      "payload": {
+        "courseId": "YOUR_COURSE_ID_HERE",
+        "title": "Test Lab - No Exemptions",
+        "description": "Control lab with no exempt IP ranges",
+        "type": "lab",
+        "network": {
+          "name": "Normal Network",
+          "topology": {
+            "baseNetwork": "10.0.0.0",
+            "subnetMask": 24,
+            "allocationStrategy": "student_id_based",
+            "exemptIpRanges": []
+          },
+          "devices": [
+            {
+              "deviceId": "router1",
+              "templateId": "YOUR_TEMPLATE_ID_HERE",
+              "displayName": "Router 1",
+              "ipVariables": [
+                {
+                  "name": "mgmt",
+                  "interface": "GigabitEthernet0/0",
+                  "inputType": "studentManagement",
+                  "isManagementInterface": true,
+                  "description": "Management interface"
+                }
+              ],
+              "credentials": {
+                "usernameTemplate": "admin",
+                "passwordTemplate": "cisco123",
+                "enablePassword": "cisco123"
+              }
+            }
+          ]
+        }
+      },
+      "expectedBehavior": {
+        "totalIps": 254,
+        "exemptIps": 0,
+        "availableIps": 254,
+        "studentWithIndex1ShouldGet": "10.0.0.1",
+        "note": "No IPs are skipped, normal assignment"
+      }
+    },
+
+    {
+      "name": "Scenario 5: Validation Test - Invalid IP Format",
+      "description": "Should fail validation - invalid IP format",
+      "endpoint": "POST /api/labs",
+      "payload": {
+        "courseId": "YOUR_COURSE_ID_HERE",
+        "title": "Test Lab - Invalid IP",
+        "description": "This should fail validation",
+        "type": "lab",
+        "network": {
+          "name": "Invalid Network",
+          "topology": {
+            "baseNetwork": "10.0.0.0",
+            "subnetMask": 24,
+            "allocationStrategy": "student_id_based",
+            "exemptIpRanges": [
+              {
+                "start": "10.0.0.999",
+                "comment": "Invalid IP - should fail"
+              }
+            ]
+          },
+          "devices": [
+            {
+              "deviceId": "router1",
+              "templateId": "YOUR_TEMPLATE_ID_HERE",
+              "displayName": "Router 1",
+              "ipVariables": [
+                {
+                  "name": "mgmt",
+                  "interface": "GigabitEthernet0/0",
+                  "inputType": "studentManagement",
+                  "isManagementInterface": true,
+                  "description": "Management interface"
+                }
+              ],
+              "credentials": {
+                "usernameTemplate": "admin",
+                "passwordTemplate": "cisco123",
+                "enablePassword": "cisco123"
+              }
+            }
+          ]
+        }
+      },
+      "expectedResult": "400 Bad Request",
+      "expectedError": "Invalid start IP '10.0.0.999'"
+    },
+
+    {
+      "name": "Scenario 6: Validation Test - Out of Network",
+      "description": "Should fail validation - IP outside management network",
+      "endpoint": "POST /api/labs",
+      "payload": {
+        "courseId": "YOUR_COURSE_ID_HERE",
+        "title": "Test Lab - Out of Network",
+        "description": "This should fail validation",
+        "type": "lab",
+        "network": {
+          "name": "Invalid Network",
+          "topology": {
+            "baseNetwork": "10.0.0.0",
+            "subnetMask": 24,
+            "allocationStrategy": "student_id_based",
+            "exemptIpRanges": [
+              {
+                "start": "192.168.1.1",
+                "comment": "Outside management network - should fail"
+              }
+            ]
+          },
+          "devices": [
+            {
+              "deviceId": "router1",
+              "templateId": "YOUR_TEMPLATE_ID_HERE",
+              "displayName": "Router 1",
+              "ipVariables": [
+                {
+                  "name": "mgmt",
+                  "interface": "GigabitEthernet0/0",
+                  "inputType": "studentManagement",
+                  "isManagementInterface": true,
+                  "description": "Management interface"
+                }
+              ],
+              "credentials": {
+                "usernameTemplate": "admin",
+                "passwordTemplate": "cisco123",
+                "enablePassword": "cisco123"
+              }
+            }
+          ]
+        }
+      },
+      "expectedResult": "400 Bad Request",
+      "expectedError": "IP 192.168.1.1 is outside management network 10.0.0.0/24"
+    },
+
+    {
+      "name": "Scenario 7: Validation Test - Invalid Range (start > end)",
+      "description": "Should fail validation - start IP greater than end IP",
+      "endpoint": "POST /api/labs",
+      "payload": {
+        "courseId": "YOUR_COURSE_ID_HERE",
+        "title": "Test Lab - Invalid Range",
+        "description": "This should fail validation",
+        "type": "lab",
+        "network": {
+          "name": "Invalid Network",
+          "topology": {
+            "baseNetwork": "10.0.0.0",
+            "subnetMask": 24,
+            "allocationStrategy": "student_id_based",
+            "exemptIpRanges": [
+              {
+                "start": "10.0.0.20",
+                "end": "10.0.0.10",
+                "comment": "start > end - should fail"
+              }
+            ]
+          },
+          "devices": [
+            {
+              "deviceId": "router1",
+              "templateId": "YOUR_TEMPLATE_ID_HERE",
+              "displayName": "Router 1",
+              "ipVariables": [
+                {
+                  "name": "mgmt",
+                  "interface": "GigabitEthernet0/0",
+                  "inputType": "studentManagement",
+                  "isManagementInterface": true,
+                  "description": "Management interface"
+                }
+              ],
+              "credentials": {
+                "usernameTemplate": "admin",
+                "passwordTemplate": "cisco123",
+                "enablePassword": "cisco123"
+              }
+            }
+          ]
+        }
+      },
+      "expectedResult": "400 Bad Request",
+      "expectedError": "Invalid range 10.0.0.20 - 10.0.0.10 (start > end)"
+    },
+
+    {
+      "name": "Scenario 8: Insufficient Capacity Test",
+      "description": "Should fail - too many exempt IPs for enrolled students",
+      "endpoint": "POST /api/labs",
+      "note": "Only use if course has >50 enrolled students",
+      "payload": {
+        "courseId": "YOUR_COURSE_ID_HERE",
+        "title": "Test Lab - Insufficient Capacity",
+        "description": "This should fail if course has many students",
+        "type": "lab",
+        "network": {
+          "name": "Overcrowded Network",
+          "topology": {
+            "baseNetwork": "10.0.0.0",
+            "subnetMask": 28,
+            "allocationStrategy": "student_id_based",
+            "exemptIpRanges": [
+              {
+                "start": "10.0.0.1",
+                "end": "10.0.0.10",
+                "comment": "Exempt 10 IPs from /28 (only 14 usable)"
+              }
+            ]
+          },
+          "devices": [
+            {
+              "deviceId": "router1",
+              "templateId": "YOUR_TEMPLATE_ID_HERE",
+              "displayName": "Router 1",
+              "ipVariables": [
+                {
+                  "name": "mgmt",
+                  "interface": "GigabitEthernet0/0",
+                  "inputType": "studentManagement",
+                  "isManagementInterface": true,
+                  "description": "Management interface"
+                }
+              ],
+              "credentials": {
+                "usernameTemplate": "admin",
+                "passwordTemplate": "cisco123",
+                "enablePassword": "cisco123"
+              }
+            }
+          ]
+        }
+      },
+      "expectedResult": "400 Bad Request",
+      "expectedError": "Insufficient IP capacity for enrolled students",
+      "note": "/28 = 14 usable IPs, 10 exempt = 4 available. Fails if >4 students enrolled."
+    }
+  ],
+
+  "testingSteps": {
+    "step1": {
+      "description": "Get your Course ID and Template ID",
+      "commands": [
+        "GET /api/courses - Copy a courseId from your courses",
+        "GET /api/templates - Copy a templateId (any device template)"
+      ]
+    },
+    "step2": {
+      "description": "Replace placeholders in test data",
+      "action": "Replace 'YOUR_COURSE_ID_HERE' and 'YOUR_TEMPLATE_ID_HERE' in each scenario"
+    },
+    "step3": {
+      "description": "Test Scenario 1 - Single Gateway Exempt",
+      "action": "POST /api/labs with Scenario 1 payload",
+      "expectedResult": "201 Created - Lab created successfully"
+    },
+    "step4": {
+      "description": "Start the lab as a student",
+      "action": "POST /api/labs/{labId}/start",
+      "expectedResult": "Should receive managementIp: '10.0.0.2' (skipped 10.0.0.1)"
+    },
+    "step5": {
+      "description": "Test Scenario 2 - Infrastructure Range",
+      "action": "POST /api/labs with Scenario 2 payload",
+      "expectedResult": "201 Created"
+    },
+    "step6": {
+      "description": "Start the lab as a student",
+      "action": "POST /api/labs/{labId}/start",
+      "expectedResult": "Should receive managementIp: '10.0.0.11' (skipped 10.0.0.1-10)"
+    },
+    "step7": {
+      "description": "Test Scenario 3 - Multiple Ranges",
+      "action": "POST /api/labs with Scenario 3 payload",
+      "expectedResult": "201 Created - Complex exemptions should work"
+    },
+    "step8": {
+      "description": "Test Scenario 5 - Invalid IP Format",
+      "action": "POST /api/labs with Scenario 5 payload",
+      "expectedResult": "400 Bad Request with error: 'Invalid start IP'"
+    },
+    "step9": {
+      "description": "Test Scenario 6 - Out of Network",
+      "action": "POST /api/labs with Scenario 6 payload",
+      "expectedResult": "400 Bad Request with error about network boundaries"
+    },
+    "step10": {
+      "description": "Test Scenario 7 - Invalid Range",
+      "action": "POST /api/labs with Scenario 7 payload",
+      "expectedResult": "400 Bad Request with error: 'start > end'"
+    },
+    "step11": {
+      "description": "Test Lab Update with Conflict",
+      "steps": [
+        "1. Create lab from Scenario 4 (no exemptions)",
+        "2. Start lab as student (you'll get an IP like 10.0.0.1)",
+        "3. Update lab to add exemption for 10.0.0.1 (your current IP)",
+        "4. Should receive 409 Conflict with warning",
+        "5. Retry with ?confirmed=true query parameter",
+        "6. Should receive 200 OK with reassignment details",
+        "7. Check session via GET /api/admin/sessions/student/{studentId}/lab/{labId}",
+        "8. Your IP should have changed to a non-exempt IP"
+      ]
+    }
+  },
+
+  "curlExamples": {
+    "createLabWithExemptions": {
+      "description": "Create lab with gateway exempt",
+      "command": "curl -X POST http://localhost:3000/api/labs \\\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer YOUR_TOKEN' \\\n  -d @scenario1.json"
+    },
+    "startLab": {
+      "description": "Start lab as student",
+      "command": "curl -X POST http://localhost:3000/api/labs/LAB_ID/start \\\n  -H 'Authorization: Bearer STUDENT_TOKEN'"
+    },
+    "updateLabWithConflict": {
+      "description": "Update lab exempt ranges (will warn if conflicts)",
+      "command": "curl -X PUT http://localhost:3000/api/labs/LAB_ID \\\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer INSTRUCTOR_TOKEN' \\\n  -d '{\"network\":{\"topology\":{\"exemptIpRanges\":[{\"start\":\"10.0.0.1\"}]}}}'"
+    },
+    "updateLabWithConfirmation": {
+      "description": "Update lab with confirmation to reassign IPs",
+      "command": "curl -X PUT 'http://localhost:3000/api/labs/LAB_ID?confirmed=true' \\\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer INSTRUCTOR_TOKEN' \\\n  -d '{\"network\":{\"topology\":{\"exemptIpRanges\":[{\"start\":\"10.0.0.1\"}]}}}'"
+    },
+    "checkSessionDetails": {
+      "description": "Check student session details",
+      "command": "curl -X GET http://localhost:3000/api/admin/sessions/student/STUDENT_ID/lab/LAB_ID \\\n  -H 'Authorization: Bearer ADMIN_TOKEN'"
+    }
+  }
+}
