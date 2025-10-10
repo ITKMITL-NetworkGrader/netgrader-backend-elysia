@@ -28,6 +28,7 @@ export interface ILab extends Document {
         calculationMultiplier?: number;  // For calculated_vlan mode
         baseNetwork: string;   // e.g., "172.16.0.0"
         subnetMask: number;    // 8-30
+        subnetIndex: number;   // Which subnet block to use (0-based, e.g., 0=first, 1=second)
         groupModifier?: number; // For lecturer_group mode
         isStudentGenerated: boolean;
       }>;
@@ -186,6 +187,12 @@ const labSchema = new Schema<ILab>({
             required: true,
             min: 8,
             max: 30
+          },
+          subnetIndex: {
+            type: Number,
+            required: true,
+            min: 0,
+            default: 1  // Default to second subnet block (historically .64 for /26)
           },
           groupModifier: {
             type: Number,

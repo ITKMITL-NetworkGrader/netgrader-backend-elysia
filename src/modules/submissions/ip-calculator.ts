@@ -67,11 +67,12 @@ export function calculateStudentIdBasedIP(
  * 1. dec2 = floor((studentId/1000000 - 61) * 10 + (studentId % 1000) / 250)
  * 2. dec3 = floor((studentId % 1000) % 250)
  * 3. For calculated VLANs: dec3 = floor((dec3 + calculatedVlanId) % 250)
- * 4. IP = vlanOct1.dec2.dec3.(64 + interfaceOffset)
+ * 4. Calculate subnet block starting address: subnetIndex * (2^(32 - subnetMask))
+ * 5. IP = vlanOct1.dec2.dec3.(blockStart + interfaceOffset)
  *
  * @example
- * // VLAN with multiplier 400:
- * calculateAdvancedStudentIP("61071234", {baseNetwork: "172.16.0.0", calculationMultiplier: 400}, 2)
+ * // VLAN with multiplier 400, /26 subnet, 2nd block (index 1):
+ * calculateAdvancedStudentIP("61071234", {baseNetwork: "172.16.0.0", calculationMultiplier: 400, subnetMask: 26, subnetIndex: 1}, 2)
  * // Returns: "172.1.246.66"
  */
 export function calculateAdvancedStudentIP(
@@ -79,6 +80,8 @@ export function calculateAdvancedStudentIP(
   vlanConfig: {
     baseNetwork: string;
     calculationMultiplier?: number;
+    subnetMask: number;
+    subnetIndex: number;
   },
   interfaceOffset: number
 ): string {
@@ -86,6 +89,15 @@ export function calculateAdvancedStudentIP(
 
   if (isNaN(student_id)) {
     throw new Error(`Invalid student ID: ${studentId}`);
+  }
+
+  // Validate subnet parameters
+  if (vlanConfig.subnetMask < 8 || vlanConfig.subnetMask > 30) {
+    throw new Error(`Invalid subnet mask: ${vlanConfig.subnetMask}. Must be between 8 and 30.`);
+  }
+
+  if (vlanConfig.subnetIndex < 0) {
+    throw new Error(`Invalid subnet index: ${vlanConfig.subnetIndex}. Must be >= 0.`);
   }
 
   // Calculate dec2 (second octet for 172.x.x.x)
@@ -109,8 +121,29 @@ export function calculateAdvancedStudentIP(
   // Get first octet from VLAN base network
   const [vlanOct1] = vlanConfig.baseNetwork.split('.').map(Number);
 
-  // Base VLAN IP starts at .64, then add interface offset
-  const hostAddress = 64 + interfaceOffset;
+  // Calculate dynamic subnet block starting address
+  // Block size = 2^(32 - subnetMask)
+  const blockSize = Math.pow(2, 32 - vlanConfig.subnetMask);
+  const baseHostAddress = vlanConfig.subnetIndex * blockSize;
+
+  // Validate that offset doesn't exceed block size
+  if (interfaceOffset >= blockSize - 1) {
+    throw new Error(
+      `Interface offset ${interfaceOffset} exceeds subnet block size. ` +
+      `Max offset for /${vlanConfig.subnetMask} is ${blockSize - 2} (excluding network/broadcast).`
+    );
+  }
+
+  // Calculate final host address
+  const hostAddress = baseHostAddress + interfaceOffset;
+
+  // Validate final address doesn't exceed 254 (fourth octet limit)
+  if (hostAddress > 254) {
+    throw new Error(
+      `Calculated host address ${hostAddress} exceeds valid range (1-254). ` +
+      `Reduce subnetIndex or interfaceOffset.`
+    );
+  }
 
   return `${vlanOct1}.${dec2}.${dec3}.${hostAddress}`;
 }

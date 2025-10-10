@@ -77,7 +77,9 @@ export class IPGenerator {
           studentId,
           {
             baseNetwork: vlan.baseNetwork,
-            calculationMultiplier: vlan.calculationMultiplier
+            calculationMultiplier: vlan.calculationMultiplier,
+            subnetMask: vlan.subnetMask,
+            subnetIndex: vlan.subnetIndex
           },
           interfaceOffset
         );
