@@ -176,22 +176,33 @@ export class IPGenerator {
 
   /**
    * Generate IP mappings for task parameters
-   * Returns mapping of device.variableName to actual IP address
+   * Returns mapping of device.variableName to IP address and VLAN ID
+   * Format: { "router1.gig0_1": { ip: "172.40.210.65", vlan: 210 } }
    */
   static generateIPMappings(
     lab: ILab,
     studentId: string,
     managementIp: string
-  ): Record<string, string> {
-    const mappings: Record<string, string> = {};
+  ): Record<string, { ip: string; vlan: number | null }> {
+    const mappings: Record<string, { ip: string; vlan: number | null }> = {};
+
+    // First, get VLAN mappings to map VLAN index to actual VLAN ID
+    const vlanMappings = this.generateVLANMappings(lab, studentId);
 
     for (const device of lab.network.devices) {
       for (const ipVar of device.ipVariables) {
         const ip = this.generateIP(ipVar, lab, studentId, managementIp);
 
+        // Determine VLAN ID if this is a VLAN interface
+        let vlanId: number | null = null;
+        if (ipVar.isVlanInterface && ipVar.vlanIndex !== undefined) {
+          const vlanKey = `vlan${ipVar.vlanIndex}`;
+          vlanId = vlanMappings[vlanKey] ?? null;
+        }
+
         // Create mapping with device.variableName format (e.g., "router1.loopback0")
         const key = `${device.deviceId}.${ipVar.name}`;
-        mappings[key] = ip;
+        mappings[key] = { ip, vlan: vlanId };
       }
     }
 
@@ -200,7 +211,8 @@ export class IPGenerator {
 
   /**
    * Generate VLAN ID mappings for task parameters
-   * Returns mapping of vlanX to actual VLAN ID (e.g., {"vlan0": 134, "vlan1": 234})
+   * Returns mapping of vlanX to actual VLAN ID using dec3-based calculation
+   * (e.g., {"vlan0": 210, "vlan1": 117})
    */
   static generateVLANMappings(lab: ILab, studentId: string): Record<string, number> {
     const mappings: Record<string, number> = {};
@@ -211,15 +223,20 @@ export class IPGenerator {
     }
 
     const vlanConfig = lab.network.vlanConfiguration;
-    const vlanCount = vlanConfig.vlanCount;
 
     // Generate VLAN IDs based on mode
     if (vlanConfig.mode === 'calculated_vlan') {
-      // For calculated_vlan mode, calculate VLAN IDs per spec
-      const vlanIds = calculateStudentVLANs(studentId, vlanCount);
+      // For calculated_vlan mode, extract multipliers and calculate VLAN IDs using dec3
+      const multipliers = vlanConfig.vlans
+        .map(vlan => vlan.calculationMultiplier)
+        .filter((m): m is number => m !== undefined);
 
-      for (let i = 0; i < vlanIds.length; i++) {
-        mappings[`vlan${i}`] = vlanIds[i];
+      if (multipliers.length > 0) {
+        const vlanIds = calculateStudentVLANs(studentId, multipliers);
+
+        for (let i = 0; i < vlanIds.length; i++) {
+          mappings[`vlan${i}`] = vlanIds[i];
+        }
       }
     } else if (vlanConfig.mode === 'fixed_vlan') {
       // For fixed_vlan mode, use the vlanId from configuration
@@ -241,7 +258,7 @@ export class IPGenerator {
    */
   static transformTaskParameters(
     parameters: Record<string, any>,
-    ipMappings: Record<string, string>,
+    ipMappings: Record<string, { ip: string; vlan: number | null }>,
     vlanMappings?: Record<string, number>
   ): Record<string, any> {
     const transformed = { ...parameters };
@@ -250,9 +267,9 @@ export class IPGenerator {
       if (typeof value === 'string') {
         // Replace IP variable references like {{device.interface}} or {{variable}}
         let transformedValue = value.replace(/\{\{([^}]+)\}\}/g, (match, varName) => {
-          // Check IP mappings first
+          // Check IP mappings first - extract IP from the object
           if (ipMappings[varName]) {
-            return ipMappings[varName];
+            return ipMappings[varName].ip;
           }
 
           // Check VLAN mappings (e.g., {{vlan0}}, {{vlan1}})
@@ -273,14 +290,14 @@ export class IPGenerator {
 
   /**
    * Generate complete network configuration for student when they START a lab
-   * Returns all IPs (Management + VLAN) and VLAN IDs for frontend display
+   * Returns all IPs (Management + VLAN) with embedded VLAN IDs and separate VLAN mappings
    */
   static async generateStudentNetworkConfiguration(
     lab: ILab,
     studentId: string
   ): Promise<{
     managementIp: string;
-    ipMappings: Record<string, string>;
+    ipMappings: Record<string, { ip: string; vlan: number | null }>;
     vlanMappings: Record<string, number>;
     sessionInfo: {
       sessionId: string;
@@ -359,6 +376,12 @@ export class IPGenerator {
       };
     }));
 
+    // Convert ipMappings from {ip, vlan} format to simple IP strings for grading service
+    const flatIpMappings: Record<string, string> = {};
+    for (const [key, value] of Object.entries(ipMappings)) {
+      flatIpMappings[key] = value.ip;
+    }
+
     return {
       job_id: jobId,
       student_id: studentId,
@@ -370,7 +393,7 @@ export class IPGenerator {
         groups: part.task_groups || []
       },
       devices,
-      ip_mappings: ipMappings,
+      ip_mappings: flatIpMappings,  // Send flat format to grading service
       vlan_mappings: vlanMappings,
       callback_url: callbackUrl
     };

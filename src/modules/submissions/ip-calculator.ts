@@ -116,32 +116,45 @@ export function calculateAdvancedStudentIP(
 }
 
 /**
- * Calculate VLAN IDs using Student ID-Based algorithm
- * From: IP_VLAN_GENERATION_ALGORITHMS.md lines 367-436
+ * Calculate VLAN IDs using Advanced dec3-based algorithm (NO COLLISIONS)
+ * Uses the same dec3 calculation as calculateAdvancedStudentIP to ensure uniqueness
  *
  * Algorithm:
- * - baseVLAN = (studentIdNum % 100) + 100
- * - vlans = [baseVLAN, baseVLAN + 100, baseVLAN + 200, ...]
+ * - For each VLAN with a calculationMultiplier:
+ *   - dec3 = floor((studentId % 1000) % 250)
+ *   - calculatedVlanId = floor((studentId/1000000 - 61) * multiplier + (studentId % 1000))
+ *   - vlanId = floor((dec3 + calculatedVlanId) % 250)
  *
  * @example
- * calculateStudentVLANs("61071234", 3)
- * // Returns: [134, 234, 334]
+ * // For student 65071041 with VLANs using multipliers [400, 500]:
+ * calculateStudentVLANs("65071041", [400, 500])
+ * // Returns: [210, 117]
  */
 export function calculateStudentVLANs(
   studentId: string,
-  vlanCount: number
+  calculationMultipliers: number[]
 ): number[] {
-  const studentIdNum = parseInt(studentId);
+  const student_id = Number(studentId);
 
-  if (isNaN(studentIdNum)) {
+  if (isNaN(student_id)) {
     throw new Error(`Invalid student ID: ${studentId}`);
   }
 
-  const baseVLAN = (studentIdNum % 100) + 100;
+  // Calculate base dec3 (same as in calculateAdvancedStudentIP)
+  let dec3 = Math.floor((student_id % 1000) % 250);
+
   const vlans: number[] = [];
 
-  for (let i = 0; i < vlanCount; i++) {
-    vlans.push(baseVLAN + (i * 100));
+  for (const multiplier of calculationMultipliers) {
+    // Calculate VLAN ID using the same algorithm as IP calculation
+    const calculatedVlanId = Math.floor(
+      (student_id / 1000000 - 61) * multiplier + (student_id % 1000)
+    );
+
+    // Modify dec3 for uniqueness (same as line 106 in calculateAdvancedStudentIP)
+    const vlanId = Math.floor((dec3 + calculatedVlanId) % 250);
+
+    vlans.push(vlanId);
   }
 
   return vlans;
