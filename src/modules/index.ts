@@ -6,7 +6,6 @@ import { websocket } from "./websocket";
 import { aiRoutes } from "./ai";
 import { enrollmentRoutes } from "./enrollments";
 import { labRoutes } from "./labs";
-import { networkRoutes } from "./networks";
 import { partRoutes } from "./parts";
 import { taskTemplateRoutes } from "./task-templates";
 import { deviceTemplateRoutes } from "./device-templates";
@@ -22,7 +21,6 @@ export const routes = new Elysia()
     .use(aiRoutes)
     .use(labRoutes)
     .use(partRoutes)
-    .use(networkRoutes)
     .use(taskTemplateRoutes)
     .use(deviceTemplateRoutes)
     .use(sessionCleanupRoutes)
