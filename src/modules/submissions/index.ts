@@ -7,6 +7,7 @@ import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
 import { env } from "process";
 import { authPlugin } from "../../plugins/plugins";
+import { sseService } from "../../services/sse-emitter";
 
 export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   .use(authPlugin)
@@ -67,9 +68,9 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         });
 
         // Send job to queue
-        // channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
-        //   persistent: true,
-        // });
+        channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
+          persistent: true,
+        });
 
         return { 
           status: "success", 
@@ -119,6 +120,10 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         }
 
         console.log(`Job Started: ${jobId}`);
+
+        // 🆕 Emit SSE started event to connected clients
+        sseService.sendStarted(jobId);
+
         return { status: "received", message: "Job started successfully" };
       } catch (error) {
         console.error("Error updating job start status:", error);
@@ -163,6 +168,16 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         }
 
         console.log(`Progress for job ${jobId}: ${body.percentage || 0}% - ${body.message || ""}`);
+
+        // 🆕 Emit SSE progress event to connected clients
+        sseService.sendProgress(jobId, {
+          message: body.message || "",
+          current_test: body.current_test,
+          tests_completed: body.tests_completed || 0,
+          total_tests: body.total_tests || 0,
+          percentage: body.percentage || 0
+        });
+
         return {
           status: "success",
           message: `Progress updated for job ${jobId}`,
@@ -209,7 +224,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         }
 
         console.log(`Final Result for job ${jobId}: Status - ${body.status}, Points Earned - ${body.total_points_earned}/${body.total_points_possible}`);
-        
+
         if (Array.isArray(body.test_results)) {
           for (const test_result of body.test_results) {
             const status_emoji = test_result.status === "passed" ? "✅" : "❌";
@@ -219,8 +234,22 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           }
         }
 
-        return { 
-          status: "received", 
+        // 🆕 Emit SSE completion event to connected clients
+        console.log(`[SSE] About to call sseService.sendResult() for job ${jobId}`);
+        try {
+          sseService.sendResult(jobId, {
+            status: body.status,
+            total_points_earned: body.total_points_earned,
+            total_points_possible: body.total_points_possible,
+            test_results: body.test_results
+          });
+          console.log(`[SSE] sseService.sendResult() completed for job ${jobId}`);
+        } catch (sseError) {
+          console.error(`[SSE] Error in sseService.sendResult() for job ${jobId}:`, sseError);
+        }
+
+        return {
+          status: "received",
           message: "Grading result stored successfully",
           submission_id: submission._id
         };
@@ -326,6 +355,92 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         tags: ["Submissions"],
         summary: "Get Student Submissions",
         description: "Get submissions for a specific student."
+      }
+    }
+  )
+  .get(
+    "/:jobId/stream",
+    async ({ params, request }) => {
+      const { jobId } = params;
+
+      // Verify submission exists
+      const submission = await SubmissionService.getSubmissionByJobId(jobId);
+      if (!submission) {
+        return new Response(JSON.stringify({ status: "error", message: "Submission not found" }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Get origin for CORS
+      const origin = request.headers.get('origin') || env.FRONTEND_ORIGIN || 'http://localhost:3000';
+
+      console.log(`[SSE] Setting up stream for job ${jobId}`);
+
+      // Create a readable stream
+      const stream = new ReadableStream({
+        start(controller) {
+          // Register this client with the SSE service
+          sseService.addClient(jobId, controller);
+
+          console.log(`[SSE] Client connected to job ${jobId}`);
+
+          // Send initial connection message
+          const initialMessage = `event: connected\ndata: ${JSON.stringify({
+            jobId,
+            status: submission.status,
+            message: 'Connected to grading updates'
+          })}\n\n`;
+          controller.enqueue(new TextEncoder().encode(initialMessage));
+
+          // Send keepalive every 30 seconds to prevent timeout
+          const keepaliveInterval = setInterval(() => {
+            try {
+              controller.enqueue(new TextEncoder().encode(': keepalive\n\n'));
+            } catch (error) {
+              clearInterval(keepaliveInterval);
+            }
+          }, 30000);
+
+          // If submission is already completed, send the result immediately
+          if (submission.status === 'completed' && submission.gradingResult) {
+            setTimeout(() => {
+              clearInterval(keepaliveInterval);
+              sseService.sendResult(jobId, {
+                status: submission.gradingResult!.status,
+                total_points_earned: submission.gradingResult!.total_points_earned,
+                total_points_possible: submission.gradingResult!.total_points_possible,
+                test_results: submission.gradingResult!.test_results
+              });
+            }, 100); // Small delay to ensure connection is established
+          }
+        },
+        cancel() {
+          // Client disconnected
+          console.log(`[SSE] Client disconnected from job ${jobId}`);
+        }
+      });
+
+      // Return Response with proper headers
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+          'Transfer-Encoding': 'chunked'
+        }
+      });
+    },
+    {
+      params: t.Object({
+        jobId: t.String()
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Stream Grading Progress (SSE)",
+        description: "Real-time Server-Sent Events stream for grading progress updates. Connect to this endpoint to receive instant updates without polling."
       }
     }
   );
