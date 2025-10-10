@@ -68,9 +68,9 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         });
 
         // Send job to queue
-        // channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
-        //   persistent: true,
-        // });
+        channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
+          persistent: true,
+        });
 
         return { 
           status: "success", 
