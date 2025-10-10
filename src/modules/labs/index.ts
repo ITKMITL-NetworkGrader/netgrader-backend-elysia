@@ -33,6 +33,7 @@ const LabBodySchema = t.Object({
         calculationMultiplier: t.Optional(t.Number()),
         baseNetwork: t.String(),
         subnetMask: t.Number({ minimum: 8, maximum: 30 }),
+        subnetIndex: t.Number({ minimum: 0, default: 1 }),
         groupModifier: t.Optional(t.Number()),
         isStudentGenerated: t.Boolean()
       }))

@@ -12,6 +12,7 @@ interface VlanConfig {
     calculationMultiplier?: number;
     baseNetwork: string;
     subnetMask: number;
+    subnetIndex: number;
     groupModifier?: number;
     isStudentGenerated: boolean;
   }>;
@@ -64,6 +65,24 @@ export class VlanValidator {
     // Validate subnet mask range
     if (vlan.subnetMask < 8 || vlan.subnetMask > 30) {
       errors.push(`VLAN ${index}: Subnet mask must be between 8 and 30, got ${vlan.subnetMask}`);
+    }
+
+    // Validate subnet index
+    if (vlan.subnetIndex === undefined || vlan.subnetIndex === null) {
+      errors.push(`VLAN ${index}: subnetIndex is required`);
+    } else if (vlan.subnetIndex < 0) {
+      errors.push(`VLAN ${index}: subnetIndex must be >= 0, got ${vlan.subnetIndex}`);
+    } else {
+      // Validate that subnetIndex doesn't cause fourth octet overflow
+      const blockSize = Math.pow(2, 32 - vlan.subnetMask);
+      const maxHostAddress = vlan.subnetIndex * blockSize;
+      if (maxHostAddress > 254) {
+        errors.push(
+          `VLAN ${index}: subnetIndex ${vlan.subnetIndex} with /${vlan.subnetMask} subnet ` +
+          `would start at .${maxHostAddress}, exceeding valid range (max .254). ` +
+          `Use smaller subnetIndex or larger subnet mask.`
+        );
+      }
     }
 
     // Mode-specific validation
