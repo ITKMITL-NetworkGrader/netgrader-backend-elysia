@@ -5,24 +5,59 @@ export interface ILab extends Document {
   title: string;
   description?: string;
   type: 'lab' | 'exam';
-  
+
   // Embedded Network Configuration (frequently co-accessed)
   network: {
     name: string;
     topology: {
-      baseNetwork: string;     // "10.30.6.0"
+      baseNetwork: string;     // "10.0.0.0" - Management network
       subnetMask: number;      // 24
       allocationStrategy: 'student_id_based' | 'group_based';
+      exemptIpRanges?: Array<{
+        start: string;         // IPv4 address (e.g., "10.0.0.1")
+        end?: string;          // Optional: IPv4 address for range end
+      }>;
+    };
+    // VLAN Configuration for multi-phase VLAN system
+    vlanConfiguration?: {
+      mode: 'fixed_vlan' | 'lecturer_group' | 'calculated_vlan';
+      vlanCount: number;       // 1-10
+      vlans: Array<{
+        id: string;            // UUID from frontend
+        vlanId?: number;       // For fixed_vlan & lecturer_group (1-4094)
+        calculationMultiplier?: number;  // For calculated_vlan mode
+        baseNetwork: string;   // e.g., "172.16.0.0"
+        subnetMask: number;    // 8-30
+        groupModifier?: number; // For lecturer_group mode
+        isStudentGenerated: boolean;
+      }>;
     };
     devices: Array<{
       deviceId: string;        // "router1", "pc1"
       templateId: Types.ObjectId;    // Ref: templates._id
       displayName: string;     // "Router 1"
       ipVariables: Array<{
-        name: string;          // "mgmt_ip", "lan_ip"
-        hostOffset?: number;   // 1, 10, 254 - optional when fullIp is defined
-        interface?: string;    // "eth0", "g0/1"
-        fullIp?: string;       // Full IP address if defined, bypasses hostOffset calculation
+        name: string;          // "mgmt_interface", "gig0_0_vlan_1"
+        interface?: string;    // "GigabitEthernet0/0", "eth0"
+
+        // Input type system - defines how IP is determined
+        inputType: 'fullIP' | 'studentManagement' | 'studentVlan0' | 'studentVlan1' | 'studentVlan2' | 'studentVlan3' | 'studentVlan4' | 'studentVlan5' | 'studentVlan6' | 'studentVlan7' | 'studentVlan8' | 'studentVlan9';
+
+        // For fullIP type - manually specified IP
+        fullIp?: string;       // Full IP address for static assignments
+
+        // Management interface flag
+        isManagementInterface?: boolean;
+
+        // VLAN interface configuration
+        isVlanInterface?: boolean;
+        vlanIndex?: number;    // Which VLAN (0-based index, maps to vlans array)
+        interfaceOffset?: number; // 1-50 (max enrolled students per VLAN)
+
+        // Additional metadata
+        isStudentGenerated?: boolean;
+        description?: string;
+        readonly?: boolean;
       }>;
       credentials: {
         usernameTemplate: string;
@@ -31,10 +66,12 @@ export interface ILab extends Document {
       };
     }>;
   };
-  
+
   // Metadata
   createdBy: Types.ObjectId;         // Ref: users._id
   publishedAt?: Date;
+  availableFrom?: Date;    // When lab becomes accessible
+  availableUntil?: Date;   // When lab becomes inaccessible
   dueDate?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -78,13 +115,90 @@ const labSchema = new Schema<ILab>({
       },
       subnetMask: {
         type: Number,
-        required: true
+        required: true,
+        min: 8,
+        max: 30
       },
       allocationStrategy: {
         type: String,
         enum: ['student_id_based', 'group_based'],
         required: true
+      },
+      exemptIpRanges: {
+        type: [{
+          _id: false,
+          start: {
+            type: String,
+            required: true,
+            validate: {
+              validator: (v: string) => /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(v),
+              message: 'Invalid IPv4 address format'
+            }
+          },
+          end: {
+            type: String,
+            required: false,
+            validate: {
+              validator: (v: string) => !v || /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(v),
+              message: 'Invalid IPv4 address format'
+            }
+          }
+        }],
+        required: false,
+        default: []
       }
+    },
+    vlanConfiguration: {
+      type: {
+        mode: {
+          type: String,
+          enum: ['fixed_vlan', 'lecturer_group', 'calculated_vlan'],
+          required: true
+        },
+        vlanCount: {
+          type: Number,
+          required: true,
+          min: 1,
+          max: 10
+        },
+        vlans: [{
+          _id: false,
+          id: {
+            type: String,
+            required: true
+          },
+          vlanId: {
+            type: Number,
+            required: false,
+            min: 1,
+            max: 4094
+          },
+          calculationMultiplier: {
+            type: Number,
+            required: false
+          },
+          baseNetwork: {
+            type: String,
+            required: true
+          },
+          subnetMask: {
+            type: Number,
+            required: true,
+            min: 8,
+            max: 30
+          },
+          groupModifier: {
+            type: Number,
+            required: false
+          },
+          isStudentGenerated: {
+            type: Boolean,
+            required: true,
+            default: true
+          }
+        }]
+      },
+      required: false
     },
     devices: [{
       _id: false,
@@ -107,17 +221,54 @@ const labSchema = new Schema<ILab>({
           type: String,
           required: true
         },
-        hostOffset: {
-          type: Number,
-          required: false
-        },
         interface: {
           type: String,
           required: false
         },
+        inputType: {
+          type: String,
+          enum: ['fullIP', 'studentManagement', 'studentVlan0', 'studentVlan1', 'studentVlan2', 'studentVlan3', 'studentVlan4', 'studentVlan5', 'studentVlan6', 'studentVlan7', 'studentVlan8', 'studentVlan9'],
+          required: true
+        },
         fullIp: {
           type: String,
           required: false
+        },
+        isManagementInterface: {
+          type: Boolean,
+          required: false,
+          default: false
+        },
+        isVlanInterface: {
+          type: Boolean,
+          required: false,
+          default: false
+        },
+        vlanIndex: {
+          type: Number,
+          required: false,
+          min: 0,
+          max: 9
+        },
+        interfaceOffset: {
+          type: Number,
+          required: false,
+          min: 1,
+          max: 50
+        },
+        isStudentGenerated: {
+          type: Boolean,
+          required: false,
+          default: false
+        },
+        description: {
+          type: String,
+          required: false
+        },
+        readonly: {
+          type: Boolean,
+          required: false,
+          default: false
         }
       }],
       credentials: {
@@ -144,6 +295,14 @@ const labSchema = new Schema<ILab>({
     ref: 'User'
   },
   publishedAt: {
+    type: Date,
+    required: false
+  },
+  availableFrom: {
+    type: Date,
+    required: false
+  },
+  availableUntil: {
     type: Date,
     required: false
   },

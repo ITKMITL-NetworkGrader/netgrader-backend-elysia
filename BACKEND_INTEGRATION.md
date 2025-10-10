@@ -179,13 +179,13 @@ Step 6: Review & Create (Summary + Submission)
 3. **`studentManagement`**: Auto-generate management IP per student
    - Uses management network from Step 2
    - One management IP per student
-   - Backend-generated using student ID algorithm
+   - **Frontend-calculated** using student u_id (Student ID) algorithm when student accesses lab
 
 4. **`studentVlan0`, `studentVlan1`, etc.**: Auto-generate VLAN-specific IPs
    - Uses VLAN base network from Step 2
    - `vlanIndex` maps to VLAN array index
    - `interfaceOffset` ensures unique IPs when multiple interfaces use same VLAN
-   - Backend-generated using student ID + VLAN network + offset
+   - **Frontend-calculated** using student u_id + VLAN network + offset when student accesses lab
 
 **Device Template Integration**:
 - Frontend fetches templates from `GET /v0/device-templates`
@@ -579,6 +579,248 @@ Frontend Redirect to Course Page
 
 ---
 
+## 🎓 Student Lab Execution & IP Calculation Workflow
+
+### ⚠️ CRITICAL: Who Calculates Student IPs?
+
+**Backend Role**: 
+- **STORES** the network configuration variables (base networks, VLAN configurations, multipliers, subnet masks) in the lab document after lab creation
+- **ASSIGNS** Management IP addresses when student starts/executes a lab (⚠️ **NOT YET IMPLEMENTED** - currently returns dummy/placeholder data)
+
+**Frontend Role**: 
+- **CALCULATES** all other student-specific IP addresses (VLAN IPs, hostOffset IPs) when a student starts/accesses the lab
+- **RECEIVES** Management IP from backend and displays it in the IP schema table
+
+### 📊 Complete Student Lab Execution Flow
+
+```
+Student clicks "Start Lab" or accesses lab
+        ↓
+Frontend fetches lab configuration from backend
+    GET /v0/labs/{labId}
+        ↓
+Backend returns lab document with:
+    - managementNetwork & subnetMask
+    - vlanConfiguration (mode, vlans array with baseNetwork, multipliers, etc.)
+    - devices array with ipVariables
+        ↓
+Frontend retrieves student's u_id (Student ID)
+    From authenticated session
+        ↓
+Frontend runs IP calculation algorithm
+    Using: studentId + lab configuration
+        ↓
+For each device's ipVariables:
+    - studentManagement → Backend assigns Management IP (⚠️ NOT YET IMPLEMENTED)
+    - studentVlan0, studentVlan1, etc. → Frontend calculates from VLAN baseNetwork
+    - hostOffset → Frontend calculates from managementNetwork + offset
+    - fullIP → Use as-is (no calculation)
+        ↓
+Frontend generates IP Schema Table
+    Shows all calculated IPs for this student
+        ↓
+Student sees personalized IP addresses
+    Each student gets unique IPs based on their u_id
+```
+
+### 🧮 Frontend Calculation Algorithm
+
+**Location**: Frontend code (e.g., `utils/studentIpGenerator.ts`)
+
+**Input Variables** (from backend):
+```javascript
+{
+  studentId: "65070232",           // From authenticated user
+  managementNetwork: "10.0.0.0",   // From lab.network.topology.baseNetwork
+  managementSubnetMask: 24,        // From lab.network.topology.subnetMask
+  vlans: [                         // From lab.network.vlanConfiguration.vlans
+    {
+      vlanId: 1,
+      baseNetwork: "172.16.0.0",
+      subnetMask: 24,
+      calculationMultiplier: 400,  // For calculated_vlan mode
+      groupModifier: 0             // For lecturer_group mode
+    }
+  ]
+}
+```
+
+**Calculation Formula** (executed by frontend):
+```javascript
+// Extract components from student ID (e.g., 65070232)
+const studentIdNum = Number(studentId)
+const yearComponent = Math.floor(studentIdNum / 1000000) // 65
+const facultyIndex = Math.floor((studentIdNum % 1000000) / 10000) // 07
+const studentIndex = studentIdNum % 10000 // 0232
+
+// Calculate IP octets
+const dec2_1 = (studentIdNum / 1000000 - 61) * 10  // (65 - 61) * 10 = 40
+const dec2_2 = (studentIdNum % 1000) / 250         // 232 / 250 = 0.928
+const dec2 = Math.floor(dec2_1 + dec2_2)           // 40
+
+const dec3 = Math.floor((studentIdNum % 1000) % 250) // 232
+
+// For calculated VLANs, incorporate VLAN calculation
+if (vlan.calculationMultiplier) {
+  const calculatedVlanId = Math.floor(
+    (studentIdNum / 1000000 - 61) * vlan.calculationMultiplier + (studentIdNum % 1000)
+  )
+  // Modify dec3 for uniqueness
+  dec3 = Math.floor((dec3 + calculatedVlanId) % 250)
+}
+
+// Generate final IP
+const baseOct1 = vlan.baseNetwork.split('.')[0]  // First octet from base network
+const finalIP = `${baseOct1}.${dec2}.${dec3}.${hostOffset}`
+```
+
+**Example Output** (for Student ID 65070232):
+```javascript
+{
+  managementIPs: {
+    "router1.mgmt_interface": "10.40.232.65"
+  },
+  vlanIPs: {
+    "router1.gig0_0_vlan_1": "172.40.232.65",  // VLAN 1, offset 1
+    "router1.gig0_1_vlan_1": "172.40.232.66",  // VLAN 1, offset 2
+    "router1.gig1_0_vlan_2": "172.40.232.97"   // VLAN 2, offset 1
+  },
+  staticIPs: {
+    "router1.loopback0": "10.0.0.5"            // hostOffset type
+  }
+}
+```
+
+### 🔄 Backend's Responsibility
+
+**During Lab Creation** (`POST /v0/labs`):
+1. ✅ Store network configuration (base networks, subnet masks)
+2. ✅ Store VLAN configuration (mode, multipliers, modifiers)
+3. ✅ Store device configurations with IP variable definitions
+4. ✅ Validate data structure and constraints
+5. ❌ **DO NOT** calculate any student-specific IPs
+6. ❌ **DO NOT** generate IP schemas per student
+
+**During Lab Access** (`GET /v0/labs/{labId}`):
+1. ✅ Return stored lab configuration
+2. ✅ Include all network and VLAN configuration
+3. ❌ **DO NOT** calculate IPs (frontend will do this)
+
+**After Calculation** (Student submission):
+- Backend receives student's configuration commands
+- Backend validates against expected results
+- Backend does NOT need to recalculate IPs (student already has them from frontend)
+
+### 📋 What Backend Stores vs What Frontend Calculates
+
+| Data | Backend Stores | Frontend Calculates |
+|------|---------------|---------------------|
+| Base Networks | ✅ `10.0.0.0` | ❌ |
+| Subnet Masks | ✅ `/24` | ❌ |
+| VLAN IDs | ✅ `vlanId: 1` | ❌ |
+| Multipliers | ✅ `400` | ❌ |
+| Group Modifiers | ✅ `10` | ❌ |
+| Interface Offsets | ✅ `1, 2, 3...` | ❌ |
+| Management IPs | ✅ Assigned by backend (NOT YET IMPLEMENTED) | ❌ Receives from backend |
+| VLAN IPs | ❌ | ✅ `172.40.232.65` |
+| Student IP Schema | ❌ | ✅ Complete table |
+
+### 🎯 Key Takeaways for Backend Team
+
+1. **Store, Don't Calculate (Mostly)**: Backend stores the configuration parameters and assigns Management IPs only
+2. **Management IP Assignment** ⚠️ **TODO**: Backend should assign Management IPs when student starts lab (not implemented yet - currently returns dummy data)
+3. **Frontend Owns Algorithm**: The VLAN and other IP calculation logic lives in the frontend
+4. **Per-Student Uniqueness**: Each student gets unique IPs calculated on-the-fly when they access the lab
+5. **No IP Pre-generation**: Backend does not need to pre-generate or store per-student IP schemas (except Management IPs)
+6. **Configuration as Variables**: Treat stored data as "variables for the formula" not as final IPs
+
+### 🔍 Example: What Backend Stores
+
+```json
+{
+  "_id": "507f1f77bcf86cd799439013",
+  "courseId": "aLg0B5jPrFW47ICP",
+  "title": "OSPF Configuration Lab",
+  "network": {
+    "topology": {
+      "baseNetwork": "10.0.0.0",        // ← Variable for calculation
+      "subnetMask": 24                   // ← Variable for calculation
+    },
+    "vlanConfiguration": {
+      "mode": "calculated_vlan",
+      "vlans": [
+        {
+          "vlanId": 1,
+          "baseNetwork": "172.16.0.0",   // ← Variable for calculation
+          "subnetMask": 24,
+          "calculationMultiplier": 400   // ← Variable for calculation
+        }
+      ]
+    },
+    "devices": [
+      {
+        "deviceId": "router1",
+        "ipVariables": [
+          {
+            "name": "mgmt_interface",
+            "inputType": "studentManagement",
+            "interfaceOffset": 1         // ← Variable for calculation
+            // NO actual IP address stored here!
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### 🔜 Future Backend Implementation: Management IP Assignment
+
+**When**: Student starts/executes a lab (clicks "Start Lab" button)
+
+**Backend Should**:
+1. Receive student u_id and lab ID
+2. Calculate Management IP for this student using the stored `managementNetwork` and `subnetMask`
+3. Store the assigned Management IP in a student-lab mapping collection
+4. Return the Management IP along with lab configuration
+
+**API Endpoint (to be implemented)**:
+```javascript
+POST /v0/labs/{labId}/start
+Body: {
+  studentId: string  // u_id from session
+}
+
+Response: {
+  lab: { /* lab configuration */ },
+  studentManagementIP: string,  // e.g., "10.40.232.65"
+  assignedAt: Date
+}
+```
+
+**For Now (Temporary)**:
+- Backend returns dummy/placeholder Management IP
+- Frontend displays it as-is without calculation
+- **DO NOT** break the flow - just return a placeholder like `"10.0.0.1"` or similar
+
+---
+
+### 🎓 Example: What Student Sees (Calculated by Frontend)
+
+```
+IP Schema for Student 65070232:
+
+Device: router1
+├─ mgmt_interface (GigabitEthernet0/0)
+│  └─ IP: 10.40.232.65/24            ← Calculated
+├─ gig0_0_vlan_1 (GigabitEthernet0/1)
+│  └─ IP: 172.40.232.65/24           ← Calculated
+└─ gig0_1_vlan_1 (GigabitEthernet0/2)
+   └─ IP: 172.40.232.66/24           ← Calculated
+```
+
+---
+
 ## 🔄 Required Backend API Updates
 
 ### 🆕 Key Changes in Frontend Data Submission
@@ -897,54 +1139,60 @@ The frontend has been updated to submit enhanced data structures for lab creatio
 }
 ```
 
-## 🔧 Backend Processing Requirements
+## 🔧 Backend Storage & Validation Requirements
 
-### 1. Complex Network Mode Processing
+**⚠️ Note**: This section describes what backend must STORE and VALIDATE, not calculate. IP calculations happen in the frontend when students access the lab.
 
-The backend must support three distinct network modes:
+### 1. Complex Network Mode Storage
+
+The backend must store configuration for three distinct network modes:
 
 #### Fixed VLAN Mode
 - **Description**: Traditional VLAN assignment with fixed VLAN IDs
-- **Processing**: Direct VLAN ID assignment from frontend configuration
-- **Student Generation**: Uses `studentManagement` and `studentVlanX` types
+- **Backend Stores**: Direct VLAN ID values from frontend configuration
+- **Frontend Calculates**: Student IPs using `studentManagement` and `studentVlanX` types
 
 #### Lecturer Group Mode
 - **Description**: VLAN IDs calculated based on group assignments with modifiers
-- **Processing**: `finalVlanId = baseVlanId + (groupNumber * groupModifier)`
-- **Student Generation**: Group-based IP allocation with lecturer-defined offsets
+- **Backend Stores**: Base VLAN IDs, group modifiers, and group assignments
+- **Frontend Calculates**: Final VLAN IDs using `finalVlanId = baseVlanId + (groupNumber * groupModifier)`, then generates IPs
 
 #### Calculated VLAN Mode
 - **Description**: Mathematical VLAN ID calculation using student ID components
-- **Processing**: `vlanId = (studentIdNumeric * calculationMultiplier) % 4000 + 1`
-- **Student Generation**: Algorithm-based VLAN assignment for scalability
+- **Backend Stores**: Calculation multipliers for each VLAN
+- **Frontend Calculates**: VLAN IDs using `vlanId = (studentIdNumeric * calculationMultiplier) % 4000 + 1`, then generates IPs
 
 ### 2. Enhanced Student Generation Algorithm
 
+**⚠️ IMPORTANT**: This algorithm runs in the **FRONTEND** when students access the lab, not during lab creation.
+
 **Algorithm**: `enhanced_base_network_replacement`
 
-**Process Flow**:
-1. Extract student ID components (year, faculty, index)
-2. Generate management IP: `managementNetwork + yearOffset + facultyIndex`
-3. For each VLAN: Generate base network using group/calculation rules
+**Process Flow** (Frontend execution):
+1. Extract student ID components (year, faculty, index) from authenticated user's u_id
+2. Generate management IP: `managementNetwork + calculated octets based on student ID`
+3. For each VLAN: Generate IP using VLAN base network + student ID calculation
 4. Apply interface offsets for multiple interfaces on same VLAN
 
-**Configuration Parameters**:
+**Configuration Parameters** (stored in backend, used by frontend):
 ```javascript
 {
-  "yearOffset": 61,        // Year component offset
-  "facultyCode": "07",     // Faculty identifier
-  "indexDigits": 4         // Student index digit count
+  "yearOffset": 61,        // Year component offset (hardcoded in frontend algorithm)
+  "facultyCode": "07",     // Faculty identifier (derived from student ID)
+  "indexDigits": 4         // Student index digit count (derived from student ID)
 }
 ```
 
+**Backend's Role**: Store the base networks, subnet masks, and multipliers. The backend does **NOT** execute this algorithm.
+
 ### 3. IP Variable Processing Types
 
-The backend must process these enhanced IP variable types:
+The backend must **store** these IP variable types (actual IP calculation happens in frontend):
 
-- **`studentManagement`**: Management network + student offset
-- **`studentVlan0`**, **`studentVlan1`**, **`studentVlan2`**: VLAN-specific IP generation
-- **`hostOffset`**: Traditional host offset calculation
-- **`fullIP`**: Static IP assignment
+- **`studentManagement`**: Marks interface for management network (frontend calculates IP from managementNetwork + student u_id)
+- **`studentVlan0`**, **`studentVlan1`**, **`studentVlan2`**: Marks interface for VLAN-specific IP (frontend calculates IP from VLAN baseNetwork + student u_id)
+- **`hostOffset`**: Traditional host offset (frontend calculates IP from managementNetwork + offset)
+- **`fullIP`**: Static IP assignment (used as-is, no calculation needed)
 
 **VLAN-Specific Processing**:
 ```javascript
