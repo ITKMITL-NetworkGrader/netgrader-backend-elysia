@@ -10,6 +10,7 @@ import { partRoutes } from "./parts";
 import { taskTemplateRoutes } from "./task-templates";
 import { deviceTemplateRoutes } from "./device-templates";
 import { sessionCleanupRoutes } from "./admin/session-cleanup-routes";
+import { storageRoutes } from "./storage";
 
 export const routes = new Elysia()
 .group("/v0", (app) => app
@@ -24,4 +25,5 @@ export const routes = new Elysia()
     .use(taskTemplateRoutes)
     .use(deviceTemplateRoutes)
     .use(sessionCleanupRoutes)
+    .use(storageRoutes)
 )

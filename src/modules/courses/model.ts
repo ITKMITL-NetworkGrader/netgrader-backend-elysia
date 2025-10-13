@@ -13,6 +13,7 @@ export interface ICourse {
   description: string;
   password?: string; // optional, since required: false
   visibility: "public" | "private";
+  bannerUrl?: string; // MinIO object URL for course banner
   created_by: string;
   createdAt: Date;
   updatedAt: Date;
@@ -37,6 +38,10 @@ const courseSchema = new Schema({
     type: String,
     enum: ["public", "private"],
     default: "public",
+  },
+  bannerUrl: {
+    type: String,
+    required: false,
   },
   created_by: {
     type: String,

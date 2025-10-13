@@ -7,6 +7,7 @@ export interface IUser extends Document {
   fullName: string;
   role: "ADMIN" | "STUDENT" | "INSTRUCTOR";
   ldapAuthenticated: boolean;
+  profilePicture?: string; // MinIO object URL for profile picture
   createdAt: Date;
   updatedAt: Date;
   lastLogin: Date;
@@ -38,6 +39,10 @@ const UserSchema = new Schema<IUser>({
   ldapAuthenticated: {
     type: Boolean,
     default: true
+  },
+  profilePicture: {
+    type: String,
+    required: false
   },
   lastLogin: {
     type: Date,

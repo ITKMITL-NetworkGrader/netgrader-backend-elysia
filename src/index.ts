@@ -6,6 +6,7 @@ import { authPlugin } from "./plugins/plugins.js";
 import { routes } from "./modules/index.js";
 import { connectDatabase } from "./config/database.js";
 import { connectRedis, gracefulShutdown } from "./config/redis.js";
+import { initializeMinioBucket } from "./config/minio.js";
 import { LabSessionCleanupService } from "./services/lab-session-cleanup.js";
 
 export type JWTPayload = {
@@ -23,6 +24,14 @@ declare module 'elysia' {
 }
 await connectDatabase();
 // await connectRedis();
+
+// Initialize MinIO (optional - will log error but not crash if unavailable)
+try {
+  await initializeMinioBucket();
+} catch (error) {
+  console.warn('⚠️  MinIO initialization failed. Storage features will not be available.');
+}
+
 const app = new Elysia()
 .use(swagger())
 .use(cors({
