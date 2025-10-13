@@ -17,6 +17,7 @@
     "dotenv": "^17.2.0",
     "elysia": "latest",
     "ldap-authentication": "^3.3.4",
+    "minio": "^8.0.6",
     "mongodb": "^6.17.0",
     "mongoose": "^8.16.1",
     "redis": "^5.8.2"
