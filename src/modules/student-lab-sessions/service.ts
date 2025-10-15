@@ -155,7 +155,6 @@ export class StudentLabSessionService {
       })
       .sort({ enrollmentDate: 1 })
       .lean();
-
       // Find the student's position in the enrollment order
       const studentIndex = enrollments.findIndex(
         enrollment => enrollment.u_id === studentId
@@ -187,80 +186,71 @@ export class StudentLabSessionService {
   ): Promise<string> {
     try {
       const baseIp = lab.network.topology.baseNetwork;
-      const exemptRanges = lab.network.topology.exemptIpRanges;
+      let exemptRanges = lab.network.topology.exemptIpRanges || [];
 
       // Convert base IP to long integer
-      const baseIpLong = this.ipToLong(baseIp);
+      let baseIpLong = this.ipToLong(baseIp);
 
-      // Management IP: Sequential assignment within the management network
-      // Start from baseIP + studentIndex
-      let offset = studentIndex;
-      let candidateIpLong = baseIpLong + offset;
-      let candidateIp = this.longToIp(candidateIpLong);
-
-      // Skip exempt IPs by incrementing offset
-      let attempts = 0;
-      const maxAttempts = 1000;
-
-      while (this.isIpInExemptRanges(candidateIp, exemptRanges) && attempts < maxAttempts) {
-        offset++;
-        candidateIpLong = baseIpLong + offset;
-        candidateIp = this.longToIp(candidateIpLong);
-        attempts++;
-      }
-
-      if (attempts >= maxAttempts) {
-        const exemptCount = exemptRanges?.length || 0;
-        const totalExemptIps = exemptRanges?.reduce((sum, range) => {
-          if (range.end) {
-            return sum + (this.ipToLong(range.end) - this.ipToLong(range.start) + 1);
-          }
-          return sum + 1;
-        }, 0) || 0;
-
-        throw new Error(
-          `Unable to assign Management IP for student index ${studentIndex}. ` +
-          `Too many exempt ranges (${exemptCount} ranges, ${totalExemptIps} IPs exempt). ` +
-          `Please reduce exempt ranges or expand management network.`
-        );
-      }
-
-      // Log if IPs were skipped (for debugging)
-      if (attempts > 0) {
-        console.log(
-          `[IP Assignment] Student index ${studentIndex} skipped ${attempts} exempt IP(s), assigned ${candidateIp}`
-        );
-      }
-
+      const mergedExemptRanges = this.adjustExemptRanges(
+        exemptRanges.map(r => ({ start: r.start, end: r.end || r.start })),
+        await this.getAssignedIpRanges(lab.id)
+      );
+      console.log(`Merged Exempt Ranges:`, mergedExemptRanges.map(r => ({ start: this.longToIp(r.start), end: this.longToIp(r.end) }))) // --- IGNORE ---
+      const candidateIp = this.getAvailableIp(
+        baseIpLong + 1,
+        mergedExemptRanges.map(r => ({ start: this.longToIp(r.start), end: this.longToIp(r.end) }))
+      );
       return candidateIp;
     } catch (error) {
       throw new Error(`Error calculating management IP: ${(error as Error).message}`);
     }
   }
 
-  /**
-   * Check if IP is in any exempt range
-   */
-  private static isIpInExemptRanges(
-    ip: string,
-    exemptRanges: Array<{ start: string; end?: string }> | undefined
-  ): boolean {
+  private static getAvailableIp(
+    iplong: number,
+    exemptRanges: Array<{ start: string; end?: string }>
+  ): string {
+    // Logic to find the next available IP address
     if (!exemptRanges || exemptRanges.length === 0) {
-      return false;
+      return this.longToIp(iplong);
     }
-
-    const ipNum = this.ipToLong(ip);
-
     for (const range of exemptRanges) {
       const startNum = this.ipToLong(range.start);
       const endNum = range.end ? this.ipToLong(range.end) : startNum;
 
-      if (ipNum >= startNum && ipNum <= endNum) {
-        return true;
+      if (iplong >= startNum && iplong <= endNum) {
+        iplong = endNum + 1;
+      }
+    }
+    return this.longToIp(iplong);
+  }
+
+  private static adjustExemptRanges(
+    exemptRanges: Array<{ start: string; end: string }>,
+    assignedIps: Array<{ start: string; end: string }>
+  ): Array<{ start: number; end: number }> {
+    exemptRanges = exemptRanges.concat(assignedIps);
+    const sorted = [...exemptRanges].sort((a, b) => this.ipToLong(a.start) - this.ipToLong(b.start));
+    const merged: Array<{ start: number; end: number }> = [];
+    for (const range of sorted) {
+      const startNum = this.ipToLong(range.start);
+      const endNum = this.ipToLong(range.end);
+
+      if (merged.length === 0) {
+        merged.push({ start: startNum, end: endNum });
+      } else {
+        const last = merged[merged.length - 1];
+        if (startNum <= last.end + 1) {
+          // Overlapping or contiguous ranges, merge them
+          last.end = Math.max(last.end, endNum);
+        } else {
+          // Non-overlapping range, add to list
+          merged.push({ start: startNum, end: endNum });
+        }
       }
     }
 
-    return false;
+    return merged;
   }
 
   /**
@@ -445,5 +435,27 @@ export class StudentLabSessionService {
     }
 
     return reassignedCount;
+  }
+
+  /**
+   * Get list of assigned management IPs from active student lab sessions
+   * Maps them to range format {start: IP, end: IP} for concatenation with exempt ranges
+   *
+   * @param labId - The lab ID to get assigned IPs for
+   * @returns Array of IP ranges where start and end are the same (single IP addresses)
+   */
+  static async getAssignedIpRanges(
+    labId: Types.ObjectId
+  ): Promise<Array<{ start: string; end: string }>> {
+    const activeSessions = await StudentLabSession.find({
+      labId,
+      status: 'active'
+    }).select('managementIp');
+
+    // Map each assigned IP to range format {start: IP, end: IP}
+    return activeSessions.map(session => ({
+      start: session.managementIp,
+      end: session.managementIp
+    }));
   }
 }
