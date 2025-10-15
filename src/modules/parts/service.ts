@@ -388,9 +388,14 @@ export class PartService {
    */
   static async loadAutoSave(partId: string, labId: string, field: string) {
     try {
+      const projection = {
+        [`metadata.autoSave.${field}`]: 1,
+        'metadata.autoSave.timestamp': 1
+      } as Record<string, 1>;
+      
       const part = await LabPart.findOne(
         { _id: partId, labId: labId },
-        { [`metadata.autoSave.${field}`]: 1, 'metadata.autoSave.timestamp': 1 }
+        projection
       );
 
       if (!part || !part.metadata?.autoSave) {

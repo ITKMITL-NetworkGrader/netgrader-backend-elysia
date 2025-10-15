@@ -44,7 +44,6 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
             message: `Part not found with ID: ${body.part_id} in lab ${body.lab_id}`
           };
         }
-        const callback_url = env.CALLBACK_URL || "http://localhost:4000/v0/submissions";
         // Generate job ID if not provided
         const jobId = body.job_id || `${u_id}-${body.lab_id}-${body.part_id}-${Date.now()}`;
 
@@ -53,18 +52,15 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           lab as any, // Cast to ILab type (services return transformed data)
           part as any, // Cast to ILabPart type
           u_id,
-          jobId,
-          callback_url
+          jobId
         );
-        console.log("Generated Job Payload:", JSON.stringify(jobPayload, null, 2));
         // Create submission record
         const submission = await SubmissionService.createSubmission({
           jobId: jobPayload.job_id,
           studentId: u_id,
           labId: body.lab_id,
           partId: body.part_id,
-          ipMappings: jobPayload.ip_mappings,
-          callbackUrl: callback_url
+          ipMappings: jobPayload.ip_mappings
         });
 
         // Send job to queue

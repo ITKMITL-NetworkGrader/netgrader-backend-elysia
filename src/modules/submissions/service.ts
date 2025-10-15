@@ -14,7 +14,6 @@ export class SubmissionService {
     labId: string | Types.ObjectId;
     partId: string;
     ipMappings: Record<string, string>;
-    callbackUrl: string;
     attempt?: number;
   }): Promise<ISubmission> {
     const labObjectId = new Types.ObjectId(data.labId);
@@ -34,7 +33,6 @@ export class SubmissionService {
       labId: labObjectId,
       partId: data.partId,
       ipMappings: data.ipMappings,
-      callbackUrl: data.callbackUrl,
       attempt: nextAttempt,
       status: 'pending',
       progressHistory: []

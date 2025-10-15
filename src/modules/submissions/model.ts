@@ -92,8 +92,7 @@ export interface ISubmission extends Document {
   // Additional metadata
   attempt: number;
   ipMappings: Record<string, string>;
-  callbackUrl: string;
-  
+
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
@@ -225,10 +224,6 @@ const submissionSchema = new Schema<ISubmission>({
   },
   ipMappings: {
     type: Schema.Types.Mixed,
-    required: true
-  },
-  callbackUrl: {
-    type: String,
     required: true
   }
 }, {

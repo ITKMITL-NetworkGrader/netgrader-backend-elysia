@@ -341,7 +341,6 @@ export class IPGenerator {
     part: ILabPart,
     studentId: string,
     jobId: string,
-    callbackUrl: string
   ): Promise<any> {
     // Get or create student lab session to get permanent Management IP
     const labId = lab.id as Types.ObjectId;
@@ -396,8 +395,6 @@ export class IPGenerator {
       },
       devices,
       ip_mappings: flatIpMappings,  // Send flat format to grading service
-      vlan_mappings: vlanMappings,
-      callback_url: callbackUrl
-    };
+      vlan_mappings: vlanMappings    };
   }
 }
