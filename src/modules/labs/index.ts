@@ -1,9 +1,10 @@
 import { Elysia, t } from "elysia";
 import { LabService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
-import { IpAllocationService } from "../../services/ip-allocation";
 import { VlanValidator } from "../../utils/vlan-validator";
 import { IPGenerator } from "../submissions/ip-generator";
+import { StudentLabSession, StudentLabSessionService } from "../student-lab-sessions";
+import { ILab } from "./model";
 
 // Updated schemas for the embedded network model with VLAN support
 const LabBodySchema = t.Object({
@@ -629,6 +630,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
     async ({ params, set }) => {
       try {
         const lab = await LabService.getLabWithDetails(params.id);
+        const { StudentLabSessionService } = await import('../student-lab-sessions/service');
+        const capacity = await StudentLabSessionService.calculateIpCapacity(lab as ILab);
         
         if (!lab) {
           set.status = 404;
@@ -642,7 +645,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
         return {
           success: true,
           message: "Lab details fetched successfully",
-          data: lab
+          data: lab,
+          ipCapacity: capacity
         };
       } catch (error) {
         set.status = 500;
@@ -697,48 +701,3 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
       }
     }
   )
-
-  // Get IP assignments for a student in a lab
-  .get(
-    "/:id/ip-assignments/:studentId",
-    async ({ params, set }) => {
-      try {
-        const lab = await LabService.getLabById(params.id);
-        
-        if (!lab) {
-          set.status = 404;
-          return {
-            success: false,
-            message: "Lab not found"
-          };
-        }
-
-        const ipAssignments = await IpAllocationService.calculateStudentIPs(lab as any, params.studentId as any);
-        
-        set.status = 200;
-        return {
-          success: true,
-          message: "IP assignments calculated successfully",
-          data: ipAssignments
-        };
-      } catch (error) {
-        set.status = 500;
-        return {
-          success: false,
-          message: "Error calculating IP assignments",
-          error: (error as Error).message
-        };
-      }
-    },
-    {
-      params: t.Object({ 
-        id: t.String(),
-        studentId: t.String()
-      }),
-      detail: {
-        tags: ["Labs"],
-        summary: "Get IP Assignments for Student",
-        description: "Calculate IP assignments for a specific student in a lab"
-      }
-    }
-  );

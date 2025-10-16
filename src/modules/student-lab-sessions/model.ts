@@ -2,13 +2,17 @@ import { Schema, model, Document, Types } from 'mongoose';
 
 /**
  * StudentLabSession Model
- * Tracks permanent Management IP assignments for each student's lab session
+ * Tracks Management IP assignments for each student's lab session
  *
- * Rules:
- * - IP is assigned when student starts a lab
+ * IP Assignment Rules:
+ * - IP is assigned dynamically when student starts a lab (first available IP)
  * - IP remains the same while lab is incomplete (status: 'active')
- * - IP is released when lab is completed (status: 'completed')
- * - If student restarts or starts new lab after completion, new IP is assigned
+ * - IP is released when lab is completed (status: 'completed') or times out
+ * - If student restarts after completion, a new available IP is assigned
+ *
+ * Race Condition Prevention:
+ * - Unique index on (labId, managementIp, status='active') prevents duplicate IP assignments
+ * - Service layer implements retry logic on duplicate key errors
  */
 export interface IStudentLabSession extends Document {
   studentId: string;           // Student's u_id (e.g., "65070041")
@@ -17,7 +21,7 @@ export interface IStudentLabSession extends Document {
 
   // IP Assignment
   managementIp: string;        // Assigned Management IP (e.g., "10.0.1.5")
-  studentIndex: number;        // Student's enrollment order (1-based)
+  studentIndex?: number;       // DEPRECATED: Student's enrollment order (kept for backward compatibility)
 
   // Session Status
   status: 'active' | 'completed';
@@ -56,7 +60,7 @@ const studentLabSessionSchema = new Schema<IStudentLabSession>({
   },
   studentIndex: {
     type: Number,
-    required: true,
+    required: false,
     min: 1
   },
 
@@ -90,12 +94,21 @@ const studentLabSessionSchema = new Schema<IStudentLabSession>({
 // Indexes for efficient querying
 studentLabSessionSchema.index({ labId: 1, status: 1 }); // Find all active sessions for a lab
 studentLabSessionSchema.index({ courseId: 1 }); // Course-level queries
-studentLabSessionSchema.index({ managementIp: 1, labId: 1 }); // IP uniqueness check per lab
 
 // Compound unique index: One active session per student per lab
 // This also covers queries for { studentId: 1, labId: 1, status: 1 }
 studentLabSessionSchema.index(
   { studentId: 1, labId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'active' }
+  }
+);
+
+// Unique index for race condition prevention: No two active sessions can have the same IP
+// Ensures atomic IP assignment at database level
+studentLabSessionSchema.index(
+  { labId: 1, managementIp: 1, status: 1 },
   {
     unique: true,
     partialFilterExpression: { status: 'active' }

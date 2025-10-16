@@ -168,7 +168,6 @@ export const sessionCleanupRoutes = new Elysia({ prefix: "/admin/sessions" })
             session: {
               sessionId: session._id,
               managementIp: session.managementIp,
-              studentIndex: session.studentIndex,
               status: session.status,
               startedAt: session.startedAt,
               lastAccessedAt: session.lastAccessedAt

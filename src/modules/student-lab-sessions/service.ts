@@ -5,7 +5,13 @@ import { Enrollment } from '../enrollments/model';
 
 /**
  * StudentLabSession Service
- * Manages permanent Management IP assignments for student lab sessions
+ * Manages dynamic Management IP assignments for student lab sessions
+ *
+ * IP Assignment Strategy:
+ * - IPs are assigned dynamically based on availability, not enrollment order
+ * - Merges exempt IP ranges with currently assigned IPs to find available IPs
+ * - Validates IPs are within subnet boundaries (excludes network/broadcast addresses)
+ * - Uses MongoDB unique index + retry logic to prevent race conditions
  */
 export class StudentLabSessionService {
 
@@ -15,42 +21,61 @@ export class StudentLabSessionService {
    * Logic:
    * - If active session exists: return existing IP
    * - If no active session or previous completed: create new session with new IP
+   * - Uses retry logic with unique index to prevent race conditions
    */
   static async getOrCreateSession(
     studentId: string,
     labId: Types.ObjectId,
     lab: ILab
   ): Promise<IStudentLabSession> {
-    // Check for existing active session
-    const existingSession = await StudentLabSession.findOne({
-      studentId,
-      labId,
-      status: 'active'
-    });
+    const MAX_RETRIES = 5;
 
-    if (existingSession) {
-      // Update last accessed time
-      existingSession.lastAccessedAt = new Date();
-      await existingSession.save();
-      return existingSession;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        // Check for existing active session
+        const existingSession = await StudentLabSession.findOne({
+          studentId,
+          labId,
+          status: 'active'
+        });
+
+        if (existingSession) {
+          // Update last accessed time
+          existingSession.lastAccessedAt = new Date();
+          await existingSession.save();
+          return existingSession;
+        }
+
+        // No active session - create new one with new IP
+        const managementIp = await this.calculateManagementIP(lab);
+
+        const newSession = new StudentLabSession({
+          studentId,
+          labId,
+          courseId: lab.courseId,
+          managementIp,
+          status: 'active',
+          startedAt: new Date(),
+          lastAccessedAt: new Date()
+        });
+
+        return await newSession.save();
+
+      } catch (error: any) {
+        // Check if error is duplicate key (race condition on IP assignment)
+        if (error.code === 11000 && attempt < MAX_RETRIES - 1) {
+          // Another thread took this IP, wait briefly and retry
+          const waitTime = 50 * (attempt + 1); // Exponential backoff: 50ms, 100ms, 150ms...
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          continue; // Retry with new IP calculation
+        }
+
+        // Not a duplicate key error or max retries reached
+        throw new Error(`Failed to create session: ${error.message}`);
+      }
     }
 
-    // No active session - create new one with new IP
-    const studentIndex = await this.getStudentIndex(lab.courseId, studentId);
-    const managementIp = await this.calculateManagementIP(lab, studentIndex);
-
-    const newSession = new StudentLabSession({
-      studentId,
-      labId,
-      courseId: lab.courseId,
-      managementIp,
-      studentIndex,
-      status: 'active',
-      startedAt: new Date(),
-      lastAccessedAt: new Date()
-    });
-
-    return await newSession.save();
+    throw new Error('Failed to assign IP after maximum retries. Please try again.');
   }
 
   /**
@@ -139,53 +164,22 @@ export class StudentLabSessionService {
     }).sort({ studentIndex: 1 });
   }
 
-  /**
-   * Get student enrollment index (1-based) using enrollment order
-   * Uses actual Enrollment model schema: { u_id, c_id, u_role, enrollmentDate }
-   */
-  private static async getStudentIndex(
-    courseId: Types.ObjectId,
-    studentId: string
-  ): Promise<number> {
-    try {
-      // Get all student enrollments for this course, sorted by enrollment date
-      const enrollments = await Enrollment.find({
-        c_id: courseId.toString(),
-        u_role: 'STUDENT'
-      })
-      .sort({ enrollmentDate: 1 })
-      .lean();
-      // Find the student's position in the enrollment order
-      const studentIndex = enrollments.findIndex(
-        enrollment => enrollment.u_id === studentId
-      );
-
-      if (studentIndex === -1) {
-        throw new Error(`Student ${studentId} not found in course enrollments`);
-      }
-
-      // Return 1-based index (first student gets index 1, not 0)
-      return studentIndex + 1;
-    } catch (error) {
-      throw new Error(`Error getting student index: ${(error as Error).message}`);
-    }
-  }
 
   /**
-   * Calculate Management IP based on student index and lab network configuration
-   * Uses enrollment-order algorithm and skips exempt IP ranges
+   * Calculate Management IP based on lab network configuration
+   * Finds the first available IP by checking exempt ranges and assigned IPs
    *
    * Algorithm:
-   * 1. Count how many exempt IPs exist BEFORE the student's position
-   * 2. Shift student's position by that count
-   * 3. This ensures students get unique sequential non-exempt IPs
+   * 1. Merge exempt IP ranges with currently assigned IPs
+   * 2. Find first available IP starting from baseIp + 1
+   * 3. Validate IP is within subnet boundaries (excludes network/broadcast addresses)
    */
   private static async calculateManagementIP(
-    lab: ILab,
-    studentIndex: number
+    lab: ILab
   ): Promise<string> {
     try {
       const baseIp = lab.network.topology.baseNetwork;
+      const subnetMask = lab.network.topology.subnetMask;
       let exemptRanges = lab.network.topology.exemptIpRanges || [];
 
       // Convert base IP to long integer
@@ -196,10 +190,18 @@ export class StudentLabSessionService {
         await this.getAssignedIpRanges(lab.id)
       );
       console.log(`Merged Exempt Ranges:`, mergedExemptRanges.map(r => ({ start: this.longToIp(r.start), end: this.longToIp(r.end) }))) // --- IGNORE ---
+
       const candidateIp = this.getAvailableIp(
         baseIpLong + 1,
-        mergedExemptRanges.map(r => ({ start: this.longToIp(r.start), end: this.longToIp(r.end) }))
+        mergedExemptRanges.map(r => ({ start: this.longToIp(r.start), end: this.longToIp(r.end) })),
+        baseIp,
+        subnetMask
       );
+
+      if (!candidateIp) {
+        throw new Error('No available IPs in subnet. All IPs are either exempt or assigned.');
+      }
+
       return candidateIp;
     } catch (error) {
       throw new Error(`Error calculating management IP: ${(error as Error).message}`);
@@ -208,12 +210,19 @@ export class StudentLabSessionService {
 
   private static getAvailableIp(
     iplong: number,
-    exemptRanges: Array<{ start: string; end?: string }>
-  ): string {
-    // Logic to find the next available IP address
+    exemptRanges: Array<{ start: string; end?: string }>,
+    baseIp: string,
+    subnetMask: number
+  ): string | null {
+    // Logic to find the next available IP address within subnet boundaries
     if (!exemptRanges || exemptRanges.length === 0) {
-      return this.longToIp(iplong);
+      // Check if IP is within valid range (excluding network and broadcast)
+      if (this.isIpInSubnet(iplong, baseIp, subnetMask)) {
+        return this.longToIp(iplong);
+      }
+      return null; // No available IP
     }
+
     for (const range of exemptRanges) {
       const startNum = this.ipToLong(range.start);
       const endNum = range.end ? this.ipToLong(range.end) : startNum;
@@ -222,7 +231,14 @@ export class StudentLabSessionService {
         iplong = endNum + 1;
       }
     }
-    return this.longToIp(iplong);
+
+    // Validate the final IP is within subnet boundaries
+    if (this.isIpInSubnet(iplong, baseIp, subnetMask)) {
+      return this.longToIp(iplong);
+    }
+
+    // IP exhausted - outside valid range
+    return null;
   }
 
   private static adjustExemptRanges(
@@ -312,25 +328,50 @@ export class StudentLabSessionService {
   }
 
   /**
-   * Calculate available IP capacity considering exempt ranges
+   * Calculate broadcast address from base IP (network address) and subnet mask
+   * baseIp is always the network address
+   */
+  private static getBroadcastAddress(baseIp: string, subnetMask: number): number {
+    const networkAddress = this.ipToLong(baseIp);
+    const hostBits = 32 - subnetMask;
+    return (networkAddress | ((1 << hostBits) - 1)) >>> 0;
+  }
+
+  /**
+   * Check if an IP is within the valid subnet range
+   * Excludes network address (baseIp) and broadcast address
+   */
+  private static isIpInSubnet(ipLong: number, baseIp: string, subnetMask: number): boolean {
+    const networkAddress = this.ipToLong(baseIp);
+    const broadcastAddress = this.getBroadcastAddress(baseIp, subnetMask);
+
+    // IP must be between network and broadcast (exclusive)
+    return ipLong > networkAddress && ipLong < broadcastAddress;
+  }
+
+  /**
+   * Calculate available IP capacity considering exempt ranges and assigned IPs
    * Returns capacity information for validation
+   * Uses merged ranges for accurate calculation (same logic as IP assignment)
    */
   static async calculateIpCapacity(
     lab: ILab
   ): Promise<{
     totalIps: number;
     exemptCount: number;
+    assignedCount: number;
+    totalBlocked: number;
     available: number;
     enrolledStudents: number;
     sufficient: boolean;
   }> {
     try {
-      const { baseNetwork, subnetMask, exemptIpRanges } = lab.network.topology;
+      const { subnetMask, exemptIpRanges } = lab.network.topology;
 
       // Total usable IPs in management network (excluding network & broadcast)
       const totalIps = Math.pow(2, 32 - subnetMask) - 2;
 
-      // Count exempt IPs
+      // Count configured exempt IPs (for transparency)
       let exemptCount = 0;
       if (exemptIpRanges && exemptIpRanges.length > 0) {
         for (const range of exemptIpRanges) {
@@ -344,18 +385,36 @@ export class StudentLabSessionService {
         }
       }
 
+      // Get assigned IPs
+      const assignedIps = await this.getAssignedIpRanges(lab.id);
+      const assignedCount = assignedIps.length;
+
+      // Merge exempt and assigned ranges for accurate count
+      const mergedExemptRanges = this.adjustExemptRanges(
+        (exemptIpRanges || []).map(r => ({ start: r.start, end: r.end || r.start })),
+        assignedIps
+      );
+
+      // Count total blocked IPs from merged ranges
+      let totalBlocked = 0;
+      for (const range of mergedExemptRanges) {
+        totalBlocked += (range.end - range.start + 1);
+      }
+
       // Count enrolled STUDENTS in this lab's course
       const enrolledStudents = await Enrollment.countDocuments({
         c_id: lab.courseId.toString(),
         u_role: 'STUDENT'
       });
 
-      const available = totalIps - exemptCount;
+      const available = totalIps - totalBlocked;
       const sufficient = available >= enrolledStudents;
 
       return {
         totalIps,
         exemptCount,
+        assignedCount,
+        totalBlocked,
         available,
         enrolledStudents,
         sufficient
@@ -406,6 +465,11 @@ export class StudentLabSessionService {
   /**
    * Reassign Management IPs for conflicted sessions
    * Called when instructor confirms exempt range update that conflicts with active sessions
+   *
+   * Strategy:
+   * 1. Temporarily remove old conflicted IPs from database (release them)
+   * 2. Calculate new IPs (which won't see the old IPs as assigned anymore)
+   * 3. Update sessions with new IPs
    */
   static async reassignConflictedIPs(
     labId: Types.ObjectId,
@@ -414,24 +478,44 @@ export class StudentLabSessionService {
   ): Promise<number> {
     let reassignedCount = 0;
 
-    for (const studentId of conflictedStudentIds) {
-      const session = await StudentLabSession.findOne({
-        studentId,
-        labId,
-        status: 'active'
-      });
+    // Collect all conflicted sessions first
+    const conflictedSessions = await StudentLabSession.find({
+      studentId: { $in: conflictedStudentIds },
+      labId,
+      status: 'active'
+    });
 
-      if (!session) continue;
+    // Temporarily delete all conflicted sessions to release their IPs
+    await StudentLabSession.deleteMany({
+      studentId: { $in: conflictedStudentIds },
+      labId,
+      status: 'active'
+    });
 
-      // Calculate new Management IP that avoids exempt ranges
-      const newManagementIp = await this.calculateManagementIP(lab, session.studentIndex);
+    // Reassign new IPs for each student
+    for (const oldSession of conflictedSessions) {
+      try {
+        // Calculate new Management IP (won't see old IP as assigned anymore)
+        const newManagementIp = await this.calculateManagementIP(lab);
 
-      // Update session with new IP
-      session.managementIp = newManagementIp;
-      session.lastAccessedAt = new Date();
-      await session.save();
+        // Recreate session with new IP
+        const newSession = new StudentLabSession({
+          studentId: oldSession.studentId,
+          labId: oldSession.labId,
+          courseId: oldSession.courseId,
+          managementIp: newManagementIp,
+          status: 'active',
+          startedAt: oldSession.startedAt, // Preserve original start time
+          lastAccessedAt: new Date()
+        });
 
-      reassignedCount++;
+        await newSession.save();
+        reassignedCount++;
+
+      } catch (error) {
+        console.error(`Failed to reassign IP for student ${oldSession.studentId}:`, error);
+        // Continue with other students even if one fails
+      }
     }
 
     return reassignedCount;

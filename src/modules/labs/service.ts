@@ -4,7 +4,6 @@ import { env } from "process";
 import { Types } from "mongoose";
 import { ObjectId } from "mongodb";
 import { User } from "../auth/model";
-import { IpAllocationService } from "../../services/ip-allocation";
 
 /**
  * Lab Service - Business logic for lab operations
@@ -152,10 +151,7 @@ export class LabService {
         return null;
       }
 
-      // If network configuration changed, clear related IP cache
-      if (updateFields.network) {
-        await IpAllocationService.clearLabIPCache(id);
-      }
+      // IP cache no longer used - removed IpAllocationService
 
       // Transform response to match frontend interface
       return {
@@ -174,12 +170,7 @@ export class LabService {
   static async deleteLab(id: string) {
     try {
       const deletedLab = await Lab.findByIdAndDelete(id);
-      
-      if (deletedLab) {
-        // Clear related IP cache when lab is deleted
-        await IpAllocationService.clearLabIPCache(id);
-      }
-      
+      // IP cache no longer used - removed IpAllocationService
       return deletedLab;
     } catch (error) {
       throw new Error(`Error deleting lab: ${(error as Error).message}`);
