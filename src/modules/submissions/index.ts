@@ -355,6 +355,93 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
     }
   )
   .get(
+    "/lab/:labId",
+    async ({ params, query, set }) => {
+      try {
+        const overview = await SubmissionService.getLabSubmissionOverview(
+          params.labId,
+          {
+            limit: query.limit ? parseInt(query.limit) : undefined,
+            offset: query.offset ? parseInt(query.offset) : undefined
+          }
+        );
+        return { status: "success", ...overview };
+      } catch (error) {
+        console.error("Error fetching lab submission overview:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to fetch submission overview" };
+      }
+    },
+    {
+      params: t.Object({
+        labId: t.String()
+      }),
+      query: t.Object({
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String())
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get Lab Submission Overview",
+        description: "Get student progression overview for a lab. Shows which part each student is on and their latest submission status. Lightweight for polling with pagination support."
+      }
+    }
+  )
+  .get(
+    "/history/lab/:labId/student/:studentId",
+    async ({ params, set }) => {
+      try {
+        const history = await SubmissionService.getStudentSubmissionHistory(
+          params.labId,
+          params.studentId
+        );
+        return { status: "success", data: history };
+      } catch (error) {
+        console.error("Error fetching student submission history:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to fetch submission history" };
+      }
+    },
+    {
+      params: t.Object({
+        labId: t.String(),
+        studentId: t.String()
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get Student Submission History",
+        description: "Get submission history for a specific student in a lab, grouped by part. Shows all attempts with scores and statuses."
+      }
+    }
+  )
+  .get(
+    "/detailed/:submissionId",
+    async ({ params, set }) => {
+      try {
+        const submission = await SubmissionService.getSubmissionById(params.submissionId);
+        if (!submission) {
+          set.status = 404;
+          return { status: "error", message: "Submission not found" };
+        }
+        return { status: "success", data: submission };
+      } catch (error) {
+        console.error("Error fetching submission details:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to fetch submission details" };
+      }
+    },
+    {
+      params: t.Object({
+        submissionId: t.String()
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get Detailed Submission",
+        description: "Get complete submission details including all grading results, test cases, and debug information by submission ID."
+      }
+    }
+  )
+  .get(
     "/:jobId/stream",
     async ({ params, request }) => {
       const { jobId } = params;

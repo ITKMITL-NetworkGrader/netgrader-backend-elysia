@@ -241,18 +241,53 @@ export class SubmissionService {
       limit?: number;
       offset?: number;
     }
-  ): Promise<ISubmission[]> {
-    const query: any = { labId: new Types.ObjectId(labId) };
+  ): Promise<any[]> {
+    const matchStage: any = { labId: new Types.ObjectId(labId) };
     
     if (options?.status) {
-      query.status = options.status;
+      matchStage.status = options.status;
     }
 
-    return await Submission.find(query)
-      .populate('studentId', 'name email')
-      .sort({ submittedAt: -1 })
-      .limit(options?.limit || 100)
-      .skip(options?.offset || 0);
+    const submissions = await Submission.aggregate([
+      {
+        $match: matchStage
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'studentId',
+          foreignField: 'u_id',
+          as: 'studentInfo'
+        }
+      },
+      {
+        $unwind: {
+          path: '$studentInfo',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $addFields: {
+          studentName: { $ifNull: ['$studentInfo.fullName', 'Unknown Student'] }
+        }
+      },
+      {
+        $project: {
+          studentInfo: 0 // Remove the full studentInfo object, keep only studentName
+        }
+      },
+      {
+        $sort: { submittedAt: -1 }
+      },
+      {
+        $skip: options?.offset || 0
+      },
+      {
+        $limit: options?.limit || 100
+      }
+    ]);
+
+    return submissions;
   }
 
   /**
@@ -365,5 +400,229 @@ export class SubmissionService {
     });
 
     return result.deletedCount;
+  }
+
+  /**
+   * Get student progression overview for a lab (lightweight for polling)
+   * Shows high-level progression: which part students are on and their latest status
+   */
+  static async getLabSubmissionOverview(
+    labId: string | Types.ObjectId,
+    options?: {
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<{ data: any[], total: number, limit: number, offset: number }> {
+    const labObjectId = new Types.ObjectId(labId);
+
+    // Get total parts for this lab
+    const partsResponse = await PartService.getPartsByLab(labId.toString());
+    const totalParts = partsResponse.parts.length;
+
+    // Build aggregation pipeline
+    const pipeline: any[] = [
+      {
+        $match: { labId: labObjectId }
+      },
+      // Sort by submission date to get latest
+      {
+        $sort: { submittedAt: -1 }
+      },
+      // Group by student and part to find which parts they've completed
+      {
+        $group: {
+          _id: {
+            studentId: '$studentId',
+            partId: '$partId'
+          },
+          latestSubmission: { $first: '$$ROOT' },
+          hasCompletedPart: {
+            $max: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$status', 'completed'] },
+                    { $eq: ['$gradingResult.total_points_earned', '$gradingResult.total_points_possible'] },
+                    { $gt: ['$gradingResult.total_points_possible', 0] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      },
+      // Group by student to calculate progression
+      {
+        $group: {
+          _id: '$_id.studentId',
+          completedPartsCount: { $sum: '$hasCompletedPart' },
+          latestSubmissionDoc: { $first: '$latestSubmission' }
+        }
+      },
+      // Join with users to get student names
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: 'u_id',
+          as: 'studentInfo'
+        }
+      },
+      {
+        $unwind: {
+          path: '$studentInfo',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      // Final projection
+      {
+        $project: {
+          _id: 0,
+          studentId: '$_id',
+          studentName: { $ifNull: ['$studentInfo.fullName', 'Unknown Student'] },
+          // currentPart = completedParts + 1 (the part they're working on)
+          // But cap it at totalParts if all parts are completed
+          currentPart: {
+            $cond: [
+              { $eq: ['$completedPartsCount', totalParts] },
+              totalParts,
+              { $add: ['$completedPartsCount', 1] }
+            ]
+          },
+          totalParts: { $literal: totalParts },
+          progression: {
+            $concat: [
+              { $toString: '$completedPartsCount' },
+              '/',
+              { $toString: totalParts }
+            ]
+          },
+          // Show grading result status (passed/failed), not submission status
+          latestSubmissionStatus: {
+            $cond: [
+              { $eq: ['$latestSubmissionDoc.status', 'completed'] },
+              {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ['$latestSubmissionDoc.gradingResult.total_points_earned', '$latestSubmissionDoc.gradingResult.total_points_possible'] },
+                      { $gt: ['$latestSubmissionDoc.gradingResult.total_points_possible', 0] }
+                    ]
+                  },
+                  'passed',
+                  'failed'
+                ]
+              },
+              '$latestSubmissionDoc.status' // pending/running/cancelled
+            ]
+          },
+          latestSubmissionAt: '$latestSubmissionDoc.submittedAt'
+        }
+      },
+      // Sort by student ID
+      {
+        $sort: { studentId: 1 }
+      }
+    ];
+
+    // Get total count before pagination
+    const countPipeline = [...pipeline, { $count: 'total' }];
+    const countResult = await Submission.aggregate(countPipeline);
+    const total = countResult.length > 0 ? countResult[0].total : 0;
+
+    // Add pagination
+    if (options?.offset) {
+      pipeline.push({ $skip: options.offset });
+    }
+    if (options?.limit) {
+      pipeline.push({ $limit: options.limit });
+    }
+
+    const data = await Submission.aggregate(pipeline);
+
+    return {
+      data,
+      total,
+      limit: options?.limit || total,
+      offset: options?.offset || 0
+    };
+  }
+
+  /**
+   * Get submission history for a specific student in a lab, grouped by part
+   */
+  static async getStudentSubmissionHistory(
+    labId: string | Types.ObjectId,
+    studentId: string
+  ): Promise<any[]> {
+    const history = await Submission.aggregate([
+      {
+        $match: {
+          labId: new Types.ObjectId(labId),
+          studentId: studentId
+        }
+      },
+      // Project only essential fields
+      {
+        $project: {
+          _id: 1,
+          partId: 1,
+          status: 1,
+          attempt: 1,
+          submittedAt: 1,
+          completedAt: 1,
+          startedAt: 1,
+          score: '$gradingResult.total_points_earned',
+          totalPoints: '$gradingResult.total_points_possible'
+        }
+      },
+      // Sort by part and attempt (latest first)
+      {
+        $sort: { partId: 1, attempt: -1 }
+      },
+      // Group by part
+      {
+        $group: {
+          _id: '$partId',
+          submissionHistory: {
+            $push: {
+              _id: '$_id',
+              attempt: '$attempt',
+              status: '$status',
+              score: '$score',
+              totalPoints: '$totalPoints',
+              submittedAt: '$submittedAt',
+              startedAt: '$startedAt',
+              completedAt: '$completedAt'
+            }
+          }
+        }
+      },
+      // Final projection
+      {
+        $project: {
+          _id: 0,
+          partId: '$_id',
+          submissionHistory: 1
+        }
+      },
+      // Sort by partId
+      {
+        $sort: { partId: 1 }
+      }
+    ]);
+
+    return history;
+  }
+
+  /**
+   * Get detailed submission by submission ID
+   * Returns complete submission with all grading results and test details
+   */
+  static async getSubmissionById(submissionId: string | Types.ObjectId): Promise<ISubmission | null> {
+    return await Submission.findById(submissionId)
+      .populate('labId', 'title description');
   }
 }
