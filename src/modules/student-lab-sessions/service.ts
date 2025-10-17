@@ -529,7 +529,7 @@ export class StudentLabSessionService {
    * @returns Array of IP ranges where start and end are the same (single IP addresses)
    */
   static async getAssignedIpRanges(
-    labId: Types.ObjectId
+    labId: string
   ): Promise<Array<{ start: string; end: string }>> {
     const activeSessions = await StudentLabSession.find({
       labId,
@@ -540,6 +540,46 @@ export class StudentLabSessionService {
     return activeSessions.map(session => ({
       start: session.managementIp,
       end: session.managementIp
+    }));
+  }
+
+  static async getAssignedIps(
+    labId: string
+  ): Promise<Array<{ studentId: string; username: string; mgntIp: string }>> {
+    const activeSessions = await StudentLabSession.aggregate([
+      {
+        $match: {
+          labId: new Types.ObjectId(labId),
+          status: 'active'
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'studentId',
+          foreignField: 'u_id',
+          as: 'userInfo'
+        }
+      },
+      {
+        $unwind: {
+          path: '$userInfo',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $project: {
+          studentId: 1,
+          username: { $ifNull: ['$userInfo.fullName', 'Unknown User'] },
+          mgntIp: '$managementIp'
+        }
+      }
+    ]);
+
+    return activeSessions.map(session => ({
+      studentId: session.studentId,
+      username: session.username,
+      mgntIp: session.mgntIp
     }));
   }
 }

@@ -701,3 +701,43 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
       }
     }
   )
+  .get(
+    "/stats/:id", async ({ params, set }) => {
+      try {
+        const lab = await LabService.getLabById(params.id);
+        if (!lab) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Lab not found"
+          };
+        }
+        const assignedIps = (await StudentLabSessionService.getAssignedIps(params.id)).map(s => ({
+          studentId: s.studentId,
+          studentName: s.username,
+          managementIp: s.mgntIp
+        }));
+        const ipStats = await StudentLabSessionService.calculateIpCapacity(lab as ILab)
+        return {
+          success: true,
+          message: "Lab IP assignment statistics fetched successfully",
+          ipStats,
+          assignedIps
+        };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error fetching lab IP assignment statistics",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      detail: {
+        tags: ["Labs"],
+        summary: "Get Lab IP Assignment Statistics"
+      }
+    }
+  );
