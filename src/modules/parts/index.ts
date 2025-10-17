@@ -369,11 +369,11 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     "/:id/auto-save/:field",
     async ({ params, query, set }) => {
       try {
-        const { partId, field } = params;
+        const { id, field } = params;
         const { labId } = query;
 
         const result = await PartService.loadAutoSave(
-          partId,
+          id,
           labId as string,
           field
         );
@@ -410,11 +410,11 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     "/:id/with-autosave",
     async ({ params, query, set }) => {
       try {
-        const { partId } = params;
+        const { id } = params;
         const { labId } = query;
 
         const part = await PartService.getPartWithAutoSave(
-          partId,
+          id,
           labId as string
         );
         
