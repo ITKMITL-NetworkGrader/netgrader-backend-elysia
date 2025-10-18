@@ -22,6 +22,27 @@ export interface ILabPart extends Document {
     order: number;
     points: number;
 
+    // Schema mapping (how answer maps to StudentIpSchema)
+    schemaMapping?: {
+      vlanIndex: number;         // Which VLAN (0-9)
+      field: 'networkAddress' | 'subnetMask' | 'firstUsableIp' |
+             'lastUsableIp' | 'broadcastAddress';
+      deviceId?: string;         // For device-specific IPs
+      variableName?: string;     // For device interface IPs
+      autoDetected?: boolean;    // Was VLAN auto-detected?
+    };
+
+    // Validation metadata
+    answerFormula?: string;      // Reserved for future auto-validation
+    expectedAnswerType: 'exact' | 'range';
+    placeholder?: string;
+    inputFormat?: 'ip' | 'cidr' | 'number' | 'text';
+
+    // Lecturer-defined answer (custom text questions)
+    expectedAnswer?: string;     // Required when questionType === 'custom_text'
+    caseSensitive?: boolean;     // Default false
+    trimWhitespace?: boolean;    // Default true
+
     // IP Table Questionnaire (ONLY for 'ip_table_questionnaire' type)
     ipTableQuestionnaire?: {
       tableId: string;
@@ -201,6 +222,7 @@ const labPartSchema = new Schema<ILabPart>({
 
   // Questions for fill_in_blank parts
   questions: [{
+    _id: false,
     questionId: { type: String, required: true },
     questionText: { type: String, required: true },
     questionType: {
@@ -212,6 +234,42 @@ const labPartSchema = new Schema<ILabPart>({
     },
     order: { type: Number, required: true },
     points: { type: Number, required: true, min: 0 },
+
+    // Schema mapping (how answer maps to StudentIpSchema)
+    schemaMapping: {
+      type: {
+        _id: false,
+        vlanIndex: { type: Number, required: true, min: 0, max: 9 },
+        field: {
+          type: String,
+          enum: ['networkAddress', 'subnetMask', 'firstUsableIp', 'lastUsableIp', 'broadcastAddress'],
+          required: true
+        },
+        deviceId: { type: String, required: false },
+        variableName: { type: String, required: false },
+        autoDetected: { type: Boolean, required: false, default: false }
+      },
+      required: false
+    },
+
+    // Validation metadata
+    answerFormula: { type: String, required: false },
+    expectedAnswerType: {
+      type: String,
+      enum: ['exact', 'range'],
+      required: true
+    },
+    placeholder: { type: String, required: false },
+    inputFormat: {
+      type: String,
+      enum: ['ip', 'cidr', 'number', 'text'],
+      required: false
+    },
+
+    // Lecturer-defined answer (custom text questions)
+    expectedAnswer: { type: String, required: false },
+    caseSensitive: { type: Boolean, required: false, default: false },
+    trimWhitespace: { type: Boolean, required: false, default: true },
 
     // IP Table Questionnaire
     ipTableQuestionnaire: {

@@ -8,75 +8,203 @@ const RichContentSchema = t.Object({
   json: t.Any()
 });
 
-// Updated schemas for embedded tasks model
+// Schema mapping for IP calculations
+const SchemaMappingSchema = t.Object({
+  vlanIndex: t.Number({ minimum: 0, maximum: 9 }),
+  field: t.Union([
+    t.Literal("networkAddress"),
+    t.Literal("subnetMask"),
+    t.Literal("firstUsableIp"),
+    t.Literal("lastUsableIp"),
+    t.Literal("broadcastAddress")
+  ]),
+  deviceId: t.Optional(t.String()),
+  variableName: t.Optional(t.String()),
+  autoDetected: t.Optional(t.Boolean())
+});
+
+// Calculated answer schema for IP tables
+const CalculatedAnswerSchema = t.Object({
+  calculationType: t.Union([
+    t.Literal("vlan_network_address"),
+    t.Literal("vlan_first_usable"),
+    t.Literal("vlan_last_usable"),
+    t.Literal("vlan_broadcast"),
+    t.Literal("vlan_subnet_mask"),
+    t.Literal("vlan_lecturer_offset"),
+    t.Literal("vlan_lecturer_range"),
+    t.Literal("device_interface_ip"),
+    t.Literal("vlan_id")
+  ]),
+  vlanIndex: t.Optional(t.Number({ minimum: 0, maximum: 9 })),
+  lecturerOffset: t.Optional(t.Number({ minimum: 1, maximum: 254 })),
+  lecturerRangeStart: t.Optional(t.Number({ minimum: 1, maximum: 254 })),
+  lecturerRangeEnd: t.Optional(t.Number({ minimum: 1, maximum: 254 })),
+  deviceId: t.Optional(t.String()),
+  interfaceName: t.Optional(t.String())
+});
+
+// IP Table cell schema
+const TableCellSchema = t.Object({
+  cellId: t.String(),
+  rowId: t.String(),
+  columnId: t.String(),
+  answerType: t.Union([t.Literal("static"), t.Literal("calculated")]),
+  staticAnswer: t.Optional(t.String()),
+  calculatedAnswer: t.Optional(CalculatedAnswerSchema),
+  points: t.Number({ minimum: 0 }),
+  autoCalculated: t.Boolean()
+});
+
+// IP Table questionnaire schema
+const IpTableQuestionnaireSchema = t.Object({
+  tableId: t.String(),
+  rowCount: t.Number({ minimum: 1, maximum: 10 }),
+  columnCount: t.Number({ minimum: 1, maximum: 10 }),
+  autoCalculate: t.Boolean(),
+  columns: t.Array(t.Object({
+    columnId: t.String(),
+    label: t.String(),
+    order: t.Number()
+  })),
+  rows: t.Array(t.Object({
+    rowId: t.String(),
+    deviceId: t.String(),
+    interfaceName: t.String(),
+    displayName: t.String(),
+    order: t.Number()
+  })),
+  cells: t.Array(t.Array(TableCellSchema))
+});
+
+// Question schema for fill-in-blank parts
+const QuestionSchema = t.Object({
+  questionId: t.String(),
+  questionText: t.String(),
+  questionType: t.Union([
+    t.Literal("network_address"),
+    t.Literal("first_usable_ip"),
+    t.Literal("last_usable_ip"),
+    t.Literal("broadcast_address"),
+    t.Literal("subnet_mask"),
+    t.Literal("ip_address"),
+    t.Literal("number"),
+    t.Literal("custom_text"),
+    t.Literal("ip_table_questionnaire")
+  ]),
+  order: t.Number(),
+  points: t.Number({ minimum: 0 }),
+  schemaMapping: t.Optional(SchemaMappingSchema),
+  answerFormula: t.Optional(t.String()),
+  expectedAnswerType: t.Union([t.Literal("exact"), t.Literal("range")]),
+  placeholder: t.Optional(t.String()),
+  inputFormat: t.Optional(t.Union([
+    t.Literal("ip"),
+    t.Literal("cidr"),
+    t.Literal("number"),
+    t.Literal("text")
+  ])),
+  expectedAnswer: t.Optional(t.String()),
+  caseSensitive: t.Optional(t.Boolean()),
+  trimWhitespace: t.Optional(t.Boolean()),
+  ipTableQuestionnaire: t.Optional(IpTableQuestionnaireSchema)
+});
+
+// DHCP configuration schema
+const DhcpConfigurationSchema = t.Object({
+  vlanIndex: t.Number({ minimum: 0, maximum: 9 }),
+  startOffset: t.Number({ minimum: 1, maximum: 254 }),
+  endOffset: t.Number({ minimum: 1, maximum: 254 }),
+  dhcpServerDevice: t.String()
+});
+
+// Task schema (for network_config parts)
+const TaskSchema = t.Object({
+  taskId: t.String(),
+  name: t.String(),
+  description: t.String({ default: "" }),
+  templateId: t.String(),
+  group_id: t.Optional(t.String({ description: "Optional grouping for grading" })),
+  executionDevice: t.String(),
+  targetDevices: t.Array(t.String(), { default: [] }),
+  parameters: t.Record(t.String(), t.Any()),
+  testCases: t.Array(t.Object({
+    comparison_type: t.String({ description: "Type of comparison: equals, contains, regex, success, ssh_success, greater_than" }),
+    expected_result: t.Any({ description: "Expected value/result for comparison" })
+  })),
+  order: t.Number(),
+  points: t.Number()
+});
+
+// Task group schema
+const TaskGroupSchema = t.Object({
+  group_id: t.String(),
+  title: t.String(),
+  description: t.String({ default: "" }),
+  group_type: t.Union([t.Literal("all_or_nothing"), t.Literal("proportional")]),
+  points: t.Number(),
+  continue_on_failure: t.Boolean(),
+  timeout_seconds: t.Number()
+});
+
+// Main Part Create Schema (supports all part types)
 const PartCreateSchema = t.Object({
   labId: t.String({ description: "Lab ID this part belongs to" }),
   partId: t.String({ description: "Human-readable ID within lab" }),
   title: t.String({ description: "Part title" }),
-  description: t.String({ default: "" }),
-  instructions: t.Union([RichContentSchema, t.String()]), // Accept both rich content and plain HTML string
+  description: t.Optional(t.String({ default: "" })),
+  instructions: t.Union([RichContentSchema, t.String()]),
   order: t.Number({ description: "Part order within lab" }),
-  tasks: t.Array(t.Object({
-    taskId: t.String(),
-    name: t.String(),
-    description: t.String({ default: "" }),
-    templateId: t.String(),
-    group_id: t.Optional(t.String({ description: "Optional grouping for grading" })),
-    executionDevice: t.String(),
-    targetDevices: t.Array(t.String(), { default: [] }),
-    parameters: t.Record(t.String(), t.Any()),
-    testCases: t.Array(t.Object({
-      comparison_type: t.String({ description: "Type of comparison: equals, contains, regex, success, ssh_success, greater_than" }),
-      expected_result: t.Any({ description: "Expected value/result for comparison" })
-    })),
-    order: t.Number(),
-    points: t.Number()
-  })),
-  task_groups: t.Array(t.Object({
-    group_id: t.String(),
-    title: t.String(),
-    description: t.String({ default: "" }),
-    group_type: t.Union([t.Literal("all_or_nothing"), t.Literal("proportional")]),
-    points: t.Number(),
-    continue_on_failure: t.Boolean(),
-    timeout_seconds: t.Number()
-  }), { default: [] }),
-  prerequisites: t.Array(t.String(), { default: [] }),
+
+  // Part type determines which fields are required
+  partType: t.Union([
+    t.Literal("fill_in_blank"),
+    t.Literal("network_config"),
+    t.Literal("dhcp_config")
+  ], { default: "network_config" }),
+
+  // For fill_in_blank parts
+  questions: t.Optional(t.Array(QuestionSchema)),
+
+  // For network_config parts
+  tasks: t.Optional(t.Array(TaskSchema)),
+  task_groups: t.Optional(t.Array(TaskGroupSchema, { default: [] })),
+
+  // For dhcp_config parts
+  dhcpConfiguration: t.Optional(DhcpConfigurationSchema),
+
+  // Common fields
+  prerequisites: t.Optional(t.Array(t.String(), { default: [] })),
   totalPoints: t.Number({ description: "Total points for this part" })
 });
 
+// Part Update Schema (all fields optional for partial updates)
 const PartUpdateSchema = t.Object({
   partId: t.Optional(t.String()),
   title: t.Optional(t.String()),
-  description: t.String({ default: "" }),
-  instructions: t.Optional(t.Union([RichContentSchema, t.String()])), // Accept both rich content and plain HTML string
+  description: t.Optional(t.String()),
+  instructions: t.Optional(t.Union([RichContentSchema, t.String()])),
   order: t.Optional(t.Number()),
-  tasks: t.Optional(t.Array(t.Object({
-    taskId: t.String(),
-    name: t.String(),
-    description: t.String({ default: "" }),
-    templateId: t.String(),
-    group_id: t.Optional(t.String({ description: "Optional grouping for grading" })),
-    executionDevice: t.String(),
-    targetDevices: t.Array(t.String(), { default: [] }),
-    parameters: t.Record(t.String(), t.Any()),
-    testCases: t.Array(t.Object({
-      comparison_type: t.String({ description: "Type of comparison: equals, contains, regex, success, ssh_success, greater_than" }),
-      expected_result: t.Any({ description: "Expected value/result for comparison" })
-    })),
-    order: t.Number(),
-    points: t.Number()
-  }))),
-  task_groups: t.Array(t.Object({
-    group_id: t.String(),
-    title: t.String(),
-    description: t.String({ default: "" }),
-    group_type: t.Union([t.Literal("all_or_nothing"), t.Literal("proportional")]),
-    points: t.Number(),
-    continue_on_failure: t.Boolean(),
-    timeout_seconds: t.Number()
-  }), { default: [] }),
-  prerequisites: t.Array(t.String(), { default: [] }),
+
+  // Part type
+  partType: t.Optional(t.Union([
+    t.Literal("fill_in_blank"),
+    t.Literal("network_config"),
+    t.Literal("dhcp_config")
+  ])),
+
+  // For fill_in_blank parts
+  questions: t.Optional(t.Array(QuestionSchema)),
+
+  // For network_config parts
+  tasks: t.Optional(t.Array(TaskSchema)),
+  task_groups: t.Optional(t.Array(TaskGroupSchema)),
+
+  // For dhcp_config parts
+  dhcpConfiguration: t.Optional(DhcpConfigurationSchema),
+
+  // Common fields
+  prerequisites: t.Optional(t.Array(t.String())),
   totalPoints: t.Optional(t.Number())
 });
 
@@ -369,11 +497,11 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     "/:id/auto-save/:field",
     async ({ params, query, set }) => {
       try {
-        const { partId, field } = params;
+        const { id, field } = params;
         const { labId } = query;
 
         const result = await PartService.loadAutoSave(
-          partId,
+          id,
           labId as string,
           field
         );
@@ -410,11 +538,11 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     "/:id/with-autosave",
     async ({ params, query, set }) => {
       try {
-        const { partId } = params;
+        const { id } = params;
         const { labId } = query;
 
         const part = await PartService.getPartWithAutoSave(
-          partId,
+          id,
           labId as string
         );
         

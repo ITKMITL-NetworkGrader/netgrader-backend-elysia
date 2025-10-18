@@ -2,6 +2,7 @@ import { LabPart, ILabPart } from "./model";
 import { Lab } from "../labs/model";
 import { Types } from "mongoose";
 import { processRichContent, estimateReadingTime } from "../../utils/rich-content";
+import { PartValidator } from "./validation";
 
 /**
  * Part Service - Business logic for lab part operations
@@ -17,6 +18,12 @@ export class PartService {
       const labExists = await Lab.findById(partData.labId);
       if (!labExists) {
         throw new Error(`Lab with ID ${partData.labId} does not exist`);
+      }
+
+      // Validate part data based on partType
+      const validation = PartValidator.validatePartData(partData);
+      if (!validation.valid) {
+        throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
       }
 
       // Process rich content for instructions only
@@ -53,6 +60,8 @@ export class PartService {
         description: partData.description || "",
         instructions: processedInstructions,
         order: partData.order,
+        partType: partData.partType || 'network_config',
+        questions: partData.questions || [],
         tasks: (partData.tasks || []).map((task: any) => ({
           ...task,
           description: task.description || ""
@@ -61,6 +70,7 @@ export class PartService {
           ...group,
           description: group.description || ""
         })),
+        dhcpConfiguration: partData.dhcpConfiguration,
         prerequisites: (partData.prerequisites || []).filter((prereq: string) => prereq && prereq.trim() !== ''),
         totalPoints: partData.totalPoints,
         metadata: {
@@ -164,13 +174,35 @@ export class PartService {
    */
   static async updatePart(id: string, updateData: any) {
     try {
+      // Validate part data if partType or related fields are being updated
+      if (updateData.partType || updateData.questions || updateData.tasks || updateData.dhcpConfiguration) {
+        const currentPart = await LabPart.findById(id);
+        if (!currentPart) {
+          throw new Error('Part not found');
+        }
+
+        // Merge current data with updates for validation
+        const dataToValidate = {
+          partType: updateData.partType || currentPart.partType,
+          questions: updateData.questions !== undefined ? updateData.questions : currentPart.questions,
+          tasks: updateData.tasks !== undefined ? updateData.tasks : currentPart.tasks,
+          task_groups: updateData.task_groups !== undefined ? updateData.task_groups : currentPart.task_groups,
+          dhcpConfiguration: updateData.dhcpConfiguration !== undefined ? updateData.dhcpConfiguration : currentPart.dhcpConfiguration
+        };
+
+        const validation = PartValidator.validatePartData(dataToValidate);
+        if (!validation.valid) {
+          throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+        }
+      }
+
       // Filter out undefined values for partial updates
       const filteredData = Object.fromEntries(
         Object.entries(updateData).filter(([_, value]) => value !== undefined)
       );
 
       // Only allow updating specific fields
-      const allowedFields = ['partId', 'title', 'description', 'instructions', 'order', 'tasks', 'task_groups', 'prerequisites', 'totalPoints'];
+      const allowedFields = ['partId', 'title', 'description', 'instructions', 'order', 'partType', 'questions', 'tasks', 'task_groups', 'dhcpConfiguration', 'prerequisites', 'totalPoints'];
       const updateFields: any = {};
       
       allowedFields.forEach(field => {
