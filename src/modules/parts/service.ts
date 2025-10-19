@@ -1,5 +1,6 @@
 import { LabPart, ILabPart } from "./model";
 import { Lab } from "../labs/model";
+import { Submission } from "../submissions/model";
 import { Types } from "mongoose";
 import { processRichContent, estimateReadingTime } from "../../utils/rich-content";
 
@@ -263,21 +264,39 @@ export class PartService {
 
   /**
    * Delete part by ID
+   * Also cascades delete to all submissions for this part
    */
   static async deletePart(id: string) {
     try {
-      const deletedPart = await LabPart.findByIdAndDelete(id);
-      
-      if (!deletedPart) {
+      // First, find the part to get its partId for submission deletion
+      const part = await LabPart.findById(id);
+
+      if (!part) {
         return null;
       }
 
+      // Cascade delete: Remove all submissions for this part
+      // Submissions reference partId (string), not the MongoDB _id
+      const deletionResult = await Submission.deleteMany({
+        labId: part.labId,
+        partId: part.partId
+      });
+
+      console.log(`🗑️  Cascade delete: Removed ${deletionResult.deletedCount} submissions for part ${part.partId}`);
+
+      // Now delete the part itself
+      const deletedPart = await LabPart.findByIdAndDelete(id);
+
       return {
-        ...deletedPart.toObject(),
-        id: deletedPart._id?.toString(),
-        prerequisites: deletedPart.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
-        labId: deletedPart.labId?.toString(),
-        _id: undefined
+        ...deletedPart!.toObject(),
+        id: deletedPart!._id?.toString(),
+        prerequisites: deletedPart!.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
+        labId: deletedPart!.labId?.toString(),
+        _id: undefined,
+        // Include deletion stats in response
+        deletionStats: {
+          submissionsDeleted: deletionResult.deletedCount
+        }
       };
     } catch (error) {
       throw new Error(`Error deleting part: ${(error as Error).message}`);
