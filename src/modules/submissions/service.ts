@@ -625,4 +625,73 @@ export class SubmissionService {
     return await Submission.findById(submissionId)
       .populate('labId', 'title description');
   }
+
+  /**
+   * Store student IP table questionnaire answers
+   * Creates or updates IP answers for a specific lab part
+   */
+  static async storeIpAnswers(
+    studentId: string,
+    labId: string | Types.ObjectId,
+    partId: string,
+    answers: Record<string, string[][]>
+  ): Promise<any> {
+    const labObjectId = new Types.ObjectId(labId);
+
+    // Find existing submission or create metadata storage
+    // We use a special submission type for IP answers
+    const existingSubmission = await Submission.findOne({
+      studentId,
+      labId: labObjectId,
+      partId,
+      jobId: `ip-answers-${studentId}-${labId}-${partId}` // Special jobId for IP answers
+    });
+
+    if (existingSubmission) {
+      // Update existing IP answers
+      existingSubmission.ipMappings = answers as any;
+      existingSubmission.updatedAt = new Date();
+      await existingSubmission.save();
+      return existingSubmission.ipMappings;
+    }
+
+    // Create new IP answers submission
+    const submission = new Submission({
+      jobId: `ip-answers-${studentId}-${labId}-${partId}`,
+      studentId,
+      labId: labObjectId,
+      partId,
+      ipMappings: answers as any,
+      status: 'pending',
+      attempt: 0 // Special attempt number for IP answers
+    });
+
+    await submission.save();
+    return submission.ipMappings;
+  }
+
+  /**
+   * Retrieve student IP table questionnaire answers
+   * Gets IP answers for a specific lab part
+   */
+  static async getIpAnswers(
+    studentId: string,
+    labId: string | Types.ObjectId,
+    partId: string
+  ): Promise<Record<string, string[][]> | null> {
+    const labObjectId = new Types.ObjectId(labId);
+
+    const submission = await Submission.findOne({
+      studentId,
+      labId: labObjectId,
+      partId,
+      jobId: `ip-answers-${studentId}-${labId}-${partId}`
+    });
+
+    if (!submission) {
+      return null;
+    }
+
+    return submission.ipMappings as any;
+  }
 }

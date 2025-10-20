@@ -20,6 +20,43 @@ export class PartService {
         throw new Error(`Lab with ID ${partData.labId} does not exist`);
       }
 
+      // Validate IP Table Questionnaire - reject management interfaces
+      if (partData.partType === 'fill_in_blank' && partData.questions) {
+        for (const question of partData.questions) {
+          if (question.questionType === 'ip_table_questionnaire' && question.ipTableQuestionnaire) {
+            const cells = question.ipTableQuestionnaire.cells || [];
+
+            for (let rowIndex = 0; rowIndex < cells.length; rowIndex++) {
+              const row = cells[rowIndex];
+              for (let colIndex = 0; colIndex < row.length; colIndex++) {
+                const cell = row[colIndex];
+
+                // Check if this cell uses device_interface_ip with a management interface
+                if (cell.answerType === 'calculated' &&
+                    cell.calculatedAnswer?.calculationType === 'device_interface_ip') {
+                  const { deviceId, interfaceName } = cell.calculatedAnswer;
+
+                  if (deviceId && interfaceName) {
+                    // Find the device and check if the interface is a management interface
+                    const device = labExists.network?.devices?.find((d: any) => d.deviceId === deviceId);
+                    if (device) {
+                      const ipVar = device.ipVariables?.find((v: any) => v.name === interfaceName);
+                      if (ipVar?.isManagementInterface) {
+                        throw new Error(
+                          `Invalid IP Table configuration: Cell [${rowIndex}, ${colIndex}] uses management interface ` +
+                          `${deviceId}.${interfaceName}. Management interfaces cannot be used in IP questionnaires ` +
+                          `because they are auto-generated. Please remove this cell or use a different interface.`
+                        );
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Process rich content for instructions only
       let processedInstructions;
       
@@ -54,6 +91,9 @@ export class PartService {
         description: partData.description || "",
         instructions: processedInstructions,
         order: partData.order,
+        partType: partData.partType || 'network_config',
+        questions: partData.questions || [],
+        dhcpConfiguration: partData.dhcpConfiguration,
         tasks: (partData.tasks || []).map((task: any) => ({
           ...task,
           description: task.description || ""

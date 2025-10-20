@@ -526,4 +526,107 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         description: "Real-time Server-Sent Events stream for grading progress updates. Connect to this endpoint to receive instant updates without polling."
       }
     }
+  )
+  .post(
+    "/labs/:labId/ip-answers",
+    async ({ params, body, set, authPlugin }) => {
+      const { u_id } = authPlugin ?? { u_id: "" };
+      try {
+        const { labId } = params;
+        const { partId, answers } = body;
+
+        // Store or update IP answers for the student
+        const result = await SubmissionService.storeIpAnswers(
+          u_id,
+          labId,
+          partId,
+          answers
+        );
+
+        return {
+          status: "success",
+          message: "IP answers saved successfully",
+          data: result
+        };
+      } catch (error) {
+        console.error("Error storing IP answers:", error);
+        set.status = 500;
+        return {
+          status: "error",
+          message: `Failed to store IP answers: ${(error as Error).message}`
+        };
+      }
+    },
+    {
+      params: t.Object({
+        labId: t.String()
+      }),
+      body: t.Object({
+        partId: t.String(),
+        answers: t.Record(t.String(), t.Array(t.Array(t.String())))
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Store Student IP Answers",
+        description: "Store student's IP table questionnaire answers for a specific lab part."
+      }
+    }
+  )
+  .get(
+    "/labs/:labId/ip-answers",
+    async ({ params, query, set, authPlugin }) => {
+      const { u_id } = authPlugin ?? { u_id: "" };
+      try {
+        const { labId } = params;
+        const { partId } = query;
+
+        if (!partId) {
+          set.status = 400;
+          return {
+            status: "error",
+            message: "partId query parameter is required"
+          };
+        }
+
+        // Retrieve IP answers for the student
+        const answers = await SubmissionService.getIpAnswers(
+          u_id,
+          labId,
+          partId
+        );
+
+        if (!answers) {
+          set.status = 404;
+          return {
+            status: "error",
+            message: "No IP answers found for this lab part"
+          };
+        }
+
+        return {
+          status: "success",
+          data: answers
+        };
+      } catch (error) {
+        console.error("Error retrieving IP answers:", error);
+        set.status = 500;
+        return {
+          status: "error",
+          message: `Failed to retrieve IP answers: ${(error as Error).message}`
+        };
+      }
+    },
+    {
+      params: t.Object({
+        labId: t.String()
+      }),
+      query: t.Object({
+        partId: t.String()
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get Student IP Answers",
+        description: "Retrieve student's IP table questionnaire answers for a specific lab part."
+      }
+    }
   );
