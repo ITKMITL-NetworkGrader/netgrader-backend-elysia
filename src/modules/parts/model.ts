@@ -8,7 +8,79 @@ export interface ILabPart extends Document {
   description?: string;    // Markdown content
   instructions: RichContent;    // Student instructions with TipTap JSON
   order: number;           // Display sequence
-  
+
+  // Part Type (to distinguish between different part types)
+  partType: 'fill_in_blank' | 'network_config' | 'dhcp_config';
+
+  // Fill-in-Blank Questions
+  questions?: Array<{
+    questionId: string;
+    questionText: string;
+    questionType: 'network_address' | 'first_usable_ip' | 'last_usable_ip' | 'broadcast_address' |
+                  'subnet_mask' | 'ip_address' | 'number' | 'custom_text' | 'ip_table_questionnaire';
+    order: number;
+    points: number;
+    schemaMapping?: {
+      vlanIndex: number;
+      field: 'networkAddress' | 'subnetMask' | 'firstUsableIp' | 'lastUsableIp' | 'broadcastAddress';
+      deviceId?: string;
+      variableName?: string;
+      autoDetected?: boolean;
+    };
+    answerFormula?: string;
+    expectedAnswerType: 'exact' | 'range';
+    placeholder?: string;
+    inputFormat?: 'ip' | 'cidr' | 'number' | 'text';
+    expectedAnswer?: string;
+    caseSensitive?: boolean;
+    trimWhitespace?: boolean;
+    ipTableQuestionnaire?: {
+      tableId: string;
+      rowCount: number;
+      columnCount: number;
+      columns: Array<{
+        columnId: string;
+        label: string;
+        order: number;
+      }>;
+      rows: Array<{
+        rowId: string;
+        deviceId: string;
+        interfaceName: string;
+        displayName: string;
+        order: number;
+      }>;
+      cells: Array<Array<{
+        cellId: string;
+        rowId: string;
+        columnId: string;
+        answerType: 'static' | 'calculated';
+        staticAnswer?: string;
+        calculatedAnswer?: {
+          calculationType: 'vlan_network_address' | 'vlan_first_usable' | 'vlan_last_usable' |
+                          'vlan_broadcast' | 'vlan_subnet_mask' | 'vlan_lecturer_offset' |
+                          'vlan_lecturer_range' | 'device_interface_ip' | 'vlan_id';
+          vlanIndex?: number;
+          lecturerOffset?: number;
+          lecturerRangeStart?: number;
+          lecturerRangeEnd?: number;
+          deviceId?: string;
+          interfaceName?: string;
+        };
+        points: number;
+        autoCalculated: boolean;
+      }>>;
+    };
+  }>;
+
+  // DHCP Configuration
+  dhcpConfiguration?: {
+    vlanIndex: number;
+    startOffset: number;
+    endOffset: number;
+    dhcpServerDevice: string;
+  };
+
   // Embedded Tasks (1-10 per part typically)
   tasks: Array<{
     taskId: string;        // Unique within part
@@ -117,7 +189,114 @@ const labPartSchema = new Schema<ILabPart>({
     required: true,
     min: 1
   },
-  
+
+  // Part Type
+  partType: {
+    type: String,
+    enum: ['fill_in_blank', 'network_config', 'dhcp_config'],
+    required: true,
+    default: 'network_config'
+  },
+
+  // Fill-in-Blank Questions
+  questions: [{
+    _id: false,
+    questionId: { type: String, required: true },
+    questionText: { type: String, required: true },
+    questionType: {
+      type: String,
+      enum: ['network_address', 'first_usable_ip', 'last_usable_ip', 'broadcast_address',
+             'subnet_mask', 'ip_address', 'number', 'custom_text', 'ip_table_questionnaire'],
+      required: true
+    },
+    order: { type: Number, required: true },
+    points: { type: Number, required: true },
+    schemaMapping: {
+      _id: false,
+      vlanIndex: Number,
+      field: {
+        type: String,
+        enum: ['networkAddress', 'subnetMask', 'firstUsableIp', 'lastUsableIp', 'broadcastAddress']
+      },
+      deviceId: String,
+      variableName: String,
+      autoDetected: Boolean
+    },
+    answerFormula: String,
+    expectedAnswerType: {
+      type: String,
+      enum: ['exact', 'range'],
+      required: true
+    },
+    placeholder: String,
+    inputFormat: {
+      type: String,
+      enum: ['ip', 'cidr', 'number', 'text']
+    },
+    expectedAnswer: String,
+    caseSensitive: Boolean,
+    trimWhitespace: Boolean,
+    ipTableQuestionnaire: {
+      _id: false,
+      tableId: String,
+      rowCount: Number,
+      columnCount: Number,
+      columns: [{
+        _id: false,
+        columnId: String,
+        label: String,
+        order: Number
+      }],
+      rows: [{
+        _id: false,
+        rowId: String,
+        deviceId: String,
+        interfaceName: String,
+        displayName: String,
+        order: Number
+      }],
+      cells: {
+        type: [[{
+          _id: false,
+          cellId: String,
+          rowId: String,
+          columnId: String,
+          answerType: {
+            type: String,
+            enum: ['static', 'calculated']
+          },
+          staticAnswer: String,
+          calculatedAnswer: {
+            _id: false,
+            calculationType: {
+              type: String,
+              enum: ['vlan_network_address', 'vlan_first_usable', 'vlan_last_usable',
+                     'vlan_broadcast', 'vlan_subnet_mask', 'vlan_lecturer_offset',
+                     'vlan_lecturer_range', 'device_interface_ip', 'vlan_id']
+            },
+            vlanIndex: Number,
+            lecturerOffset: Number,
+            lecturerRangeStart: Number,
+            lecturerRangeEnd: Number,
+            deviceId: String,
+            interfaceName: String
+          },
+          points: Number,
+          autoCalculated: Boolean
+        }]]
+      }
+    }
+  }],
+
+  // DHCP Configuration
+  dhcpConfiguration: {
+    _id: false,
+    vlanIndex: Number,
+    startOffset: Number,
+    endOffset: Number,
+    dhcpServerDevice: String
+  },
+
   // Embedded Tasks
   tasks: [{
     taskId: {

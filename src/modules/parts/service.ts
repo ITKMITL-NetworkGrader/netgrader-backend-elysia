@@ -1,5 +1,6 @@
 import { LabPart, ILabPart } from "./model";
 import { Lab } from "../labs/model";
+import { Submission } from "../submissions/model";
 import { Types } from "mongoose";
 import { processRichContent, estimateReadingTime } from "../../utils/rich-content";
 
@@ -17,6 +18,43 @@ export class PartService {
       const labExists = await Lab.findById(partData.labId);
       if (!labExists) {
         throw new Error(`Lab with ID ${partData.labId} does not exist`);
+      }
+
+      // Validate IP Table Questionnaire - reject management interfaces
+      if (partData.partType === 'fill_in_blank' && partData.questions) {
+        for (const question of partData.questions) {
+          if (question.questionType === 'ip_table_questionnaire' && question.ipTableQuestionnaire) {
+            const cells = question.ipTableQuestionnaire.cells || [];
+
+            for (let rowIndex = 0; rowIndex < cells.length; rowIndex++) {
+              const row = cells[rowIndex];
+              for (let colIndex = 0; colIndex < row.length; colIndex++) {
+                const cell = row[colIndex];
+
+                // Check if this cell uses device_interface_ip with a management interface
+                if (cell.answerType === 'calculated' &&
+                    cell.calculatedAnswer?.calculationType === 'device_interface_ip') {
+                  const { deviceId, interfaceName } = cell.calculatedAnswer;
+
+                  if (deviceId && interfaceName) {
+                    // Find the device and check if the interface is a management interface
+                    const device = labExists.network?.devices?.find((d: any) => d.deviceId === deviceId);
+                    if (device) {
+                      const ipVar = device.ipVariables?.find((v: any) => v.name === interfaceName);
+                      if (ipVar?.isManagementInterface) {
+                        throw new Error(
+                          `Invalid IP Table configuration: Cell [${rowIndex}, ${colIndex}] uses management interface ` +
+                          `${deviceId}.${interfaceName}. Management interfaces cannot be used in IP questionnaires ` +
+                          `because they are auto-generated. Please remove this cell or use a different interface.`
+                        );
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
 
       // Process rich content for instructions only
@@ -53,6 +91,9 @@ export class PartService {
         description: partData.description || "",
         instructions: processedInstructions,
         order: partData.order,
+        partType: partData.partType || 'network_config',
+        questions: partData.questions || [],
+        dhcpConfiguration: partData.dhcpConfiguration,
         tasks: (partData.tasks || []).map((task: any) => ({
           ...task,
           description: task.description || ""
@@ -263,21 +304,39 @@ export class PartService {
 
   /**
    * Delete part by ID
+   * Also cascades delete to all submissions for this part
    */
   static async deletePart(id: string) {
     try {
-      const deletedPart = await LabPart.findByIdAndDelete(id);
-      
-      if (!deletedPart) {
+      // First, find the part to get its partId for submission deletion
+      const part = await LabPart.findById(id);
+
+      if (!part) {
         return null;
       }
 
+      // Cascade delete: Remove all submissions for this part
+      // Submissions reference partId (string), not the MongoDB _id
+      const deletionResult = await Submission.deleteMany({
+        labId: part.labId,
+        partId: part.partId
+      });
+
+      console.log(`🗑️  Cascade delete: Removed ${deletionResult.deletedCount} submissions for part ${part.partId}`);
+
+      // Now delete the part itself
+      const deletedPart = await LabPart.findByIdAndDelete(id);
+
       return {
-        ...deletedPart.toObject(),
-        id: deletedPart._id?.toString(),
-        prerequisites: deletedPart.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
-        labId: deletedPart.labId?.toString(),
-        _id: undefined
+        ...deletedPart!.toObject(),
+        id: deletedPart!._id?.toString(),
+        prerequisites: deletedPart!.prerequisites?.filter(prereq => prereq && prereq.trim() !== '') || [],
+        labId: deletedPart!.labId?.toString(),
+        _id: undefined,
+        // Include deletion stats in response
+        deletionStats: {
+          submissionsDeleted: deletionResult.deletedCount
+        }
       };
     } catch (error) {
       throw new Error(`Error deleting part: ${(error as Error).message}`);
