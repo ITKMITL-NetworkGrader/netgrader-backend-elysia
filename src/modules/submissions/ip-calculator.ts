@@ -96,8 +96,8 @@ export function calculateAdvancedStudentIP(
     throw new Error(`Invalid subnet mask: ${vlanConfig.subnetMask}. Must be between 8 and 30.`);
   }
 
-  if (vlanConfig.subnetIndex < 0) {
-    throw new Error(`Invalid subnet index: ${vlanConfig.subnetIndex}. Must be >= 0.`);
+  if (vlanConfig.subnetIndex < 1) {
+    throw new Error(`Invalid subnet index: ${vlanConfig.subnetIndex}. Must be >= 1.`);
   }
 
   // Calculate dec2 (second octet for 172.x.x.x)
@@ -124,7 +124,7 @@ export function calculateAdvancedStudentIP(
   // Calculate dynamic subnet block starting address
   // Block size = 2^(32 - subnetMask)
   const blockSize = Math.pow(2, 32 - vlanConfig.subnetMask);
-  const baseHostAddress = vlanConfig.subnetIndex * blockSize;
+  const baseHostAddress = (vlanConfig.subnetIndex - 1) * blockSize;
 
   // Validate that offset doesn't exceed block size
   if (interfaceOffset >= blockSize - 1) {
