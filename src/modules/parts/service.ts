@@ -21,38 +21,109 @@ export class PartService {
       }
 
       // Validate IP Table Questionnaire - reject management interfaces
-      if (partData.partType === 'fill_in_blank' && partData.questions) {
+      if (partData.partType === 'fill_in_blank' && Array.isArray(partData.questions)) {
         for (const question of partData.questions) {
           if (question.questionType === 'ip_table_questionnaire' && question.ipTableQuestionnaire) {
             const cells = question.ipTableQuestionnaire.cells || [];
+            let questionPoints = 0;
 
             for (let rowIndex = 0; rowIndex < cells.length; rowIndex++) {
-              const row = cells[rowIndex];
+              const row = cells[rowIndex] || [];
+
               for (let colIndex = 0; colIndex < row.length; colIndex++) {
-                const cell = row[colIndex];
+                const originalCell = row[colIndex] || {};
+                const cellType = originalCell.cellType || 'input';
+                const cell: any = {
+                  ...originalCell,
+                  cellType
+                };
 
-                // Check if this cell uses device_interface_ip with a management interface
-                if (cell.answerType === 'calculated' &&
-                    cell.calculatedAnswer?.calculationType === 'device_interface_ip') {
-                  const { deviceId, interfaceName } = cell.calculatedAnswer;
+                if (cellType === 'input') {
+                  const answerType = cell.answerType || 'calculated';
 
-                  if (deviceId && interfaceName) {
-                    // Find the device and check if the interface is a management interface
-                    const device = labExists.network?.devices?.find((d: any) => d.deviceId === deviceId);
-                    if (device) {
-                      const ipVar = device.ipVariables?.find((v: any) => v.name === interfaceName);
-                      if (ipVar?.isManagementInterface) {
-                        throw new Error(
-                          `Invalid IP Table configuration: Cell [${rowIndex}, ${colIndex}] uses management interface ` +
-                          `${deviceId}.${interfaceName}. Management interfaces cannot be used in IP questionnaires ` +
-                          `because they are auto-generated. Please remove this cell or use a different interface.`
-                        );
+                  if (answerType !== 'static' && answerType !== 'calculated') {
+                    throw new Error(
+                      `Invalid IP Table configuration: Input cell [${rowIndex + 1}, ${colIndex + 1}] must use answerType "static" or "calculated".`
+                    );
+                  }
+
+                  cell.answerType = answerType;
+                  cell.readonlyContent = undefined;
+                  cell.blankReason = undefined;
+
+                  if (answerType === 'static') {
+                    if (!cell.staticAnswer || typeof cell.staticAnswer !== 'string' || !cell.staticAnswer.trim()) {
+                      throw new Error(
+                        `Invalid IP Table configuration: Static input cell [${rowIndex + 1}, ${colIndex + 1}] must include a non-empty static answer.`
+                      );
+                    }
+                    cell.calculatedAnswer = undefined;
+                  } else {
+                    if (!cell.calculatedAnswer) {
+                      throw new Error(
+                        `Invalid IP Table configuration: Calculated input cell [${rowIndex + 1}, ${colIndex + 1}] is missing calculatedAnswer configuration.`
+                      );
+                    }
+                    cell.staticAnswer = undefined;
+
+                    if (cell.calculatedAnswer.calculationType === 'device_interface_ip') {
+                      const { deviceId, interfaceName } = cell.calculatedAnswer;
+
+                      if (deviceId && interfaceName) {
+                        const device = labExists.network?.devices?.find((d: any) => d.deviceId === deviceId);
+                        if (device) {
+                          const ipVar = device.ipVariables?.find((v: any) => v.name === interfaceName);
+                          if (ipVar?.isManagementInterface) {
+                            throw new Error(
+                              `Invalid IP Table configuration: Cell [${rowIndex + 1}, ${colIndex + 1}] uses management interface ` +
+                              `${deviceId}.${interfaceName}. Management interfaces cannot be used in IP questionnaires ` +
+                              `because they are auto-generated. Please remove this cell or use a different interface.`
+                            );
+                          }
+                        }
                       }
                     }
                   }
+
+                  const normalizedPoints = typeof cell.points === 'number' && !Number.isNaN(cell.points)
+                    ? cell.points
+                    : 0;
+                  cell.points = normalizedPoints >= 1 ? normalizedPoints : 1;
+                  cell.autoCalculated = Boolean(cell.autoCalculated);
+                  questionPoints += cell.points;
+                } else if (cellType === 'readonly') {
+                  const readonlyContent = (cell.readonlyContent ?? '').toString().trim();
+
+                  if (!readonlyContent) {
+                    throw new Error(
+                      `Invalid IP Table configuration: Read-only cell [${rowIndex + 1}, ${colIndex + 1}] must include readonlyContent.`
+                    );
+                  }
+
+                  cell.readonlyContent = readonlyContent;
+                  cell.answerType = undefined;
+                  cell.staticAnswer = undefined;
+                  cell.calculatedAnswer = undefined;
+                  cell.points = 0;
+                  cell.autoCalculated = false;
+                  cell.blankReason = undefined;
+                } else {
+                  // Blank cell
+                  cell.answerType = undefined;
+                  cell.staticAnswer = undefined;
+                  cell.calculatedAnswer = undefined;
+                  cell.points = 0;
+                  cell.autoCalculated = false;
+                  cell.readonlyContent = undefined;
+                  cell.blankReason = (cell.blankReason ?? '').toString().trim();
                 }
+
+                row[colIndex] = cell;
               }
             }
+
+            question.ipTableQuestionnaire.cells = cells;
+            question.points = questionPoints;
           }
         }
       }

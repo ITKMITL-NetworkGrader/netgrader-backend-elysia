@@ -273,7 +273,6 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
       },
     }
   )
-  // ...existing code...
   .get(
     "/status/:c_id",
     async ({ params, authPlugin, set }) => {
@@ -328,5 +327,59 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
         description:
           "Get the current user's enrollment status and role for a specific course.",
       },
+    }
+  )
+  .put(
+    "/course/:c_id/manage",
+    async ({ params, body, authPlugin, set }) => {
+      const { u_id = "" } = authPlugin || {};
+      const { c_id } = params;
+
+      try {
+        const { roleChanges = [], removals = [] } = body;
+
+        const result = await EnrollmentService.manageCourseEnrollments(
+          u_id,
+          new ObjectId(c_id).toString(),
+          roleChanges,
+          removals
+        );
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Enrollment changes applied successfully.",
+          updated: result.updated,
+          removed: result.removed
+        };
+      } catch (error) {
+        const status = (error as any)?.statusCode || 400;
+        set.status = status;
+        return {
+          success: false,
+          message: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({
+        c_id: t.String()
+      }),
+      body: t.Object({
+        roleChanges: t.Optional(
+          t.Array(
+            t.Object({
+              u_id: t.String(),
+              newRole: t.Union([t.Literal("STUDENT"), t.Literal("TA")])
+            })
+          )
+        ),
+        removals: t.Optional(t.Array(t.String()))
+      }),
+      detail: {
+        tags: ["Enrollments"],
+        summary: "Manage Course Enrollments",
+        description: "Bulk update roles and remove members from a course."
+      }
     }
   );

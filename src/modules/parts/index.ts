@@ -1,6 +1,8 @@
 import { Elysia, t } from "elysia";
 import { PartService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
+import { IFillInBlankQuestionResult } from "../submissions/model";
+import { SubmissionService } from "../submissions/service";
 import {
   calculateStudentIdBasedIP,
   calculateAdvancedStudentIP,
@@ -34,7 +36,12 @@ const IpTableQuestionnaireSchema = t.Object({
     cellId: t.String(),
     rowId: t.String(),
     columnId: t.String(),
-    answerType: t.Union([t.Literal('static'), t.Literal('calculated')]),
+    cellType: t.Optional(t.Union([
+      t.Literal('input'),
+      t.Literal('readonly'),
+      t.Literal('blank')
+    ], { default: 'input' })),
+    answerType: t.Optional(t.Union([t.Literal('static'), t.Literal('calculated')])),
     staticAnswer: t.Optional(t.String()),
     calculatedAnswer: t.Optional(t.Object({
       calculationType: t.Union([
@@ -55,6 +62,8 @@ const IpTableQuestionnaireSchema = t.Object({
       deviceId: t.Optional(t.String()),
       interfaceName: t.Optional(t.String())
     })),
+    readonlyContent: t.Optional(t.String()),
+    blankReason: t.Optional(t.String()),
     points: t.Number(),
     autoCalculated: t.Boolean()
   })))
@@ -984,11 +993,25 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
             let correctCells = 0;
             let totalCells = 0;
             let pointsEarned = 0;
+            const cellDetails: Array<Array<{ isCorrect: boolean }>> = [];
 
             if (question.ipTableQuestionnaire?.cells) {
               question.ipTableQuestionnaire.cells.forEach((row: any[], rowIndex: number) => {
+                if (!cellDetails[rowIndex]) {
+                  cellDetails[rowIndex] = [];
+                }
                 row.forEach((cell: any, colIndex: number) => {
+                  const cellType = cell.cellType || 'input';
+
+                  if (cellType !== 'input') {
+                    // Non-input cells are informational; auto-award their points if any
+                    pointsEarned += cell.points || 0;
+                    cellDetails[rowIndex][colIndex] = { isCorrect: true };
+                    return;
+                  }
+
                   totalCells++;
+
                   const studentAnswer = studentAnswers[rowIndex]?.[colIndex]?.trim() || '';
                   let expectedAnswer = '';
 
@@ -1014,6 +1037,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
 
                   // Compare answers (case-insensitive IP comparison)
                   const isCorrect = studentAnswer.toLowerCase() === expectedAnswer.toLowerCase();
+                  cellDetails[rowIndex][colIndex] = { isCorrect };
 
                   if (isCorrect) {
                     correctCells++;
@@ -1028,7 +1052,8 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
               isCorrect: correctCells === totalCells,
               pointsEarned,
               correctCells,
-              totalCells
+              totalCells,
+              cellDetails
             };
           } else {
             // Regular question - use question points
@@ -1043,6 +1068,68 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
         const totalPointsEarned = results.reduce((sum: number, r: any) => sum + r.pointsEarned, 0);
         const totalPoints = part.totalPoints || totalPointsEarned;
 
+        // Build fill-in-blank submission summary
+        const questionSummaries = (part.questions || []).map((question: any) => {
+          const answerPayload = answers.find((a: any) => a.questionId === question.questionId) || {};
+          const questionResult = results.find((r: any) => r.questionId === question.questionId);
+
+          const summary: IFillInBlankQuestionResult = {
+            questionId: question.questionId,
+            questionText: question.questionText,
+            questionType: question.questionType,
+            pointsEarned: questionResult?.pointsEarned || 0,
+            pointsPossible: question.points || 0,
+            isCorrect: questionResult?.isCorrect || false,
+            studentAnswer: typeof answerPayload.answer === 'string' ? answerPayload.answer : null,
+            ipTableAnswers: answerPayload.ipTableAnswers,
+            cellResults: undefined
+          };
+
+          if (questionResult && typeof questionResult.correctCells === 'number') {
+            summary.correctCells = questionResult.correctCells;
+          }
+          if (questionResult && typeof questionResult.totalCells === 'number') {
+            summary.totalCells = questionResult.totalCells;
+          }
+          if (question.questionType === 'ip_table_questionnaire' && questionResult?.cellDetails) {
+            const studentTableAnswers: string[][] = answerPayload.ipTableAnswers || [];
+            const cellResults: Array<Array<{ isCorrect?: boolean; answer: string | null }>> = [];
+
+            studentTableAnswers.forEach((row: string[], rowIndex: number) => {
+              cellResults[rowIndex] = [];
+              row.forEach((value, colIndex) => {
+                const cellInfo = questionResult.cellDetails?.[rowIndex]?.[colIndex];
+                cellResults[rowIndex][colIndex] = {
+                  isCorrect: cellInfo?.isCorrect,
+                  answer: value ?? null
+                };
+              });
+            });
+
+            summary.cellResults = cellResults;
+          }
+
+          return summary;
+        });
+
+        const answersMap = answers.reduce((acc: Record<string, any>, item: any) => {
+          acc[item.questionId] = item.ipTableAnswers ?? item.answer ?? null;
+          return acc;
+        }, {});
+
+        const submissionRecord = await SubmissionService.recordFillInBlankSubmission({
+          studentId: u_id,
+          labId,
+          partId,
+          summary: {
+            totalPointsEarned,
+            totalPoints,
+            passed: totalPoints === 0 ? true : totalPointsEarned === totalPoints,
+            questions: questionSummaries
+          },
+          answersMap
+        });
+
         set.status = 200;
         return {
           success: true,
@@ -1054,6 +1141,12 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
             message: totalPointsEarned === totalPoints
               ? 'All answers correct!'
               : 'Some answers were incorrect'
+          },
+          submission: {
+            id: submissionRecord._id?.toString(),
+            attempt: submissionRecord.attempt,
+            status: submissionRecord.status,
+            submittedAt: submissionRecord.submittedAt
           }
         };
       } catch (error) {

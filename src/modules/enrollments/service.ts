@@ -8,6 +8,15 @@ interface CourseMember {
   enrollmentDate: Date;
 }
 
+export class EnrollmentServiceError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode = 400) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
 export class EnrollmentService {
   static async getAllEnrollments(): Promise<IEnrollment[]> {
     try {
@@ -166,5 +175,96 @@ export class EnrollmentService {
       },
     ]);
     return members as CourseMember[];
+  }
+
+  static async manageCourseEnrollments(
+    managerId: string,
+    courseId: string,
+    roleChanges: Array<{ u_id: string; newRole: "STUDENT" | "TA" }>,
+    removals: string[]
+  ): Promise<{ updated: Array<{ u_id: string; newRole: string }>; removed: string[] }> {
+    const sanitizedCourseId = courseId;
+
+    const managerEnrollment = await Enrollment.findOne({
+      u_id: managerId,
+      c_id: sanitizedCourseId
+    });
+
+    if (!managerEnrollment) {
+      throw new EnrollmentServiceError("You are not enrolled in this course.", 403);
+    }
+
+    const managerRole = managerEnrollment.u_role;
+    if (managerRole !== "INSTRUCTOR" && managerRole !== "TA") {
+      throw new EnrollmentServiceError("You do not have permission to manage enrollments for this course.", 403);
+    }
+
+    const uniqueTargetIds = Array.from(new Set([
+      ...roleChanges.map(change => change.u_id),
+      ...removals
+    ]));
+
+    const targetEnrollments = await Enrollment.find({
+      c_id: sanitizedCourseId,
+      u_id: { $in: uniqueTargetIds }
+    });
+
+    const enrollmentMap = new Map<string, IEnrollment>(
+      targetEnrollments.map(enrollment => [enrollment.u_id, enrollment])
+    );
+
+    const updated: Array<{ u_id: string; newRole: string }> = [];
+    const removedResults: string[] = [];
+
+    for (const change of roleChanges) {
+      if (removals.includes(change.u_id)) {
+        continue;
+      }
+
+      const enrollment = enrollmentMap.get(change.u_id);
+      if (!enrollment) {
+        throw new EnrollmentServiceError(`Enrollment not found for user ${change.u_id}`);
+      }
+
+      if (change.newRole === enrollment.u_role) {
+        continue;
+      }
+
+      if (managerRole === "TA") {
+        if (enrollment.u_role !== "STUDENT") {
+          throw new EnrollmentServiceError("Teaching Assistants can only change student roles.", 403);
+        }
+      }
+
+      if (managerRole === "INSTRUCTOR") {
+        if (enrollment.u_role === "INSTRUCTOR") {
+          throw new EnrollmentServiceError("Instructors cannot change other instructor roles.", 403);
+        }
+      }
+
+      enrollment.u_role = change.newRole;
+      await enrollment.save();
+      updated.push({ u_id: enrollment.u_id, newRole: enrollment.u_role });
+    }
+
+    for (const userId of removals) {
+      const enrollment = enrollmentMap.get(userId);
+      if (!enrollment) {
+        throw new EnrollmentServiceError(`Enrollment not found for user ${userId}`);
+      }
+
+      if (managerRole === "TA" && enrollment.u_role !== "STUDENT") {
+        throw new EnrollmentServiceError("Teaching Assistants can only remove students.", 403);
+      }
+
+      if (managerRole !== "INSTRUCTOR" && enrollment.u_role === "INSTRUCTOR") {
+        throw new EnrollmentServiceError("You do not have permission to remove this member.", 403);
+      }
+
+      await Enrollment.deleteOne({ _id: (enrollment as any)._id });
+      removedResults.push(userId);
+    }
+
+    return { updated, removed: removedResults };
   }
 }

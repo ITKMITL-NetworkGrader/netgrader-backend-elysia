@@ -54,7 +54,8 @@ export interface ILabPart extends Document {
         cellId: string;
         rowId: string;
         columnId: string;
-        answerType: 'static' | 'calculated';
+        cellType: 'input' | 'readonly' | 'blank';
+        answerType?: 'static' | 'calculated';
         staticAnswer?: string;
         calculatedAnswer?: {
           calculationType: 'vlan_network_address' | 'vlan_first_usable' | 'vlan_last_usable' |
@@ -67,6 +68,8 @@ export interface ILabPart extends Document {
           deviceId?: string;
           interfaceName?: string;
         };
+        readonlyContent?: string;
+        blankReason?: string;
         points: number;
         autoCalculated: boolean;
       }>>;
@@ -261,9 +264,15 @@ const labPartSchema = new Schema<ILabPart>({
           cellId: String,
           rowId: String,
           columnId: String,
+          cellType: {
+            type: String,
+            enum: ['input', 'readonly', 'blank'],
+            default: 'input'
+          },
           answerType: {
             type: String,
-            enum: ['static', 'calculated']
+            enum: ['static', 'calculated'],
+            required: false
           },
           staticAnswer: String,
           calculatedAnswer: {
@@ -281,6 +290,8 @@ const labPartSchema = new Schema<ILabPart>({
             deviceId: String,
             interfaceName: String
           },
+          readonlyContent: String,
+          blankReason: String,
           points: Number,
           autoCalculated: Boolean
         }]]

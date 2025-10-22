@@ -71,11 +71,36 @@ export interface IProgressUpdate {
   timestamp: Date;
 }
 
+export interface IFillInBlankQuestionResult {
+  questionId: string;
+  questionText: string;
+  questionType: string;
+  pointsEarned: number;
+  pointsPossible: number;
+  isCorrect: boolean;
+  studentAnswer?: string | null;
+  ipTableAnswers?: string[][];
+  correctCells?: number;
+  totalCells?: number;
+  cellResults?: Array<Array<{
+    isCorrect?: boolean;
+    answer: string | null;
+  }>>;
+}
+
+export interface IFillInBlankResults {
+  totalPointsEarned: number;
+  totalPoints: number;
+  passed: boolean;
+  questions: IFillInBlankQuestionResult[];
+}
+
 export interface ISubmission extends Document {
   jobId: string;
   studentId: string;
   labId: Types.ObjectId;
   partId: string;
+  submissionType: 'auto_grading' | 'fill_in_blank' | 'ip_answers';
   
   // Submission Status
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -85,6 +110,9 @@ export interface ISubmission extends Document {
   
   // Grading Results
   gradingResult?: IGradingResult;
+
+  // Fill-in-blank summary (when submissionType === 'fill_in_blank')
+  fillInBlankResults?: IFillInBlankResults;
   
   // Progress Tracking
   progressHistory: IProgressUpdate[];
@@ -170,6 +198,33 @@ const progressUpdateSchema = new Schema<IProgressUpdate>({
   timestamp: { type: Date, required: true, default: Date.now }
 }, { _id: false });
 
+const fillInBlankQuestionResultSchema = new Schema<IFillInBlankQuestionResult>({
+  questionId: { type: String, required: true },
+  questionText: { type: String, required: true },
+  questionType: { type: String, required: true },
+  pointsEarned: { type: Number, required: true },
+  pointsPossible: { type: Number, required: true },
+  isCorrect: { type: Boolean, required: true },
+  studentAnswer: { type: String, default: null },
+  ipTableAnswers: { type: [[String]], default: undefined },
+  correctCells: { type: Number },
+  totalCells: { type: Number },
+  cellResults: {
+    type: [[{
+      isCorrect: { type: Boolean },
+      answer: { type: String }
+    }]],
+    default: undefined
+  }
+}, { _id: false });
+
+const fillInBlankResultsSchema = new Schema<IFillInBlankResults>({
+  totalPointsEarned: { type: Number, required: true },
+  totalPoints: { type: Number, required: true },
+  passed: { type: Boolean, required: true },
+  questions: { type: [fillInBlankQuestionResultSchema], required: true }
+}, { _id: false });
+
 const submissionSchema = new Schema<ISubmission>({
   jobId: {
     type: String,
@@ -189,6 +244,11 @@ const submissionSchema = new Schema<ISubmission>({
   partId: {
     type: String,
     required: true
+  },
+  submissionType: {
+    type: String,
+    enum: ['auto_grading', 'fill_in_blank', 'ip_answers'],
+    default: 'auto_grading'
   },
   
   // Submission Status
@@ -212,6 +272,9 @@ const submissionSchema = new Schema<ISubmission>({
   
   // Grading Results
   gradingResult: gradingResultSchema,
+
+  // Fill-in-blank results summary
+  fillInBlankResults: fillInBlankResultsSchema,
   
   // Progress Tracking
   progressHistory: [progressUpdateSchema],
@@ -224,7 +287,8 @@ const submissionSchema = new Schema<ISubmission>({
   },
   ipMappings: {
     type: Schema.Types.Mixed,
-    required: true
+    required: true,
+    default: {}
   }
 }, {
   timestamps: true
