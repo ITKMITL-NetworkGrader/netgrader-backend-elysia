@@ -1,9 +1,23 @@
 import { Types } from 'mongoose';
-import { Submission, ISubmission, IGradingResult, IProgressUpdate } from './model';
+import { Submission, ISubmission, IGradingResult, IProgressUpdate, IFillInBlankResults } from './model';
 import { StudentLabSessionService } from '../student-lab-sessions/service';
 import { PartService } from '../parts/service';
 
 export class SubmissionService {
+  private static async getNextAttempt(
+    studentId: string,
+    labId: Types.ObjectId,
+    partId: string
+  ): Promise<number> {
+    const latestSubmission = await Submission.findOne({
+      studentId,
+      labId,
+      partId,
+      submissionType: { $ne: 'ip_answers' } // ip_answers submissions do not count toward attempts
+    }).sort({ attempt: -1 });
+
+    return latestSubmission ? latestSubmission.attempt + 1 : 1;
+  }
   
   /**
    * Create a new submission record or increment attempt for existing student/lab/part
@@ -17,21 +31,14 @@ export class SubmissionService {
     attempt?: number;
   }): Promise<ISubmission> {
     const labObjectId = new Types.ObjectId(data.labId);
-    
-    // Find the highest attempt number for this student/lab/part combination
-    const latestSubmission = await Submission.findOne({
-      studentId: data.studentId,
-      labId: labObjectId,
-      partId: data.partId
-    }).sort({ attempt: -1 });
-
-    const nextAttempt = latestSubmission ? latestSubmission.attempt + 1 : 1;
+    const nextAttempt = await this.getNextAttempt(data.studentId, labObjectId, data.partId);
 
     const submission = new Submission({
       jobId: data.jobId,
       studentId: data.studentId,
       labId: labObjectId,
       partId: data.partId,
+      submissionType: 'auto_grading',
       ipMappings: data.ipMappings,
       attempt: nextAttempt,
       status: 'pending',
@@ -561,7 +568,8 @@ export class SubmissionService {
       {
         $match: {
           labId: new Types.ObjectId(labId),
-          studentId: studentId
+          studentId: studentId,
+          submissionType: { $ne: 'ip_answers' }
         }
       },
       // Project only essential fields
@@ -574,8 +582,13 @@ export class SubmissionService {
           submittedAt: 1,
           completedAt: 1,
           startedAt: 1,
-          score: '$gradingResult.total_points_earned',
-          totalPoints: '$gradingResult.total_points_possible'
+          score: {
+            $ifNull: ['$gradingResult.total_points_earned', '$fillInBlankResults.totalPointsEarned']
+          },
+          totalPoints: {
+            $ifNull: ['$gradingResult.total_points_possible', '$fillInBlankResults.totalPoints']
+          },
+          submissionType: '$submissionType'
         }
       },
       // Sort by part and attempt (latest first)
@@ -595,7 +608,8 @@ export class SubmissionService {
               totalPoints: '$totalPoints',
               submittedAt: '$submittedAt',
               startedAt: '$startedAt',
-              completedAt: '$completedAt'
+              completedAt: '$completedAt',
+              submissionType: '$submissionType'
             }
           }
         }
@@ -661,6 +675,7 @@ export class SubmissionService {
       studentId,
       labId: labObjectId,
       partId,
+      submissionType: 'ip_answers',
       ipMappings: answers as any,
       status: 'pending',
       attempt: 0 // Special attempt number for IP answers
@@ -668,6 +683,72 @@ export class SubmissionService {
 
     await submission.save();
     return submission.ipMappings;
+  }
+
+  /**
+   * Record a fill-in-blank submission attempt
+   */
+  static async recordFillInBlankSubmission(params: {
+    studentId: string;
+    labId: string | Types.ObjectId;
+    partId: string;
+    summary: IFillInBlankResults;
+    answersMap?: Record<string, any>;
+  }): Promise<ISubmission> {
+    const labObjectId = new Types.ObjectId(params.labId);
+    const jobId = `fib-${params.studentId}-${params.partId}-${Date.now()}`;
+    const attempt = await this.getNextAttempt(params.studentId, labObjectId, params.partId);
+
+    const gradingResult: IGradingResult = {
+      job_id: jobId,
+      status: 'completed',
+      total_points_earned: params.summary.totalPointsEarned,
+      total_points_possible: params.summary.totalPoints,
+      test_results: [],
+      group_results: [],
+      total_execution_time: 0,
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString()
+    };
+
+    const submission = new Submission({
+      jobId,
+      studentId: params.studentId,
+      labId: labObjectId,
+      partId: params.partId,
+      submissionType: 'fill_in_blank',
+      status: 'completed',
+      submittedAt: new Date(),
+      completedAt: new Date(),
+      gradingResult,
+      fillInBlankResults: params.summary,
+      progressHistory: [],
+      attempt,
+      ipMappings: params.answersMap || {}
+    });
+
+    const savedSubmission = await submission.save();
+
+    if (params.summary.passed && params.summary.totalPoints > 0) {
+      try {
+        const allPartsCompleted = await this.areAllPartsCompleted(
+          params.studentId,
+          labObjectId
+        );
+
+        if (allPartsCompleted) {
+          await StudentLabSessionService.deleteSession(
+            params.studentId,
+            labObjectId
+          );
+          console.log(`[Session Released] Student ${params.studentId} completed ALL parts of lab ${labObjectId} - IP released`);
+        }
+      } catch (error) {
+        console.error('Error checking/releasing student lab session for fill-in-blank submission:', error);
+      }
+    }
+
+    return savedSubmission;
   }
 
   /**
