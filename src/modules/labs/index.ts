@@ -5,6 +5,7 @@ import { VlanValidator } from "../../utils/vlan-validator";
 import { IPGenerator } from "../submissions/ip-generator";
 import { StudentLabSession, StudentLabSessionService } from "../student-lab-sessions";
 import { ILab } from "./model";
+import { Types } from "mongoose";
 
 // Updated schemas for the embedded network model with VLAN support
 const LabBodySchema = t.Object({
@@ -12,6 +13,13 @@ const LabBodySchema = t.Object({
   title: t.String(),
   description: t.String({ default: "" }),
   type: t.Optional(t.Union([t.Literal("lab"), t.Literal("exam")])),
+  instructions: t.Optional(t.Union([
+    t.String(),
+    t.Object({
+      html: t.String(),
+      json: t.Any()
+    })
+  ])),
   network: t.Object({
     name: t.String(),
     topology: t.Object({
@@ -257,7 +265,7 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
   // Get lab by ID
   .get(
     "/:id",
-    async ({ params, set }) => {
+    async ({ params, set, authPlugin }) => {
       try {
         const lab = await LabService.getLabById(params.id);
 
@@ -269,11 +277,28 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           };
         }
 
+        let instructionsAcknowledged = false;
+
+        if (authPlugin?.u_id) {
+          try {
+            const labObjectId = new Types.ObjectId(params.id);
+            instructionsAcknowledged = await StudentLabSessionService.hasAcknowledgedInstructions(
+              authPlugin.u_id,
+              labObjectId
+            );
+          } catch (ackError) {
+            console.warn('[Labs] Unable to determine instruction acknowledgement state:', ackError);
+          }
+        }
+
         set.status = 200;
         return {
           success: true,
           message: "Lab fetched successfully",
-          data: lab
+          data: {
+            ...lab,
+            instructionsAcknowledged
+          }
         };
       } catch (error) {
         set.status = 500;
@@ -383,6 +408,66 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
         tags: ["Labs"],
         summary: "Start Lab - Generate Network Configuration",
         description: "Creates/retrieves student lab session and generates all IP addresses (Management + VLAN) and VLAN IDs for the student to configure their devices"
+      }
+    }
+  )
+  // Acknowledge lab instructions (Part 0)
+  .post(
+    "/:id/instructions/acknowledge",
+    async ({ params, set, authPlugin }) => {
+      try {
+        const { u_id } = authPlugin ?? { u_id: "" };
+
+        if (!u_id) {
+          set.status = 401;
+          return {
+            success: false,
+            message: "Unauthorized"
+          };
+        }
+
+        const lab = await LabService.getLabById(params.id);
+        if (!lab) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Lab not found"
+          };
+        }
+
+        const labObjectId = new Types.ObjectId(params.id);
+        const session = await StudentLabSessionService.acknowledgeInstructions(
+          u_id,
+          labObjectId,
+          lab as ILab
+        );
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Instructions acknowledged",
+          data: {
+            acknowledged: session.instructionsAcknowledged,
+            acknowledgedAt: session.instructionsAcknowledgedAt
+          }
+        };
+      } catch (error) {
+        console.error('[Instructions Acknowledge Error]', error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Failed to acknowledge instructions",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      beforeHandle: requireRole(["STUDENT", "INSTRUCTOR", "ADMIN"]),
+      detail: {
+        tags: ["Labs"],
+        summary: "Acknowledge Lab Instructions",
+        description: "Marks the lab instructions (Part 0) as acknowledged for the current student"
       }
     }
   )

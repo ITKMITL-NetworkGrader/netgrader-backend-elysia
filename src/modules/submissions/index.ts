@@ -388,6 +388,29 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
     }
   )
   .get(
+    "/lab/:labId/part-summary",
+    async ({ params, set }) => {
+      try {
+        const summary = await SubmissionService.getSubmissionSummaryByPart(params.labId);
+        return { status: "success", data: summary };
+      } catch (error) {
+        console.error("Error fetching part submission summary:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to fetch part submission summary" };
+      }
+    },
+    {
+      params: t.Object({
+        labId: t.String()
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get Part Submission Summary",
+        description: "Aggregate submission counts per part for a lab. Used to warn when editing parts with existing submissions."
+      }
+    }
+  )
+  .get(
     "/history/lab/:labId/student/:studentId",
     async ({ params, set }) => {
       try {

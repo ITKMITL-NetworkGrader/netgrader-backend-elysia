@@ -1,10 +1,12 @@
 import { Schema, model, Document, Types } from 'mongoose';
+import { RichContent } from '../../utils/rich-content';
 
 export interface ILab extends Document {
   courseId: Types.ObjectId;      // Ref: courses._id
   title: string;
   description?: string;
   type: 'lab' | 'exam';
+  instructions?: RichContent;
 
   // Embedded Network Configuration (frequently co-accessed)
   network: {
@@ -77,6 +79,26 @@ export interface ILab extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
+
+const RichContentSchema = new Schema({
+  html: { type: String, required: true },
+  json: { type: Schema.Types.Mixed, required: true },
+  plainText: { type: String, required: true },
+  metadata: {
+    wordCount: { type: Number, required: true },
+    characterCount: { type: Number, required: true },
+    estimatedReadingTime: { type: Number, required: true },
+    lastModified: { type: Date, required: true },
+    hasImages: { type: Boolean, required: true },
+    hasCodeBlocks: { type: Boolean, required: true },
+    headingStructure: [{
+      _id: false,
+      level: { type: Number, required: true },
+      text: { type: String, required: true },
+      id: { type: String, required: true }
+    }]
+  }
+}, { _id: false });
 
 const labSchema = new Schema<ILab>({
   courseId: {
@@ -294,7 +316,11 @@ const labSchema = new Schema<ILab>({
       }
     }]
   },
-  
+  instructions: {
+    type: RichContentSchema,
+    required: false
+  },
+
   // Metadata
   createdBy: {
     type: Schema.Types.ObjectId,

@@ -305,6 +305,8 @@ export class IPGenerator {
       sessionId: string;
       status: string;
       startedAt: Date;
+      instructionsAcknowledged: boolean;
+      instructionsAcknowledgedAt?: Date;
     };
   }> {
     // Get or create student lab session to get permanent Management IP
@@ -327,7 +329,9 @@ export class IPGenerator {
       sessionInfo: {
         sessionId: session.id?.toString() || '',
         status: session.status,
-        startedAt: session.startedAt
+        startedAt: session.startedAt,
+        instructionsAcknowledged: session.instructionsAcknowledged ?? false,
+        instructionsAcknowledgedAt: session.instructionsAcknowledgedAt
       }
     };
   }

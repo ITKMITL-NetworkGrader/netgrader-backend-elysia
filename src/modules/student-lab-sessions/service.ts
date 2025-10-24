@@ -55,6 +55,7 @@ export class StudentLabSessionService {
           courseId: lab.courseId,
           managementIp,
           status: 'active',
+          instructionsAcknowledged: false,
           startedAt: new Date(),
           lastAccessedAt: new Date()
         });
@@ -127,6 +128,41 @@ export class StudentLabSessionService {
       labId,
       status: 'active'
     });
+  }
+
+  /**
+   * Mark lab instructions as acknowledged for a student.
+   */
+  static async acknowledgeInstructions(
+    studentId: string,
+    labId: Types.ObjectId,
+    lab: ILab
+  ): Promise<IStudentLabSession> {
+    const session = await this.getOrCreateSession(studentId, labId, lab);
+
+    if (!session.instructionsAcknowledged) {
+      session.instructionsAcknowledged = true;
+      session.instructionsAcknowledgedAt = new Date();
+      await session.save();
+    }
+
+    return session;
+  }
+
+  /**
+   * Check if instructions have been acknowledged by student.
+   */
+  static async hasAcknowledgedInstructions(
+    studentId: string,
+    labId: Types.ObjectId
+  ): Promise<boolean> {
+    const session = await StudentLabSession.findOne({
+      studentId,
+      labId,
+      status: 'active'
+    }).select('instructionsAcknowledged');
+
+    return !!session?.instructionsAcknowledged;
   }
 
   /**

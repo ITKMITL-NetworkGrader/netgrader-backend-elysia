@@ -558,6 +558,79 @@ export class SubmissionService {
   }
 
   /**
+   * Aggregate submission activity per part for a given lab.
+   * Enables UI warnings when modifying parts with existing submissions.
+   */
+  static async getSubmissionSummaryByPart(
+    labId: string | Types.ObjectId
+  ): Promise<Array<{
+    partId: string;
+    submissionCount: number;
+    studentCount: number;
+    completedCount: number;
+    perfectScoreCount: number;
+    lastSubmittedAt?: Date;
+  }>> {
+    const labObjectId = new Types.ObjectId(labId);
+
+    const summary = await Submission.aggregate([
+      {
+        $match: {
+          labId: labObjectId
+        }
+      },
+      {
+        $group: {
+          _id: '$partId',
+          submissionCount: { $sum: 1 },
+          studentIds: { $addToSet: '$studentId' },
+          completedCount: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'completed'] },
+                1,
+                0
+              ]
+            }
+          },
+          perfectScoreCount: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$status', 'completed'] },
+                    { $eq: ['$gradingResult.total_points_earned', '$gradingResult.total_points_possible'] },
+                    { $gt: ['$gradingResult.total_points_possible', 0] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          },
+          lastSubmittedAt: { $max: '$submittedAt' }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          partId: '$_id',
+          submissionCount: 1,
+          completedCount: 1,
+          perfectScoreCount: 1,
+          lastSubmittedAt: 1,
+          studentCount: { $size: '$studentIds' }
+        }
+      },
+      {
+        $sort: { partId: 1 }
+      }
+    ]);
+
+    return summary;
+  }
+
+  /**
    * Get submission history for a specific student in a lab, grouped by part
    */
   static async getStudentSubmissionHistory(

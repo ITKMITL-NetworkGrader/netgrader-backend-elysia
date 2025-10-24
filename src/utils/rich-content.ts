@@ -36,27 +36,50 @@ export function estimateReadingTime(wordCount: number): number {
   return Math.ceil(wordCount / 200);
 }
 
+const generateHeadingId = (text: string, index: number): string => {
+  if (!text) {
+    return `heading-${index + 1}`;
+  }
+
+  const normalized = text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "") // remove diacritics
+    .replace(/[^a-z0-9ก-๙]+/g, "-") // keep alphanumeric + Thai characters
+    .replace(/^-+|-+$/g, "");
+
+  if (normalized) {
+    return normalized;
+  }
+
+  return `heading-${index + 1}`;
+};
+
 export function extractHeadingStructure(json: any): Array<{ level: number; text: string; id: string }> {
   const headings: Array<{ level: number; text: string; id: string }> = [];
   
-  function traverse(node: any) {
+  function traverse(node: any, headingIndex: { value: number }) {
     if (node.type === 'heading' && node.content) {
       const text = node.content.map((n: any) => n.text || '').join('');
-      const id = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const id = generateHeadingId(text, headingIndex.value);
+
       headings.push({
         level: node.attrs?.level || 1,
         text: text,
         id: id
       });
+
+      headingIndex.value += 1;
     }
     
     if (node.content) {
-      node.content.forEach(traverse);
+      node.content.forEach((child: any) => traverse(child, headingIndex));
     }
   }
   
   if (json.content) {
-    json.content.forEach(traverse);
+    const headingIndex = { value: 0 };
+    json.content.forEach((node: any) => traverse(node, headingIndex));
   }
   
   return headings;
