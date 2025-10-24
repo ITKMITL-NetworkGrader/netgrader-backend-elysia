@@ -101,22 +101,22 @@ export interface ISubmission extends Document {
   labId: Types.ObjectId;
   partId: string;
   submissionType: 'auto_grading' | 'fill_in_blank' | 'ip_answers';
-  
+
   // Submission Status
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   submittedAt: Date;
   startedAt?: Date;
   completedAt?: Date;
-  
+
   // Grading Results
   gradingResult?: IGradingResult;
 
   // Fill-in-blank summary (when submissionType === 'fill_in_blank')
   fillInBlankResults?: IFillInBlankResults;
-  
+
   // Progress Tracking
   progressHistory: IProgressUpdate[];
-  
+
   // Additional metadata
   attempt: number;
   ipMappings: Record<string, string>;

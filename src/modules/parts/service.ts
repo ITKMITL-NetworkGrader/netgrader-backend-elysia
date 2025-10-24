@@ -421,13 +421,14 @@ export class PartService {
     try {
       const skip = (page - 1) * limit;
 
-      const [parts, total] = await Promise.all([
+      const [parts, total, lab] = await Promise.all([
         LabPart.find({ labId: labId })
           .skip(skip)
           .limit(limit)
           .sort({ order: 1 })
           .lean(),
-        LabPart.countDocuments({ labId: labId })
+        LabPart.countDocuments({ labId: labId }),
+        Lab.findById(labId).lean()
       ]);
 
       // Transform data to match frontend interface
@@ -439,12 +440,70 @@ export class PartService {
         _id: undefined
       }));
 
+      // Inject virtual Part 0 (Instructions acknowledgement) at the beginning
+      let instructionsPart: any | null = null;
+
+      if (lab) {
+        let instructionsContent = lab.instructions;
+
+        if (!instructionsContent) {
+          instructionsContent = processRichContent(
+            lab.description ? `<p>${lab.description}</p>` : '',
+            { type: 'doc', content: [] }
+          );
+        } else if (instructionsContent?.metadata?.headingStructure) {
+          instructionsContent.metadata.headingStructure = instructionsContent.metadata.headingStructure.map(
+            (heading: any, index: number) => ({
+              ...heading,
+              id: heading?.id && heading.id.trim() !== ''
+                ? heading.id
+                : `heading-${index + 1}`
+            })
+          );
+        }
+
+        const instructionsTitle = lab.type === 'exam'
+          ? 'Exam Instructions'
+          : 'Student Instructions';
+
+        instructionsPart = {
+          id: '__instructions_ack__',
+          labId: labId,
+          partId: '__instructions_ack__',
+          title: instructionsTitle,
+          description: lab.type === 'exam'
+            ? 'Read and acknowledge these rules before beginning the exam.'
+            : 'Read and acknowledge these instructions before beginning the lab.',
+          instructions: instructionsContent,
+          order: 0,
+          partType: 'network_config',
+          questions: [],
+          dhcpConfiguration: undefined,
+          tasks: [],
+          task_groups: [],
+          prerequisites: [],
+          totalPoints: 0,
+          metadata: {
+            wordCount: instructionsContent?.metadata?.wordCount ?? 0,
+            estimatedReadingTime: instructionsContent?.metadata?.estimatedReadingTime ?? 0,
+            lastModified: instructionsContent?.metadata?.lastModified ?? new Date(),
+            version: 1
+          },
+          isVirtual: true,
+          isPartZero: true
+        };
+      }
+
+      const partsWithInstructions = instructionsPart
+        ? [instructionsPart, ...transformedParts]
+        : transformedParts;
+
       return {
-        parts: transformedParts,
+        parts: partsWithInstructions,
         pagination: {
           currentPage: page,
           totalPages: Math.ceil(total / limit),
-          totalItems: total,
+          totalItems: total + (instructionsPart ? 1 : 0),
           itemsPerPage: limit
         }
       };

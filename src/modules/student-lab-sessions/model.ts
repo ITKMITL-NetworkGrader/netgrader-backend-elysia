@@ -26,6 +26,10 @@ export interface IStudentLabSession extends Document {
   // Session Status
   status: 'active' | 'completed';
 
+  // Instructions acknowledgement
+  instructionsAcknowledged: boolean;
+  instructionsAcknowledgedAt?: Date;
+
   // Timestamps
   startedAt: Date;             // When student first started this lab
   completedAt?: Date;          // When student completed this lab
@@ -70,6 +74,14 @@ const studentLabSessionSchema = new Schema<IStudentLabSession>({
     enum: ['active', 'completed'],
     default: 'active',
     required: true
+  },
+  instructionsAcknowledged: {
+    type: Boolean,
+    default: false
+  },
+  instructionsAcknowledgedAt: {
+    type: Date,
+    required: false
   },
 
   // Timestamps

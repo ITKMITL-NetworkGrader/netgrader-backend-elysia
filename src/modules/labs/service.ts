@@ -4,6 +4,7 @@ import { env } from "process";
 import { Types } from "mongoose";
 import { ObjectId } from "mongodb";
 import { User } from "../auth/model";
+import { processRichContent } from "../../utils/rich-content";
 import { LabPart } from "../parts/model";
 import { Submission } from "../submissions/model";
 
@@ -23,6 +24,18 @@ export class LabService {
         throw new Error(`User not found with u_id: ${createdBy}`);
       }
 
+      let processedInstructions;
+      if (labData.instructions) {
+        if (typeof labData.instructions === 'string') {
+          processedInstructions = processRichContent(labData.instructions, { type: 'doc', content: [] });
+        } else if (typeof labData.instructions.html === 'string' && labData.instructions.json !== undefined) {
+          processedInstructions = processRichContent(
+            labData.instructions.html,
+            labData.instructions.json
+          );
+        }
+      }
+
       const newLab = new Lab({
         courseId: new ObjectId(labData.courseId),
         title: labData.title,
@@ -31,7 +44,8 @@ export class LabService {
         network: labData.network,
         createdBy: user._id,
         publishedAt: labData.publishedAt,
-        dueDate: labData.dueDate
+        dueDate: labData.dueDate,
+        instructions: processedInstructions
       });
 
       const savedLab = await newLab.save();
@@ -130,12 +144,26 @@ export class LabService {
       );
 
       // Only allow updating specific fields
-      const allowedFields = ['title', 'description', 'type', 'courseId', 'network', 'publishedAt', 'availableFrom', 'availableUntil', 'dueDate'];
+      const allowedFields = ['title', 'description', 'type', 'courseId', 'network', 'publishedAt', 'availableFrom', 'availableUntil', 'dueDate', 'instructions'];
       const updateFields: any = {};
 
       allowedFields.forEach(field => {
         if (filteredData[field] !== undefined) {
-          updateFields[field] = filteredData[field];
+          if (field === 'instructions') {
+            const instructionsPayload = filteredData.instructions;
+            if (!instructionsPayload) {
+              updateFields.instructions = undefined;
+            } else if (typeof instructionsPayload === 'string') {
+              updateFields.instructions = processRichContent(instructionsPayload, { type: 'doc', content: [] });
+            } else if (typeof instructionsPayload.html === 'string' && instructionsPayload.json !== undefined) {
+              updateFields.instructions = processRichContent(
+                instructionsPayload.html,
+                instructionsPayload.json
+              );
+            }
+          } else {
+            updateFields[field] = filteredData[field];
+          }
         }
       });
 
