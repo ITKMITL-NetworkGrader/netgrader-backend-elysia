@@ -1,5 +1,12 @@
-import { TaskTemplate, ITaskTemplate } from "./model";
-import { CacheService } from "../../config/redis";
+import { TaskTemplate } from "./model";
+import {
+  CustomTaskTemplate,
+  getAllCustomTaskTemplates,
+  getCustomTaskTemplateById,
+  getCustomTaskTemplateByTemplateId,
+} from "./custom-template-source";
+
+type TaskTemplateDTO = CustomTaskTemplate;
 
 /**
  * TaskTemplate Service - Business logic for task template operations
@@ -11,6 +18,11 @@ export class TaskTemplateService {
    */
   static async createTaskTemplate(templateData: any) {
     try {
+      const existingExternal = await getCustomTaskTemplateByTemplateId(templateData.templateId);
+      if (existingExternal) {
+        throw new Error(`Template ID '${templateData.templateId}' already exists in MinIO custom templates. Please choose a different templateId.`);
+      }
+
       const newTemplate = new TaskTemplate({
         templateId: templateData.templateId,
         name: templateData.name,
@@ -21,11 +33,7 @@ export class TaskTemplateService {
 
       const savedTemplate = await newTemplate.save();
 
-      return {
-        ...savedTemplate.toObject(),
-        id: savedTemplate._id?.toString(),
-        _id: undefined
-      };
+      return TaskTemplateService.normalizeMongoTemplate(savedTemplate.toObject());
     } catch (error) {
       throw new Error(`Error creating task template: ${(error as Error).message}`);
     }
@@ -42,35 +50,43 @@ export class TaskTemplateService {
   } = {}) {
     try {
       const { templateId, name, page = 1, limit = 10 } = filters;
-      const skip = (page - 1) * limit;
 
-      // Build query filter
-      const filter: any = {};
-      if (templateId) filter.templateId = { $regex: templateId, $options: 'i' };
-      if (name) filter.name = { $regex: name, $options: 'i' };
+      const dbFilter: any = {};
+      if (templateId) dbFilter.templateId = { $regex: templateId, $options: 'i' };
+      if (name) dbFilter.name = { $regex: name, $options: 'i' };
 
-      const [templates, total] = await Promise.all([
-        TaskTemplate.find(filter)
-          .skip(skip)
-          .limit(limit)
-          .sort({ createdAt: -1 })
+      const [mongoTemplates, externalTemplates] = await Promise.all([
+        TaskTemplate.find(dbFilter)
+          .sort({ updatedAt: -1 })
           .lean(),
-        TaskTemplate.countDocuments(filter)
+        getAllCustomTaskTemplates()
       ]);
 
-      const transformedTemplates = templates.map(template => ({
-        ...template,
-        id: template._id?.toString(),
-        _id: undefined
-      }));
+      const normalizedMongo = mongoTemplates.map((template) => TaskTemplateService.normalizeMongoTemplate(template));
+      const filteredExternal = externalTemplates.filter((template) =>
+        TaskTemplateService.matchesFilters(template, templateId, name)
+      );
+
+      const combined: TaskTemplateDTO[] = [...normalizedMongo, ...filteredExternal];
+      combined.sort((a, b) => {
+        const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return bTime - aTime;
+      });
+
+      const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 10;
+      const safePage = Number.isFinite(page) && page > 0 ? page : 1;
+      const startIndex = (safePage - 1) * safeLimit;
+      const paginatedTemplates = combined.slice(startIndex, startIndex + safeLimit);
+      const totalItems = combined.length;
 
       return {
-        templates: transformedTemplates,
+        templates: paginatedTemplates,
         pagination: {
-          currentPage: page,
-          totalPages: Math.ceil(total / limit),
-          totalItems: total,
-          itemsPerPage: limit
+          currentPage: safePage,
+          totalPages: totalItems > 0 ? Math.ceil(totalItems / safeLimit) : 0,
+          totalItems,
+          itemsPerPage: safeLimit
         }
       };
     } catch (error) {
@@ -86,14 +102,10 @@ export class TaskTemplateService {
       const template = await TaskTemplate.findById(id).lean();
       
       if (!template) {
-        return null;
+        return getCustomTaskTemplateById(id);
       }
 
-      return {
-        ...template,
-        id: template._id?.toString(),
-        _id: undefined
-      };
+      return TaskTemplateService.normalizeMongoTemplate(template);
     } catch (error) {
       throw new Error(`Error fetching task template: ${(error as Error).message}`);
     }
@@ -104,26 +116,17 @@ export class TaskTemplateService {
    */
   static async getTaskTemplateByTemplateId(templateId: string) {
     try {
-      // Check cache first
-      const cached = await CacheService.getTaskTemplate(templateId);
-      if (cached) {
-        return cached;
-      }
-
       const template = await TaskTemplate.findOne({ templateId }).lean();
       
       if (!template) {
+        const externalTemplate = await getCustomTaskTemplateByTemplateId(templateId);
+        if (externalTemplate) {
+          return externalTemplate;
+        }
         return null;
       }
 
-      const result = {
-        ...template,
-        id: template._id?.toString(),
-        _id: undefined
-      };
-
-      // Cache the result
-      await CacheService.setTaskTemplate(templateId, result);
+      const result = TaskTemplateService.normalizeMongoTemplate(template);
 
       return result;
     } catch (error) {
@@ -156,17 +159,14 @@ export class TaskTemplateService {
       );
 
       if (!updatedTemplate) {
+        const externalTemplate = await getCustomTaskTemplateById(id);
+        if (externalTemplate) {
+          throw new Error('Custom templates managed in MinIO cannot be updated through this API.');
+        }
         return null;
       }
 
-      // Invalidate cache after successful update
-      await CacheService.clearCachePattern(`task_template:${updatedTemplate.templateId}`);
-
-      return {
-        ...updatedTemplate.toObject(),
-        id: updatedTemplate._id?.toString(),
-        _id: undefined
-      };
+      return TaskTemplateService.normalizeMongoTemplate(updatedTemplate.toObject());
     } catch (error) {
       throw new Error(`Error updating task template: ${(error as Error).message}`);
     }
@@ -180,19 +180,42 @@ export class TaskTemplateService {
       const deletedTemplate = await TaskTemplate.findByIdAndDelete(id);
       
       if (!deletedTemplate) {
+        const externalTemplate = await getCustomTaskTemplateById(id);
+        if (externalTemplate) {
+          throw new Error('Custom templates managed in MinIO cannot be deleted through this API.');
+        }
         return null;
       }
 
-      // Invalidate cache after successful deletion
-      await CacheService.clearCachePattern(`task_template:${deletedTemplate.templateId}`);
-
-      return {
-        ...deletedTemplate.toObject(),
-        id: deletedTemplate._id?.toString(),
-        _id: undefined
-      };
+      return TaskTemplateService.normalizeMongoTemplate(deletedTemplate.toObject());
     } catch (error) {
       throw new Error(`Error deleting task template: ${(error as Error).message}`);
     }
+  }
+
+  private static normalizeMongoTemplate(template: any): TaskTemplateDTO {
+    const { _id, ...rest } = template;
+    return {
+      ...rest,
+      id: _id?.toString(),
+      templateId: template.templateId,
+      name: template.name,
+      description: template.description,
+      parameterSchema: template.parameterSchema ?? [],
+      defaultTestCases: template.defaultTestCases ?? [],
+      createdAt: template.createdAt ? new Date(template.createdAt) : undefined,
+      updatedAt: template.updatedAt ? new Date(template.updatedAt) : undefined,
+      source: 'mongo',
+    };
+  }
+
+  private static matchesFilters(template: TaskTemplateDTO, templateId?: string, name?: string): boolean {
+    const matchesTemplateId = templateId
+      ? new RegExp(templateId, 'i').test(template.templateId ?? '')
+      : true;
+
+    const matchesName = name ? new RegExp(name, 'i').test(template.name ?? '') : true;
+
+    return matchesTemplateId && matchesName;
   }
 }
