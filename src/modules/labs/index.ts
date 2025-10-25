@@ -5,6 +5,7 @@ import { VlanValidator } from "../../utils/vlan-validator";
 import { IPGenerator } from "../submissions/ip-generator";
 import { StudentLabSession, StudentLabSessionService } from "../student-lab-sessions";
 import { ILab } from "./model";
+import { sseService } from "../../services/sse-emitter";
 import { Types } from "mongoose";
 
 // Updated schemas for the embedded network model with VLAN support
@@ -263,9 +264,9 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
   )
 
   // Get lab by ID
-  .get(
+.get(
     "/:id",
-    async ({ params, set, authPlugin }) => {
+    async ({ params, query, set, authPlugin }) => {
       try {
         const lab = await LabService.getLabById(params.id);
 
@@ -276,6 +277,11 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
             message: "Lab not found"
           };
         }
+
+        const fieldsQuery = typeof query?.fields === "string"
+          ? query.fields.split(",").map(f => f.trim().toLowerCase()).filter(Boolean)
+          : [];
+        const fields = new Set(fieldsQuery);
 
         let instructionsAcknowledged = false;
 
@@ -289,6 +295,30 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           } catch (ackError) {
             console.warn('[Labs] Unable to determine instruction acknowledgement state:', ackError);
           }
+        }
+
+        if (fields.size > 0) {
+          const data: Record<string, any> = {};
+
+          if (fields.has("timer")) {
+            data.id = lab.id?.toString();
+            data.labTitle = lab.title;
+            data.availableFrom = lab.availableFrom ?? null;
+            data.availableUntil = lab.availableUntil ?? null;
+            data.dueDate = lab.dueDate ?? null;
+            data.createdAt = lab.createdAt ?? null;
+          }
+
+          if (fields.has("instructions")) {
+            data.instructionsAcknowledged = instructionsAcknowledged;
+          }
+
+          set.status = 200;
+          return {
+            success: true,
+            message: "Lab fetched successfully",
+            data
+          };
         }
 
         set.status = 200;
@@ -311,9 +341,96 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
     },
     {
       params: t.Object({ id: t.String() }),
+      query: t.Object({
+        fields: t.Optional(t.String())
+      }),
       detail: {
         tags: ["Labs"],
         summary: "Get Lab by ID"
+      }
+    }
+  )
+
+  // Lab timer SSE stream
+  .get(
+    "/:id/stream",
+    async ({ params, set }) => {
+      try {
+        const channelId = `lab:${params.id}`;
+        let controllerRef: ReadableStreamDefaultController | null = null;
+        let keepaliveInterval: NodeJS.Timeout | null = null;
+
+        const stream = new ReadableStream({
+          start: async (controller) => {
+            controllerRef = controller;
+            sseService.addClient(channelId, controller);
+
+            controller.enqueue(new TextEncoder().encode(`event: connected\ndata: ${JSON.stringify({ labId: params.id })}\n\n`));
+
+            try {
+              const lab = await LabService.getLabById(params.id);
+              if (lab) {
+                const snapshot = {
+                  labId: params.id,
+                  labTitle: lab.title,
+                  availableFrom: lab.availableFrom ?? null,
+                  availableUntil: lab.availableUntil ?? null,
+                  dueDate: lab.dueDate ?? null,
+                  createdAt: lab.createdAt ?? null
+                };
+                controller.enqueue(new TextEncoder().encode(`event: timer_snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`));
+              }
+            } catch (error) {
+              console.error('[Labs SSE] Failed to load initial snapshot:', error);
+            }
+
+            keepaliveInterval = setInterval(() => {
+              try {
+                controller.enqueue(new TextEncoder().encode(': keepalive\n\n'));
+              } catch (error) {
+                console.error('[Labs SSE] Failed to send keepalive:', error);
+                if (controllerRef) {
+                  sseService.removeClient(channelId, controllerRef);
+                }
+                if (keepaliveInterval) {
+                  clearInterval(keepaliveInterval);
+                }
+              }
+            }, 30000);
+          },
+          cancel: () => {
+            if (controllerRef) {
+              sseService.removeClient(channelId, controllerRef);
+            }
+            if (keepaliveInterval) {
+              clearInterval(keepaliveInterval);
+            }
+          }
+        });
+
+        return new Response(stream, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive'
+          }
+        });
+      } catch (error) {
+        console.error('[Labs SSE] Failed to establish stream:', error);
+        set.status = 500;
+        return {
+          success: false,
+          message: 'Failed to establish lab stream'
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      detail: {
+        tags: ["Labs"],
+        summary: "Subscribe to lab timer updates",
+        description: "Server-sent events stream for timer updates on a lab"
       }
     }
   )
@@ -411,6 +528,76 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
       }
     }
   )
+  // Restart lab - close current attempt and start a new one
+  .post(
+    "/:id/restart",
+    async ({ params, set, authPlugin }) => {
+      try {
+        const { u_id } = authPlugin ?? { u_id: "" };
+
+        if (!u_id) {
+          set.status = 401;
+          return {
+            success: false,
+            message: "Authentication required"
+          };
+        }
+
+        const lab = await LabService.getLabById(params.id);
+
+        if (!lab) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Lab not found"
+          };
+        }
+
+        const labObjectId = new Types.ObjectId(params.id);
+
+        await StudentLabSessionService.restartSession(
+          u_id,
+          labObjectId,
+          lab as ILab
+        );
+
+        const networkConfig = await IPGenerator.generateStudentNetworkConfiguration(lab as ILab, u_id);
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Lab restarted successfully",
+          data: {
+            labId: lab.id?.toString(),
+            labTitle: lab.title,
+            session: networkConfig.sessionInfo,
+            networkConfiguration: {
+              managementIp: networkConfig.managementIp,
+              ipMappings: networkConfig.ipMappings,
+              vlanMappings: networkConfig.vlanMappings
+            }
+          }
+        };
+      } catch (error) {
+        console.error('[Lab Restart Error]', error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error restarting lab",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      beforeHandle: requireRole(["STUDENT", "INSTRUCTOR", "ADMIN"]),
+      detail: {
+        tags: ["Labs"],
+        summary: "Restart Lab Attempt",
+        description: "Ends the student's current lab attempt and starts a brand new attempt with fresh IP assignments."
+      }
+    }
+  )
   // Acknowledge lab instructions (Part 0)
   .post(
     "/:id/instructions/acknowledge",
@@ -487,6 +674,53 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           };
         }
 
+        const previousDueDate = existingLab.dueDate ? new Date(existingLab.dueDate) : null;
+        const previousAvailableUntil = existingLab.availableUntil ? new Date(existingLab.availableUntil) : null;
+        const emitTimerUpdate = (updatedLab: ILab) => {
+          if (!updatedLab) {
+            return;
+          }
+
+          const nextDueDate = updatedLab.dueDate ? new Date(updatedLab.dueDate) : null;
+          const nextAvailableUntil = updatedLab.availableUntil ? new Date(updatedLab.availableUntil) : null;
+          const nextAvailableFrom = updatedLab.availableFrom ? new Date(updatedLab.availableFrom) : null;
+
+          const changes: Array<{ type: 'dueDate' | 'availableUntil'; diffMs: number }> = [];
+
+          const evaluateChange = (type: 'dueDate' | 'availableUntil', previous: Date | null, next: Date | null) => {
+            const prevMs = previous ? previous.getTime() : null;
+            const nextMs = next ? next.getTime() : null;
+
+            if (prevMs === nextMs) {
+              return;
+            }
+
+            let diffMs = 0;
+            if (prevMs !== null && nextMs !== null) {
+              diffMs = nextMs - prevMs;
+            }
+
+            changes.push({ type, diffMs });
+          };
+
+          evaluateChange('dueDate', previousDueDate, nextDueDate);
+          evaluateChange('availableUntil', previousAvailableUntil, nextAvailableUntil);
+
+          if (changes.length === 0) {
+            return;
+          }
+
+          sseService.sendEvent(`lab:${params.id}`, 'timer_update', {
+            labId: params.id,
+            labTitle: updatedLab.title,
+            availableFrom: nextAvailableFrom ? nextAvailableFrom.toISOString() : null,
+            availableUntil: nextAvailableUntil ? nextAvailableUntil.toISOString() : null,
+            dueDate: nextDueDate ? nextDueDate.toISOString() : null,
+            createdAt: updatedLab.createdAt ?? null,
+            changes
+          });
+        };
+
         // Validate exempt IP ranges if being updated
         if (body.network?.topology?.exemptIpRanges) {
           const exemptValidation = VlanValidator.validateExemptRanges(
@@ -547,6 +781,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
               conflictedStudentIds
             );
 
+            emitTimerUpdate(updatedLab as any);
+
             set.status = 200;
             return {
               success: true,
@@ -599,6 +835,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
             message: "Lab not found"
           };
         }
+
+        emitTimerUpdate(updatedLab as any);
 
         set.status = 200;
         return {

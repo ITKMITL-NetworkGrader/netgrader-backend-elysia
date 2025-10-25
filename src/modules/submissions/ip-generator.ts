@@ -305,6 +305,7 @@ export class IPGenerator {
       sessionId: string;
       status: string;
       startedAt: Date;
+      attemptNumber: number;
       instructionsAcknowledged: boolean;
       instructionsAcknowledgedAt?: Date;
     };
@@ -330,6 +331,7 @@ export class IPGenerator {
         sessionId: session.id?.toString() || '',
         status: session.status,
         startedAt: session.startedAt,
+        attemptNumber: session.attemptNumber,
         instructionsAcknowledged: session.instructionsAcknowledged ?? false,
         instructionsAcknowledgedAt: session.instructionsAcknowledgedAt
       }
@@ -391,6 +393,8 @@ export class IPGenerator {
       job_id: jobId,
       student_id: studentId,
       lab_id: lab.id?.toString(),
+      lab_session_id: session.id?.toString() || '',
+      lab_attempt_number: session.attemptNumber,
       part: {
         part_id: part.partId,
         title: part.title,

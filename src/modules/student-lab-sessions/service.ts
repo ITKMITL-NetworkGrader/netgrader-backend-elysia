@@ -3,6 +3,9 @@ import { StudentLabSession, IStudentLabSession } from './model';
 import { ILab } from '../labs/model';
 import { Enrollment } from '../enrollments/model';
 
+type ReleaseReason = 'completion' | 'restart' | 'timeout' | 'admin';
+const RELEASE_REASONS: ReadonlyArray<ReleaseReason> = ['completion', 'restart', 'timeout', 'admin'];
+
 /**
  * StudentLabSession Service
  * Manages dynamic Management IP assignments for student lab sessions
@@ -14,6 +17,9 @@ import { Enrollment } from '../enrollments/model';
  * - Uses MongoDB unique index + retry logic to prevent race conditions
  */
 export class StudentLabSessionService {
+  private static releaseReasonOrDefault(reason?: ReleaseReason): ReleaseReason {
+    return reason && RELEASE_REASONS.includes(reason) ? reason : 'completion';
+  }
 
   /**
    * Get or create student lab session with Management IP assignment
@@ -49,12 +55,22 @@ export class StudentLabSessionService {
         // No active session - create new one with new IP
         const managementIp = await this.calculateManagementIP(lab);
 
+        // Determine next attempt number (monotonic counter)
+        const latestSession = await StudentLabSession.findOne({
+          studentId,
+          labId
+        }).sort({ attemptNumber: -1, createdAt: -1 });
+
+        const nextAttemptNumber = latestSession ? latestSession.attemptNumber + 1 : 1;
+
         const newSession = new StudentLabSession({
           studentId,
           labId,
           courseId: lab.courseId,
           managementIp,
           status: 'active',
+          attemptNumber: nextAttemptNumber,
+          previousSessionId: latestSession?._id ?? null,
           instructionsAcknowledged: false,
           startedAt: new Date(),
           lastAccessedAt: new Date()
@@ -85,13 +101,30 @@ export class StudentLabSessionService {
    */
   static async deleteSession(
     studentId: string,
-    labId: Types.ObjectId
+    labId: Types.ObjectId,
+    options?: {
+      reason?: ReleaseReason;
+      completedAt?: Date;
+    }
   ): Promise<void> {
-    await StudentLabSession.deleteOne({
+    await this.releaseActiveSession(
       studentId,
       labId,
-      status: 'active'
-    });
+      this.releaseReasonOrDefault(options?.reason),
+      options?.completedAt
+    );
+  }
+
+  /**
+   * Restart session by closing current attempt and creating a new one
+   */
+  static async restartSession(
+    studentId: string,
+    labId: Types.ObjectId,
+    lab: ILab
+  ): Promise<IStudentLabSession> {
+    await this.releaseActiveSession(studentId, labId, 'restart');
+    return await this.getOrCreateSession(studentId, labId, lab);
   }
 
   /**
@@ -102,6 +135,15 @@ export class StudentLabSessionService {
     studentId: string,
     labId: Types.ObjectId
   ): Promise<IStudentLabSession | null> {
+    return await this.releaseActiveSession(studentId, labId, 'completion');
+  }
+
+  private static async releaseActiveSession(
+    studentId: string,
+    labId: Types.ObjectId,
+    reason: ReleaseReason,
+    completedAt?: Date
+  ): Promise<IStudentLabSession | null> {
     return await StudentLabSession.findOneAndUpdate(
       {
         studentId,
@@ -110,7 +152,10 @@ export class StudentLabSessionService {
       },
       {
         status: 'completed',
-        completedAt: new Date()
+        completedAt: completedAt ?? new Date(),
+        releaseReason: this.releaseReasonOrDefault(reason),
+        releasedAt: new Date(),
+        lastAccessedAt: new Date()
       },
       { new: true }
     );
@@ -536,11 +581,16 @@ export class StudentLabSessionService {
 
         // Recreate session with new IP
         const newSession = new StudentLabSession({
+          _id: oldSession._id,
           studentId: oldSession.studentId,
           labId: oldSession.labId,
           courseId: oldSession.courseId,
           managementIp: newManagementIp,
           status: 'active',
+          attemptNumber: oldSession.attemptNumber,
+          previousSessionId: oldSession.previousSessionId ?? null,
+          instructionsAcknowledged: oldSession.instructionsAcknowledged,
+          instructionsAcknowledgedAt: oldSession.instructionsAcknowledgedAt,
           startedAt: oldSession.startedAt, // Preserve original start time
           lastAccessedAt: new Date()
         });

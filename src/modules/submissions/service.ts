@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { Submission, ISubmission, IGradingResult, IProgressUpdate, IFillInBlankResults } from './model';
 import { StudentLabSessionService } from '../student-lab-sessions/service';
+import { StudentLabSession } from '../student-lab-sessions/model';
 import { PartService } from '../parts/service';
 
 export class SubmissionService {
@@ -29,9 +30,20 @@ export class SubmissionService {
     partId: string;
     ipMappings: Record<string, string>;
     attempt?: number;
+    labSessionId?: string | Types.ObjectId;
+    labAttemptNumber?: number;
   }): Promise<ISubmission> {
     const labObjectId = new Types.ObjectId(data.labId);
     const nextAttempt = await this.getNextAttempt(data.studentId, labObjectId, data.partId);
+    let labSessionObjectId: Types.ObjectId | undefined;
+
+    if (data.labSessionId) {
+      labSessionObjectId = data.labSessionId instanceof Types.ObjectId
+        ? data.labSessionId
+        : new Types.ObjectId(data.labSessionId);
+    }
+
+    const attemptValue = data.attempt ?? nextAttempt;
 
     const submission = new Submission({
       jobId: data.jobId,
@@ -40,7 +52,9 @@ export class SubmissionService {
       partId: data.partId,
       submissionType: 'auto_grading',
       ipMappings: data.ipMappings,
-      attempt: nextAttempt,
+      attempt: attemptValue,
+      labSessionId: labSessionObjectId,
+      labAttemptNumber: data.labAttemptNumber,
       status: 'pending',
       progressHistory: []
     });
@@ -125,14 +139,19 @@ export class SubmissionService {
           // Check if ALL parts are now 100%
           const allPartsCompleted = await this.areAllPartsCompleted(
             submission.studentId,
-            submission.labId as Types.ObjectId
+            submission.labId as Types.ObjectId,
+            { labSessionId: submission.labSessionId ?? null }
           );
 
           if (allPartsCompleted) {
             // Delete session to release IP
             await StudentLabSessionService.deleteSession(
               submission.studentId,
-              submission.labId as Types.ObjectId
+              submission.labId as Types.ObjectId,
+              {
+                reason: 'completion',
+                completedAt: submission.completedAt ?? new Date()
+              }
             );
             console.log(`[Session Released] Student ${submission.studentId} completed ALL parts of lab ${submission.labId} - IP released`);
           } else {
@@ -154,7 +173,10 @@ export class SubmissionService {
    */
   private static async areAllPartsCompleted(
     studentId: string,
-    labId: Types.ObjectId
+    labId: Types.ObjectId,
+    options?: {
+      labSessionId?: Types.ObjectId | string | null;
+    }
   ): Promise<boolean> {
     try {
       // Get all parts for this lab
@@ -169,6 +191,13 @@ export class SubmissionService {
 
       // For EACH part, check if there's at least ONE submission with 100%
       const completedPartIds = new Set<string>();
+      let labSessionObjectId: Types.ObjectId | undefined;
+
+      if (options?.labSessionId) {
+        labSessionObjectId = options.labSessionId instanceof Types.ObjectId
+          ? options.labSessionId
+          : new Types.ObjectId(options.labSessionId);
+      }
 
       for (const partId of partIds) {
         const perfectSubmission = await Submission.findOne({
@@ -176,6 +205,7 @@ export class SubmissionService {
           labId,
           partId,
           status: 'completed',
+          ...(labSessionObjectId ? { labSessionId: labSessionObjectId } : {}),
           $expr: {
             $and: [
               { $gt: ['$gradingResult.total_points_possible', 0] },
@@ -191,7 +221,8 @@ export class SubmissionService {
 
       const allCompleted = completedPartIds.size === totalParts;
 
-      console.log(`[Parts Check] Student ${studentId} - Lab ${labId}: ${completedPartIds.size}/${totalParts} parts completed`);
+      const attemptLabel = labSessionObjectId ? ` (session: ${labSessionObjectId.toString()})` : '';
+      console.log(`[Parts Check] Student ${studentId} - Lab ${labId}${attemptLabel}: ${completedPartIds.size}/${totalParts} parts completed`);
 
       return allCompleted;
     } catch (error) {
@@ -219,6 +250,7 @@ export class SubmissionService {
       status?: string;
       limit?: number;
       offset?: number;
+      labSessionId?: string | Types.ObjectId | null;
     }
   ): Promise<ISubmission[]> {
     const query: any = { studentId };
@@ -229,6 +261,25 @@ export class SubmissionService {
     
     if (options?.status) {
       query.status = options.status;
+    }
+    
+    if (options?.labSessionId) {
+      if (options.labSessionId instanceof Types.ObjectId) {
+        query.labSessionId = options.labSessionId;
+      } else if (Types.ObjectId.isValid(options.labSessionId)) {
+        query.labSessionId = new Types.ObjectId(options.labSessionId);
+      } else if (options.labSessionId === 'legacy') {
+        query.$or = [
+          { labSessionId: { $exists: false } },
+          { labSessionId: null }
+        ];
+      }
+    }
+    if (options && Object.prototype.hasOwnProperty.call(options, 'labSessionId') && options.labSessionId === null) {
+      query.$or = [
+        { labSessionId: { $exists: false } },
+        { labSessionId: null }
+      ];
     }
 
     return await Submission.find(query)
@@ -635,17 +686,192 @@ export class SubmissionService {
    */
   static async getStudentSubmissionHistory(
     labId: string | Types.ObjectId,
-    studentId: string
+    studentId: string,
+    options?: {
+      labSessionId?: string | Types.ObjectId | null;
+      groupBy?: 'part' | 'labSession';
+    }
   ): Promise<any[]> {
+    const matchStage: any = {
+      labId: new Types.ObjectId(labId),
+      studentId,
+      submissionType: { $ne: 'ip_answers' }
+    };
+
+    if (options?.labSessionId) {
+      if (options.labSessionId instanceof Types.ObjectId) {
+        matchStage.labSessionId = options.labSessionId;
+      } else if (Types.ObjectId.isValid(options.labSessionId)) {
+        matchStage.labSessionId = new Types.ObjectId(options.labSessionId);
+      } else if (options.labSessionId === 'legacy') {
+        matchStage.$or = [
+          { labSessionId: { $exists: false } },
+          { labSessionId: null }
+        ];
+      }
+    } else if (options && Object.prototype.hasOwnProperty.call(options, 'labSessionId') && options.labSessionId === null) {
+      matchStage.$or = [
+        { labSessionId: { $exists: false } },
+        { labSessionId: null }
+      ];
+    }
+
+    if (options?.groupBy === 'labSession') {
+      const submissions = await Submission.find(matchStage)
+        .sort({ submittedAt: -1 })
+        .lean();
+
+      const sessionIds = Array.from(
+        new Set(
+          submissions
+            .map(sub => sub.labSessionId)
+            .filter((id): id is Types.ObjectId => !!id)
+            .map(id => id.toString())
+        )
+      );
+
+      let sessionDocs: Array<any> = [];
+      if (sessionIds.length > 0) {
+        sessionDocs = await StudentLabSession.find({
+          _id: { $in: sessionIds.map(id => new Types.ObjectId(id)) }
+        })
+          .lean();
+      }
+
+      const sessionMap = new Map<string, any>();
+      for (const session of sessionDocs) {
+        sessionMap.set(session._id.toString(), session);
+      }
+
+      interface PartHistory {
+        partId: string;
+        submissions: Array<{
+          _id: any;
+          attempt: number;
+          status: string;
+          score: number | null;
+          totalPoints: number | null;
+          submittedAt: Date | null;
+          startedAt?: Date | null;
+          completedAt?: Date | null;
+          submissionType: string;
+          labSessionId?: string | null;
+          jobId?: string;
+        }>;
+      }
+
+      interface SessionHistory {
+        sessionId: string | null;
+        sessionInfo: any;
+        parts: Map<string, PartHistory>;
+      }
+
+      const groupedBySession = new Map<string, SessionHistory>();
+
+      const serializeScore = (submission: any) => {
+        if (submission.gradingResult) {
+          return {
+            score: submission.gradingResult.total_points_earned ?? null,
+            totalPoints: submission.gradingResult.total_points_possible ?? null
+          };
+        }
+        if (submission.fillInBlankResults) {
+          return {
+            score: submission.fillInBlankResults.totalPointsEarned ?? null,
+            totalPoints: submission.fillInBlankResults.totalPoints ?? null
+          };
+        }
+        return { score: null, totalPoints: null };
+      };
+
+      for (const submission of submissions) {
+        const sessionKey = submission.labSessionId ? submission.labSessionId.toString() : 'legacy';
+
+        if (!groupedBySession.has(sessionKey)) {
+          groupedBySession.set(sessionKey, {
+            sessionId: submission.labSessionId ? submission.labSessionId.toString() : null,
+            sessionInfo: submission.labSessionId
+              ? sessionMap.get(submission.labSessionId.toString()) ?? null
+              : null,
+            parts: new Map<string, PartHistory>()
+          });
+        }
+
+        const sessionGroup = groupedBySession.get(sessionKey)!;
+        const partId = submission.partId?.toString?.() ?? submission.partId;
+
+        if (!sessionGroup.parts.has(partId)) {
+          sessionGroup.parts.set(partId, {
+            partId,
+            submissions: []
+          });
+        }
+
+        const { score, totalPoints } = serializeScore(submission);
+
+        sessionGroup.parts.get(partId)!.submissions.push({
+          _id: submission._id,
+          attempt: submission.attempt,
+          status: submission.status,
+          score,
+          totalPoints,
+          submittedAt: submission.submittedAt ?? null,
+          startedAt: submission.startedAt ?? null,
+          completedAt: submission.completedAt ?? null,
+          submissionType: submission.submissionType,
+          labSessionId: submission.labSessionId ? submission.labSessionId.toString() : null,
+          jobId: submission.jobId
+        });
+      }
+
+      const orderedSessions = Array.from(groupedBySession.values())
+        .map(sessionGroup => {
+          const sessionInfo = sessionGroup.sessionInfo;
+          const attemptNumber = sessionInfo?.attemptNumber ?? null;
+          const startedAt = sessionInfo?.startedAt ?? null;
+
+          const parts = Array.from(sessionGroup.parts.values()).map(partHistory => ({
+            partId: partHistory.partId,
+            submissions: partHistory.submissions.sort((a, b) => b.attempt - a.attempt)
+          })).sort((a, b) => a.partId.localeCompare(b.partId));
+
+          return {
+            labSessionId: sessionGroup.sessionId,
+            attemptNumber,
+            session: sessionInfo ? {
+              attemptNumber: sessionInfo.attemptNumber ?? null,
+              status: sessionInfo.status,
+              startedAt: sessionInfo.startedAt,
+              completedAt: sessionInfo.completedAt ?? sessionInfo.releasedAt ?? null,
+              releaseReason: sessionInfo.releaseReason ?? null,
+              releasedAt: sessionInfo.releasedAt ?? null,
+              instructionsAcknowledged: sessionInfo.instructionsAcknowledged ?? false,
+              instructionsAcknowledgedAt: sessionInfo.instructionsAcknowledgedAt ?? null,
+              managementIp: sessionInfo.managementIp ?? null
+            } : null,
+            parts
+          };
+        })
+        .sort((a, b) => {
+          // Sessions with known attemptNumber sorted desc, legacy sessions last
+          if (a.attemptNumber !== null && b.attemptNumber !== null) {
+            return b.attemptNumber - a.attemptNumber;
+          }
+          if (a.attemptNumber !== null) return -1;
+          if (b.attemptNumber !== null) return 1;
+          // Fall back to startedAt desc
+          const aStarted = a.session?.startedAt ? new Date(a.session.startedAt).getTime() : 0;
+          const bStarted = b.session?.startedAt ? new Date(b.session.startedAt).getTime() : 0;
+          return bStarted - aStarted;
+        });
+
+      return orderedSessions;
+    }
+
     const history = await Submission.aggregate([
       {
-        $match: {
-          labId: new Types.ObjectId(labId),
-          studentId: studentId,
-          submissionType: { $ne: 'ip_answers' }
-        }
+        $match: matchStage
       },
-      // Project only essential fields
       {
         $project: {
           _id: 1,
@@ -664,11 +890,9 @@ export class SubmissionService {
           submissionType: '$submissionType'
         }
       },
-      // Sort by part and attempt (latest first)
       {
         $sort: { partId: 1, attempt: -1 }
       },
-      // Group by part
       {
         $group: {
           _id: '$partId',
@@ -687,7 +911,6 @@ export class SubmissionService {
           }
         }
       },
-      // Final projection
       {
         $project: {
           _id: 0,
@@ -695,7 +918,6 @@ export class SubmissionService {
           submissionHistory: 1
         }
       },
-      // Sort by partId
       {
         $sort: { partId: 1 }
       }
@@ -767,10 +989,19 @@ export class SubmissionService {
     partId: string;
     summary: IFillInBlankResults;
     answersMap?: Record<string, any>;
+    labSessionId?: string | Types.ObjectId | null;
+    labAttemptNumber?: number;
   }): Promise<ISubmission> {
     const labObjectId = new Types.ObjectId(params.labId);
     const jobId = `fib-${params.studentId}-${params.partId}-${Date.now()}`;
     const attempt = await this.getNextAttempt(params.studentId, labObjectId, params.partId);
+    let labSessionObjectId: Types.ObjectId | undefined;
+
+    if (params.labSessionId) {
+      labSessionObjectId = params.labSessionId instanceof Types.ObjectId
+        ? params.labSessionId
+        : new Types.ObjectId(params.labSessionId);
+    }
 
     const gradingResult: IGradingResult = {
       job_id: jobId,
@@ -797,7 +1028,9 @@ export class SubmissionService {
       fillInBlankResults: params.summary,
       progressHistory: [],
       attempt,
-      ipMappings: params.answersMap || {}
+      ipMappings: params.answersMap || {},
+      labSessionId: labSessionObjectId,
+      labAttemptNumber: params.labAttemptNumber
     });
 
     const savedSubmission = await submission.save();
@@ -806,13 +1039,18 @@ export class SubmissionService {
       try {
         const allPartsCompleted = await this.areAllPartsCompleted(
           params.studentId,
-          labObjectId
+          labObjectId,
+          { labSessionId: labSessionObjectId }
         );
 
         if (allPartsCompleted) {
           await StudentLabSessionService.deleteSession(
             params.studentId,
-            labObjectId
+            labObjectId,
+            {
+              reason: 'completion',
+              completedAt: savedSubmission.completedAt ?? new Date()
+            }
           );
           console.log(`[Session Released] Student ${params.studentId} completed ALL parts of lab ${labObjectId} - IP released`);
         }

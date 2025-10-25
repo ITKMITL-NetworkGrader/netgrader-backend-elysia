@@ -25,6 +25,10 @@ export interface IStudentLabSession extends Document {
 
   // Session Status
   status: 'active' | 'completed';
+  attemptNumber: number;       // Monotonic attempt counter per student/lab
+  previousSessionId?: Types.ObjectId | null;
+  releaseReason?: 'completion' | 'restart' | 'timeout' | 'admin';
+  releasedAt?: Date;
 
   // Instructions acknowledgement
   instructionsAcknowledged: boolean;
@@ -75,6 +79,24 @@ const studentLabSessionSchema = new Schema<IStudentLabSession>({
     default: 'active',
     required: true
   },
+  attemptNumber: {
+    type: Number,
+    required: true,
+    default: 1,
+    min: 1
+  },
+  previousSessionId: {
+    type: Schema.Types.ObjectId,
+    ref: 'StudentLabSession',
+    default: null
+  },
+  releaseReason: {
+    type: String,
+    enum: ['completion', 'restart', 'timeout', 'admin']
+  },
+  releasedAt: {
+    type: Date
+  },
   instructionsAcknowledged: {
     type: Boolean,
     default: false
@@ -106,6 +128,7 @@ const studentLabSessionSchema = new Schema<IStudentLabSession>({
 // Indexes for efficient querying
 studentLabSessionSchema.index({ labId: 1, status: 1 }); // Find all active sessions for a lab
 studentLabSessionSchema.index({ courseId: 1 }); // Course-level queries
+studentLabSessionSchema.index({ studentId: 1, labId: 1, attemptNumber: 1 });
 
 // Compound unique index: One active session per student per lab
 // This also covers queries for { studentId: 1, labId: 1, status: 1 }

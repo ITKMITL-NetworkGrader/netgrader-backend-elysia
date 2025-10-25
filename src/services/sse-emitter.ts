@@ -22,35 +22,35 @@ export class SSEService {
   /**
    * Register a new SSE client for a specific job
    */
-  addClient(jobId: string, controller: ReadableStreamDefaultController): void {
-    if (!this.clients.has(jobId)) {
-      this.clients.set(jobId, new Set());
+  addClient(channelId: string, controller: ReadableStreamDefaultController): void {
+    if (!this.clients.has(channelId)) {
+      this.clients.set(channelId, new Set());
     }
 
     const client: SSEClient = {
-      jobId,
+      channelId,
       controller,
       connectionTime: new Date()
     };
 
-    this.clients.get(jobId)!.add(client);
-    console.log(`[SSE] Client connected to job ${jobId}. Total clients: ${this.clients.get(jobId)!.size}`);
+    this.clients.get(channelId)!.add(client);
+    console.log(`[SSE] Client connected to channel ${channelId}. Total clients: ${this.clients.get(channelId)!.size}`);
   }
 
   /**
    * Remove a client when they disconnect
    */
-  removeClient(jobId: string, controller: ReadableStreamDefaultController): void {
-    const jobClients = this.clients.get(jobId);
-    if (jobClients) {
-      const clientToRemove = Array.from(jobClients).find(c => c.controller === controller);
+  removeClient(channelId: string, controller: ReadableStreamDefaultController): void {
+    const channelClients = this.clients.get(channelId);
+    if (channelClients) {
+      const clientToRemove = Array.from(channelClients).find(c => c.controller === controller);
       if (clientToRemove) {
-        jobClients.delete(clientToRemove);
-        console.log(`[SSE] Client disconnected from job ${jobId}. Remaining: ${jobClients.size}`);
+        channelClients.delete(clientToRemove);
+        console.log(`[SSE] Client disconnected from channel ${channelId}. Remaining: ${channelClients.size}`);
 
         // Clean up if no more clients
-        if (jobClients.size === 0) {
-          this.clients.delete(jobId);
+        if (channelClients.size === 0) {
+          this.clients.delete(channelId);
         }
       }
     }
@@ -198,6 +198,31 @@ export class SSEService {
    */
   getWatchedJobs(): string[] {
     return Array.from(this.clients.keys());
+  }
+
+  sendEvent(channelId: string, eventName: string, data: any, options?: { close?: boolean }): void {
+    const channelClients = this.clients.get(channelId);
+    if (!channelClients || channelClients.size === 0) {
+      return;
+    }
+
+    const message = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+
+    channelClients.forEach(client => {
+      try {
+        client.controller.enqueue(new TextEncoder().encode(message));
+        if (options?.close) {
+          client.controller.close();
+        }
+      } catch (error) {
+        console.error(`[SSE] Failed to send event '${eventName}' on channel ${channelId}:`, error);
+        this.removeClient(channelId, client.controller);
+      }
+    });
+
+    if (options?.close) {
+      this.clients.delete(channelId);
+    }
   }
 
   /**
