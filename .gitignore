@@ -39,7 +39,7 @@ yarn-error.log*
 **/*.tgz
 **/*.log
 package-lock.json
-**/*.bun
+**/*.bun*
 
 .env
 docker-compose.yml
