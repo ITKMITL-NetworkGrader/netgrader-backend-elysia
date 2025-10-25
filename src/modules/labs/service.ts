@@ -150,16 +150,23 @@ export class LabService {
       allowedFields.forEach(field => {
         if (filteredData[field] !== undefined) {
           if (field === 'instructions') {
-            const instructionsPayload = filteredData.instructions;
+            const instructionsPayload: any = filteredData.instructions;
             if (!instructionsPayload) {
               updateFields.instructions = undefined;
             } else if (typeof instructionsPayload === 'string') {
               updateFields.instructions = processRichContent(instructionsPayload, { type: 'doc', content: [] });
-            } else if (typeof instructionsPayload.html === 'string' && instructionsPayload.json !== undefined) {
-              updateFields.instructions = processRichContent(
-                instructionsPayload.html,
-                instructionsPayload.json
-              );
+            } else {
+              // Safely check object shape before accessing properties
+              const ip = instructionsPayload as any;
+              if (ip && typeof ip === 'object' && typeof ip.html === 'string' && ip.json !== undefined) {
+                updateFields.instructions = processRichContent(
+                  ip.html,
+                  ip.json
+                );
+              } else {
+                // Fallback: preserve provided object (or adjust as needed)
+                updateFields.instructions = instructionsPayload;
+              }
             }
           } else {
             updateFields[field] = filteredData[field];
