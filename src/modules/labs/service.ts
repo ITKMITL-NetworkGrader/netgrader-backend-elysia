@@ -4,6 +4,8 @@ import { env } from "process";
 import { Types } from "mongoose";
 import { ObjectId } from "mongodb";
 import { User } from "../auth/model";
+import { LabPart } from "../parts/model";
+import { Submission } from "../submissions/model";
 
 /**
  * Lab Service - Business logic for lab operations
@@ -166,12 +168,51 @@ export class LabService {
 
   /**
    * Delete lab by ID
+   * Cascades delete to all related lab parts and their submissions
    */
   static async deleteLab(id: string) {
     try {
+      // First, find all lab parts for this lab
+      const labParts = await LabPart.find({ labId: id });
+      
+      let totalSubmissionsDeleted = 0;
+      let totalPartsDeleted = 0;
+
+      // Delete all submissions for each part
+      for (const part of labParts) {
+        const submissionDeletionResult = await Submission.deleteMany({
+          labId: part.labId,
+          partId: part.partId
+        });
+        totalSubmissionsDeleted += submissionDeletionResult.deletedCount;
+      }
+
+      // Delete all lab parts for this lab
+      const partDeletionResult = await LabPart.deleteMany({ labId: id });
+      totalPartsDeleted = partDeletionResult.deletedCount;
+
+      console.log(`🗑️  Cascade delete for lab ${id}:`);
+      console.log(`   - Deleted ${totalPartsDeleted} lab parts`);
+      console.log(`   - Deleted ${totalSubmissionsDeleted} submissions`);
+
+      // Finally, delete the lab itself
       const deletedLab = await Lab.findByIdAndDelete(id);
+      
+      if (!deletedLab) {
+        return null;
+      }
+
       // IP cache no longer used - removed IpAllocationService
-      return deletedLab;
+      
+      return {
+        ...deletedLab.toObject(),
+        id: deletedLab._id?.toString(),
+        _id: undefined,
+        deletionStats: {
+          partsDeleted: totalPartsDeleted,
+          submissionsDeleted: totalSubmissionsDeleted
+        }
+      };
     } catch (error) {
       throw new Error(`Error deleting lab: ${(error as Error).message}`);
     }
