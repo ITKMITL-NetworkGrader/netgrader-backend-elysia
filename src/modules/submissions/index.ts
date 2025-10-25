@@ -60,7 +60,9 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           studentId: u_id,
           labId: body.lab_id,
           partId: body.part_id,
-          ipMappings: jobPayload.ip_mappings
+          ipMappings: jobPayload.ip_mappings,
+          labSessionId: jobPayload.lab_session_id,
+          labAttemptNumber: jobPayload.lab_attempt_number
         });
 
         // Send job to queue
@@ -327,7 +329,8 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
             labId: query.labId,
             status: query.status,
             limit: query.limit ? parseInt(query.limit) : undefined,
-            offset: query.offset ? parseInt(query.offset) : undefined
+            offset: query.offset ? parseInt(query.offset) : undefined,
+            labSessionId: query.labSessionId ?? undefined
           }
         );
         return { status: "success", data: submissions };
@@ -345,7 +348,8 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         labId: t.Optional(t.String()),
         status: t.Optional(t.String()),
         limit: t.Optional(t.String()),
-        offset: t.Optional(t.String())
+        offset: t.Optional(t.String()),
+        labSessionId: t.Optional(t.String())
       }),
       detail: {
         tags: ["Submissions"],
@@ -412,11 +416,15 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   )
   .get(
     "/history/lab/:labId/student/:studentId",
-    async ({ params, set }) => {
+    async ({ params, query, set }) => {
       try {
         const history = await SubmissionService.getStudentSubmissionHistory(
           params.labId,
-          params.studentId
+          params.studentId,
+          {
+            labSessionId: query.labSessionId ?? undefined,
+            groupBy: query.groupBy === 'labSession' ? 'labSession' : 'part'
+          }
         );
         return { status: "success", data: history };
       } catch (error) {
@@ -430,10 +438,14 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         labId: t.String(),
         studentId: t.String()
       }),
+      query: t.Object({
+        labSessionId: t.Optional(t.String()),
+        groupBy: t.Optional(t.String())
+      }),
       detail: {
         tags: ["Submissions"],
         summary: "Get Student Submission History",
-        description: "Get submission history for a specific student in a lab, grouped by part. Shows all attempts with scores and statuses."
+        description: "Get submission history for a specific student in a lab, grouped by part or by lab attempt."
       }
     }
   )

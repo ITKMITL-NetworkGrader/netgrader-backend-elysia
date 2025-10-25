@@ -1,4 +1,6 @@
+import { Types } from 'mongoose';
 import { StudentLabSession } from '../modules/student-lab-sessions/model';
+import { StudentLabSessionService } from '../modules/student-lab-sessions/service';
 import { Lab, ILab } from '../modules/labs/model';
 
 /**
@@ -47,8 +49,12 @@ export class LabSessionCleanupService {
       }
 
       if (shouldRelease) {
-        // Delete the session to release IP
-        await StudentLabSession.deleteOne({ _id: session._id });
+        // Mark session as completed and release IP
+        await StudentLabSessionService.deleteSession(
+          session.studentId,
+          session.labId as Types.ObjectId,
+          { reason: 'timeout' }
+        );
 
         releasedDetails.push({
           studentId: session.studentId,

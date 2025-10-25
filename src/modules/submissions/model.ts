@@ -120,6 +120,8 @@ export interface ISubmission extends Document {
   // Additional metadata
   attempt: number;
   ipMappings: Record<string, string>;
+  labSessionId?: Types.ObjectId;
+  labAttemptNumber?: number;
 
   // Timestamps
   createdAt: Date;
@@ -289,6 +291,13 @@ const submissionSchema = new Schema<ISubmission>({
     type: Schema.Types.Mixed,
     required: true,
     default: {}
+  },
+  labSessionId: {
+    type: Schema.Types.ObjectId,
+    ref: 'StudentLabSession'
+  },
+  labAttemptNumber: {
+    type: Number
   }
 }, {
   timestamps: true

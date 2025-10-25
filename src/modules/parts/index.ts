@@ -3,6 +3,8 @@ import { PartService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 import { IFillInBlankQuestionResult } from "../submissions/model";
 import { SubmissionService } from "../submissions/service";
+import { StudentLabSessionService } from "../student-lab-sessions/service";
+import { Types } from "mongoose";
 import {
   calculateStudentIdBasedIP,
   calculateAdvancedStudentIP,
@@ -949,7 +951,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     async ({ body, authPlugin, set }) => {
       try {
         const { u_id } = authPlugin ?? { u_id: "" };
-        const { labId, partId, answers, isUpdate } = body;
+        const { labId, partId, answers, isUpdate, labSessionId } = body;
 
         // Get the part to access question definitions
         const parts = await PartService.getPartsByLab(labId);
@@ -973,6 +975,17 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
             success: false,
             message: 'Lab not found'
           };
+        }
+
+        const labObjectId = new Types.ObjectId(labId);
+        const activeSession = await StudentLabSessionService.getOrCreateSession(
+          u_id,
+          labObjectId,
+          lab
+        );
+
+        if (labSessionId && activeSession.id?.toString() !== labSessionId) {
+          console.warn(`[Fill-In-Blank] Session mismatch detected for student ${u_id} on lab ${labId}. Using active session ${activeSession.id} instead of provided ${labSessionId}.`);
         }
 
         // Calculate points based on actual question configuration
@@ -1127,7 +1140,9 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
             passed: totalPoints === 0 ? true : totalPointsEarned === totalPoints,
             questions: questionSummaries
           },
-          answersMap
+          answersMap,
+          labSessionId: activeSession.id?.toString(),
+          labAttemptNumber: activeSession.attemptNumber
         });
 
         set.status = 200;
@@ -1146,7 +1161,9 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
             id: submissionRecord._id?.toString(),
             attempt: submissionRecord.attempt,
             status: submissionRecord.status,
-            submittedAt: submissionRecord.submittedAt
+            submittedAt: submissionRecord.submittedAt,
+            labSessionId: submissionRecord.labSessionId?.toString?.() ?? activeSession.id?.toString(),
+            labAttemptNumber: submissionRecord.labAttemptNumber ?? activeSession.attemptNumber
           }
         };
       } catch (error) {
@@ -1167,7 +1184,8 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
           answer: t.Union([t.String(), t.Null()]),
           ipTableAnswers: t.Optional(t.Array(t.Array(t.String())))
         })),
-        isUpdate: t.Boolean()
+        isUpdate: t.Boolean(),
+        labSessionId: t.Optional(t.String())
       }),
       detail: {
         tags: ["Parts"],
