@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { TaskTemplate } from "./model";
 import {
   CustomTaskTemplate,
@@ -99,7 +100,10 @@ export class TaskTemplateService {
    */
   static async getTaskTemplateById(id: string) {
     try {
-      const template = await TaskTemplate.findById(id).lean();
+      let template = null;
+      if (Types.ObjectId.isValid(id)) {
+        template = await TaskTemplate.findById(id).lean();
+      }
       
       if (!template) {
         return getCustomTaskTemplateById(id);
@@ -152,6 +156,14 @@ export class TaskTemplateService {
         }
       });
 
+      if (!Types.ObjectId.isValid(id)) {
+        const externalTemplate = await getCustomTaskTemplateById(id);
+        if (externalTemplate) {
+          throw new Error('Custom templates managed in MinIO cannot be updated through this API.');
+        }
+        return null;
+      }
+
       const updatedTemplate = await TaskTemplate.findByIdAndUpdate(
         id,
         { $set: updateFields },
@@ -177,6 +189,14 @@ export class TaskTemplateService {
    */
   static async deleteTaskTemplate(id: string) {
     try {
+      if (!Types.ObjectId.isValid(id)) {
+        const externalTemplate = await getCustomTaskTemplateById(id);
+        if (externalTemplate) {
+          throw new Error('Custom templates managed in MinIO cannot be deleted through this API.');
+        }
+        return null;
+      }
+
       const deletedTemplate = await TaskTemplate.findByIdAndDelete(id);
       
       if (!deletedTemplate) {

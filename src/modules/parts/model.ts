@@ -89,7 +89,7 @@ export interface ILabPart extends Document {
     taskId: string;        // Unique within part
     name: string;
     description?: string;
-    templateId: Types.ObjectId;  // Ref: templates._id
+    templateId: Types.ObjectId | string;  // Supports Mongo templates and external MinIO templates
     group_id?: string; // Optional grouping for grading
     // Execution Configuration
     executionDevice: string;     // Device ID from lab.network.devices
@@ -324,9 +324,26 @@ const labPartSchema = new Schema<ILabPart>({
       default: ""
     },
     templateId: {
-      type: Schema.Types.ObjectId,
+      type: Schema.Types.Mixed,
       required: true,
-      ref: 'Template'
+      set: (value: unknown) => {
+        if (typeof value === 'string' && Types.ObjectId.isValid(value)) {
+          return new Types.ObjectId(value);
+        }
+        return value;
+      },
+      validate: {
+        validator: (value: unknown) => {
+          if (value instanceof Types.ObjectId) {
+            return true;
+          }
+          if (typeof value === 'string') {
+            return value.trim().length > 0;
+          }
+          return Types.ObjectId.isValid(value as any);
+        },
+        message: 'templateId must be a Mongo ObjectId or a non-empty string identifier.'
+      }
     },
     group_id: {
       type: String,
