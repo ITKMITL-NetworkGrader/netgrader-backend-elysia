@@ -461,34 +461,37 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           };
         }
 
+        
         // Check if lab is published
-        // if (!lab.publishedAt) {
-        //   set.status = 403;
-        //   return {
-        //     success: false,
-        //     message: "Lab is not published yet"
-        //   };
-        // }
+        if (!lab.publishedAt) {
+          set.status = 403;
+          return {
+            success: false,
+            message: "Lab is not published yet"
+          };
+        }
 
         // // Check if lab is available (within availableFrom and availableUntil window)
-        // const now = new Date();
-        // if (lab.availableFrom && now < lab.availableFrom) {
-        //   set.status = 403;
-        //   return {
-        //     success: false,
-        //     message: "Lab is not available yet",
-        //     availableFrom: lab.availableFrom
-        //   };
-        // }
+        const now = new Date();
+        if (lab.availableFrom && now < lab.availableFrom) {
+          console.log("Gay2")
+          set.status = 403;
+          return {
+            success: false,
+            message: "Lab is not available yet",
+            availableFrom: lab.availableFrom
+          };
+        }
 
-        // if (lab.availableUntil && now > lab.availableUntil) {
-        //   set.status = 403;
-        //   return {
-        //     success: false,
-        //     message: "Lab is no longer available",
-        //     availableUntil: lab.availableUntil
-        //   };
-        // }
+        if (lab.availableUntil && now > lab.availableUntil) {
+          console.log("Gay3")
+          set.status = 403;
+          return {
+            success: false,
+            message: "Lab is no longer available",
+            availableUntil: lab.availableUntil
+          };
+        }
 
         // Generate complete network configuration
         const networkConfig = await IPGenerator.generateStudentNetworkConfiguration(lab, u_id);

@@ -282,7 +282,7 @@ export class PartService {
       );
 
       // Only allow updating specific fields
-      const allowedFields = ['partId', 'title', 'description', 'instructions', 'order', 'tasks', 'task_groups', 'prerequisites', 'totalPoints'];
+      const allowedFields = ['partId', 'title', 'description', 'instructions', 'order', 'partType', 'questions', 'dhcpConfiguration', 'tasks', 'task_groups', 'prerequisites', 'totalPoints'];
       const updateFields: any = {};
       
       allowedFields.forEach(field => {
@@ -335,11 +335,11 @@ export class PartService {
       });
 
       // Update metadata if content changed
-      if (updateFields.instructions || updateFields.description || updateFields.tasks || updateFields.task_groups) {
+      if (updateFields.instructions || updateFields.description || updateFields.tasks || updateFields.task_groups || updateFields.questions || updateFields.partType) {
         const currentPart = await LabPart.findById(id);
         if (currentPart) {
           const instructionsWordCount = updateFields.instructions?.metadata?.wordCount || (currentPart.instructions as any)?.metadata?.wordCount || 0;
-          
+
           updateFields.metadata = {
             ...(currentPart.metadata || {}),
             wordCount: instructionsWordCount,

@@ -1,0 +1,60 @@
+@startuml UC-006: View Submission Results
+
+title UC-006: View Submission Results
+autonumber
+
+actor User
+participant "Client" as Client
+participant "Submission API" as API
+participant "SubmissionService" as SubmissionService
+database "MongoDB" as DB
+
+== View Single Submission (Student) ==
+User -> Client: Click on submission
+Client -> API: GET /v0/submissions/:jobId
+
+API -> API: Verify authentication (JWT)
+
+API -> SubmissionService: getSubmissionByJobId(jobId)
+SubmissionService -> DB: findOne({jobId})
+
+alt Submission found
+    DB --> SubmissionService: Submission with grading results
+    SubmissionService --> API: Complete submission data
+    API --> Client: 200 OK + full results
+    Client -> Client: Parse test results and group results
+    Client --> User: Display results:\n- Total points earned/possible\n- Per-test results with status\n- Group results (if grouped)\n- Execution time
+else Submission not found
+    DB --> SubmissionService: null
+    SubmissionService --> API: Not found
+    API --> Client: 404 Not Found
+    Client --> User: Submission not found
+end
+
+== View Student's Submission History ==
+User -> Client: View "My Submissions"
+Client -> API: GET /v0/submissions/student/:studentId
+
+API -> API: Verify user is student or instructor
+
+API -> SubmissionService: getSubmissionsByStudent(studentId, filters)
+SubmissionService -> DB: find({studentId, ...filters}).sort({createdAt: -1})
+DB --> SubmissionService: List of submissions
+SubmissionService --> API: Submissions array
+API --> Client: 200 OK + submissions list
+Client --> User: Display submission history:\n- Lab name\n- Status (pending/running/completed)\n- Points earned\n- Submission date
+
+== View Lab Overview (Instructor) ==
+User -> Client: View lab submissions dashboard
+Client -> API: GET /v0/submissions/lab/:labId
+
+API -> API: Verify instructor role
+
+API -> SubmissionService: getLabSubmissionOverview(labId)
+SubmissionService -> DB: Aggregate submissions by student
+DB --> SubmissionService: Lightweight overview per student
+SubmissionService --> API: Overview data
+API --> Client: 200 OK + lab overview
+Client --> User: Display class overview:\n- Student progress\n- Latest submission per student\n- Completion statistics\n- Average scores
+
+@enduml

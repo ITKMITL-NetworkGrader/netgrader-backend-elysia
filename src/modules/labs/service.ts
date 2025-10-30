@@ -43,7 +43,11 @@ export class LabService {
         type: labData.type || 'lab',
         network: labData.network,
         createdBy: user._id,
-        publishedAt: labData.publishedAt,
+        // Auto-publish lab if publishedAt is not explicitly set
+        // This allows immediate access unless instructor explicitly unpublishes
+        publishedAt: labData.publishedAt !== undefined ? labData.publishedAt : new Date(),
+        availableFrom: labData.availableFrom,
+        availableUntil: labData.availableUntil,
         dueDate: labData.dueDate,
         instructions: processedInstructions
       });

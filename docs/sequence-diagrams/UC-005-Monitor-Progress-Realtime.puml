@@ -1,0 +1,52 @@
+@startuml UC-005: Monitor Grading Progress in Real-time
+
+title UC-005: Monitor Grading Progress in Real-time
+autonumber
+
+actor Student
+participant "Client" as Client
+participant "Submission API\n(Elysia)" as API
+participant "SSE Service" as SSE
+participant "Grading Service\n(FastAPI)" as Grader
+database "MongoDB" as DB
+
+== Open SSE Connection ==
+Student -> Client: View submission progress
+Client -> API: GET /v0/submissions/:jobId/stream
+API -> SSE: addClient(jobId, stream)
+SSE --> API: Client registered
+API --> Client: SSE connection established
+Client --> Student: Show progress UI (0%)
+
+== Grading Started ==
+Grader -> API: POST /v0/submissions/started
+API -> DB: Update submission (status: running)
+DB --> API: Updated
+API -> SSE: sendStarted(jobId, "Grading started")
+SSE --> Client: event: started\ndata: {status: "running"}
+Client --> Student: Update progress (5%) "Initializing..."
+
+== Task Progress Updates ==
+loop For each task
+    Grader -> Grader: Execute task (ping/command/NAPALM)
+    Grader -> API: POST /v0/submissions/progress
+    API -> DB: Append progress to history
+    DB --> API: Updated
+    API -> SSE: sendProgress(jobId, progress)
+    SSE --> Client: event: progress\ndata: {percentage: 35%, message: "Task 3/10"}
+    Client --> Student: Update progress bar and message
+end
+
+== Grading Completed ==
+Grader -> API: POST /v0/submissions/result
+API -> DB: Update submission (status: completed, results)
+DB --> API: Updated
+API -> SSE: sendResult(jobId, gradingResult)
+SSE --> Client: event: completed\ndata: {points: 85/100, test_results: [...]}
+Client --> Student: Show final results (100%)
+
+SSE -> SSE: Close connection after 500ms
+SSE --> Client: Connection closed
+Client -> Client: Redirect to results page
+
+@enduml

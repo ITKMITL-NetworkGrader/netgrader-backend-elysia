@@ -1,0 +1,67 @@
+@startuml UC-003: Start Lab (Get Network Configuration)
+
+title UC-003: Start Lab (Get Network Configuration)
+autonumber
+
+actor Student
+participant "Client" as Client
+participant "Lab API" as API
+participant "SessionService" as SessionService
+database "MongoDB" as DB
+participant "IPGenerator" as IPGenerator
+
+== Start Lab Flow ==
+Student -> Client: Click "Start Lab"
+Client -> API: POST /v0/labs/:id/start
+
+API -> API: Verify student authentication (JWT)
+
+API -> DB: Fetch lab document
+DB --> API: Lab details
+
+API -> API: Verify lab is published
+API -> API: Check availability window
+
+alt Lab not available
+    API --> Client: 403 Forbidden
+    Client --> Student: Lab not available yet
+else Lab available
+    API -> SessionService: getOrCreateSession(studentId, labId)
+
+    SessionService -> DB: Find active session
+
+    alt Active session exists
+        DB --> SessionService: Existing session with IP
+        SessionService --> API: Return existing session
+    else No active session
+        DB --> SessionService: No session found
+
+        SessionService -> SessionService: Calculate available Management IP
+
+        SessionService -> DB: Create new session with unique IP
+
+        alt IP already assigned (race condition)
+            DB --> SessionService: Duplicate IP error
+            SessionService -> SessionService: Retry with exponential backoff
+            SessionService -> DB: Create session with new IP
+            DB --> SessionService: Session created
+        else IP available
+            DB --> SessionService: Session created
+        end
+
+        SessionService --> API: New session with Management IP
+    end
+
+    API -> IPGenerator: generateStudentNetworkConfiguration()
+
+    IPGenerator -> IPGenerator: Generate Management IPs for devices
+    IPGenerator -> IPGenerator: Calculate VLAN IPs based on topology
+    IPGenerator -> IPGenerator: Build complete network config
+
+    IPGenerator --> API: Complete network configuration
+
+    API --> Client: 200 OK + network config
+    Client --> Student: Show network topology with IPs
+end
+
+@enduml

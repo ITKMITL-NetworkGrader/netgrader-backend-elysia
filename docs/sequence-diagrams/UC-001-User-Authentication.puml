@@ -1,0 +1,48 @@
+@startuml UC-001: User Authentication
+
+title UC-001: User Authentication
+autonumber
+
+actor User
+participant "Client" as Client
+participant "Auth API" as API
+participant "AuthService" as AuthService
+database "MongoDB" as DB
+participant "LDAP" as LDAP
+
+== Login Flow ==
+User -> Client: Enter credentials
+Client -> API: POST /v0/auth/login
+API -> AuthService: authenticateUser()
+
+AuthService -> DB: Find user by u_id
+
+alt User exists in MongoDB
+    DB --> AuthService: User found
+    AuthService -> AuthService: Validate password
+    AuthService -> AuthService: Generate JWT token
+    AuthService --> API: Return user + token
+    API --> Client: 200 OK + auth cookie
+    Client --> User: Login successful
+
+else User not found - Try LDAP
+    DB --> AuthService: Not found
+    AuthService -> LDAP: Authenticate with LDAP
+
+    alt LDAP Success
+        LDAP --> AuthService: Authentication successful
+        AuthService -> DB: Create new user
+        DB --> AuthService: User created
+        AuthService -> AuthService: Generate JWT token
+        AuthService --> API: Return user + token
+        API --> Client: 200 OK + auth cookie
+        Client --> User: Login successful
+    else LDAP Failed
+        LDAP --> AuthService: Authentication failed
+        AuthService --> API: Error
+        API --> Client: 401 Unauthorized
+        Client --> User: Invalid credentials
+    end
+end
+
+@enduml

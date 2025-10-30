@@ -1,0 +1,65 @@
+@startuml UC-002: Create Lab
+
+title UC-002: Create Lab
+autonumber
+
+actor Instructor
+participant "Client" as Client
+participant "Lab API" as API
+participant "LabService" as LabService
+participant "VlanValidator" as Validator
+database "MongoDB" as DB
+participant "EnrollmentService" as EnrollmentService
+
+== Create Lab Flow ==
+Instructor -> Client: Design lab (network topology, devices, tasks)
+Client -> API: POST /v0/labs
+
+API -> API: Verify instructor role (JWT)
+
+API -> LabService: createLab(labData)
+
+LabService -> Validator: Validate VLAN configuration
+
+alt Invalid VLAN config
+    Validator --> LabService: Validation error
+    LabService --> API: Error details
+    API --> Client: 400 Bad Request
+    Client --> Instructor: Configuration error
+else Valid configuration
+    Validator --> LabService: Validation passed
+
+    LabService -> Validator: Validate exempt IP ranges
+
+    alt Invalid IP ranges
+        Validator --> LabService: Validation error
+        LabService --> API: Error details
+        API --> Client: 400 Bad Request
+        Client --> Instructor: IP range error
+    else Valid IP ranges
+        Validator --> LabService: Validation passed
+
+        LabService -> DB: Create lab document
+        DB --> LabService: Lab created
+
+        LabService -> EnrollmentService: Get enrolled student count
+        EnrollmentService -> DB: Count enrollments for course
+        DB --> EnrollmentService: Student count
+        EnrollmentService --> LabService: Student count
+
+        LabService -> LabService: Calculate IP capacity
+
+        alt Insufficient IP capacity
+            LabService -> DB: Delete lab (rollback)
+            LabService --> API: Error: Not enough IPs
+            API --> Client: 400 Bad Request
+            Client --> Instructor: Capacity error
+        else Sufficient capacity
+            LabService --> API: Lab created successfully
+            API --> Client: 201 Created + lab details
+            Client --> Instructor: Lab created successfully
+        end
+    end
+end
+
+@enduml

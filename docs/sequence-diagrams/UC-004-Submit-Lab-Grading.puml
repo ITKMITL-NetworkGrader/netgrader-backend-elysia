@@ -1,0 +1,70 @@
+@startuml UC-004: Submit Lab for Grading
+
+title UC-004: Submit Lab for Grading
+autonumber
+
+actor Student
+participant "Client" as Client
+participant "Submission API\n(Elysia)" as API
+participant "SubmissionService" as SubmissionService
+participant "IPGenerator" as IPGenerator
+participant "SessionService" as SessionService
+database "MongoDB" as DB
+queue "RabbitMQ" as Queue
+participant "Queue Consumer\n(FastAPI)" as Consumer
+participant "Grading Service\n(FastAPI)" as Grader
+
+== Submit for Grading ==
+Student -> Client: Submit lab answers
+Client -> API: POST /v0/submissions
+
+API -> API: Verify authentication (JWT)
+
+API -> SubmissionService: createSubmission(submissionData)
+
+SubmissionService -> DB: Fetch lab and part details
+DB --> SubmissionService: Lab and part data
+
+SubmissionService -> SessionService: Get student's lab session
+SessionService -> DB: Fetch active session
+DB --> SessionService: Session with Management IP
+SessionService --> SubmissionService: Session details
+
+SubmissionService -> IPGenerator: generateJobFromLab()
+
+IPGenerator -> IPGenerator: Generate Management IPs for all devices
+IPGenerator -> IPGenerator: Calculate VLAN IPs
+IPGenerator -> IPGenerator: Build complete job payload
+
+IPGenerator --> SubmissionService: Job payload with all device configs
+
+SubmissionService -> DB: Create submission record (status: pending)
+DB --> SubmissionService: Submission created
+
+SubmissionService -> Queue: Publish grading job
+Queue --> SubmissionService: Job queued
+
+SubmissionService --> API: Submission created + jobId
+API --> Client: 201 Created + jobId
+Client --> Student: Submission received, grading in progress
+
+== Grading Execution (Async) ==
+Queue -> Consumer: Consume grading job
+Consumer -> Grader: process_grading_job()
+
+Grader -> Grader: Detect device types (SNMP)
+Grader -> Grader: Initialize Nornir connections
+Grader -> Grader: Execute tasks (ping, command, NAPALM)
+Grader -> Grader: Evaluate test cases
+Grader -> Grader: Calculate scores
+
+note right of Grader: Progress updates sent\nvia callbacks (UC-005)
+
+Grader -> API: POST /v0/submissions/result
+API -> SubmissionService: storeGradingResult()
+SubmissionService -> DB: Update submission (status: completed)
+DB --> SubmissionService: Updated
+SubmissionService --> API: Result stored
+API --> Grader: 200 OK
+
+@enduml
