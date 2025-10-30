@@ -19,6 +19,22 @@ interface GeneratedDevice {
   role: string;
 }
 
+export interface LecturerRangeOverridePayload {
+  key: string;
+  ip: string;
+  metadata: {
+    sourcePartId: string;
+    questionId: string;
+    rowIndex: number;
+    colIndex: number;
+    lecturerRangeStart: number;
+    lecturerRangeEnd: number;
+    deviceId?: string;
+    interfaceName?: string;
+    vlanIndex?: number;
+  };
+}
+
 export class IPGenerator {
   /**
    * Generate IP address based on inputType
@@ -184,7 +200,8 @@ export class IPGenerator {
   static generateIPMappings(
     lab: ILab,
     studentId: string,
-    managementIp: string
+    managementIp: string,
+    overrideMap?: Map<string, string>
   ): Record<string, { ip: string; vlan: number | null }> {
     const mappings: Record<string, { ip: string; vlan: number | null }> = {};
 
@@ -193,7 +210,7 @@ export class IPGenerator {
 
     for (const device of lab.network.devices) {
       for (const ipVar of device.ipVariables) {
-        const ip = this.generateIP(ipVar, lab, studentId, managementIp);
+        let ip = this.generateIP(ipVar, lab, studentId, managementIp);
 
         // Determine VLAN ID if this is a VLAN interface
         let vlanId: number | null = null;
@@ -204,6 +221,11 @@ export class IPGenerator {
 
         // Create mapping with device.variableName format (e.g., "router1.loopback0")
         const key = `${device.deviceId}.${ipVar.name}`;
+
+        if (overrideMap?.has(key)) {
+          ip = overrideMap.get(key) as string;
+        }
+
         mappings[key] = { ip, vlan: vlanId };
       }
     }
@@ -347,6 +369,9 @@ export class IPGenerator {
     part: ILabPart,
     studentId: string,
     jobId: string,
+    options?: {
+      lecturerRangeOverrides?: LecturerRangeOverridePayload[];
+    }
   ): Promise<any> {
     // Get or create student lab session to get permanent Management IP
     const labId = lab.id as Types.ObjectId;
@@ -357,7 +382,18 @@ export class IPGenerator {
 
     // Generate devices, IP mappings, and VLAN mappings
     const devices = await this.generateDevices(lab, studentId, managementIp);
-    const ipMappings = this.generateIPMappings(lab, studentId, managementIp);
+    const overrideMap = new Map<string, string>();
+
+    options?.lecturerRangeOverrides?.forEach(override => {
+      overrideMap.set(override.key, override.ip);
+    });
+
+    const ipMappings = this.generateIPMappings(
+      lab,
+      studentId,
+      managementIp,
+      overrideMap.size > 0 ? overrideMap : undefined
+    );
     const vlanMappings = this.generateVLANMappings(lab, studentId);
 
     console.log(`[VLAN Resolution] Student ${studentId} - VLAN IDs:`, vlanMappings);
@@ -403,6 +439,20 @@ export class IPGenerator {
       },
       devices,
       ip_mappings: flatIpMappings,  // Send flat format to grading service
-      vlan_mappings: vlanMappings    };
+      lecturer_range_overrides: options?.lecturerRangeOverrides?.map(({ key, ip, metadata }) => ({
+        mapping_key: key,
+        ip,
+        source_part_id: metadata.sourcePartId,
+        question_id: metadata.questionId,
+        row_index: metadata.rowIndex,
+        col_index: metadata.colIndex,
+        lecturer_range_start: metadata.lecturerRangeStart,
+        lecturer_range_end: metadata.lecturerRangeEnd,
+        device_id: metadata.deviceId,
+        interface_name: metadata.interfaceName,
+        vlan_index: metadata.vlanIndex
+      })) ?? [],
+      vlan_mappings: vlanMappings
+    };
   }
 }

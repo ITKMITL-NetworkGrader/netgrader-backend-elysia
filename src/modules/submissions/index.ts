@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia";
 import { channel, QUEUE_NAME } from "../../config/rabbitmq";
 import { SubmissionService } from "./service";
 import { IGradingResult } from "./model";
-import { IPGenerator } from "./ip-generator";
+import { IPGenerator, type LecturerRangeOverridePayload } from "./ip-generator";
 import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
 import { env } from "process";
@@ -47,12 +47,141 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         // Generate job ID if not provided
         const jobId = body.job_id || `${u_id}-${body.lab_id}-${body.part_id}-${Date.now()}`;
 
+        const partsMap = new Map<string, any>();
+        parts.parts.forEach(existingPart => {
+          partsMap.set(existingPart.partId, existingPart);
+        });
+
+        const rawOverrides = Array.isArray(body.lecturer_range_answers)
+          ? body.lecturer_range_answers
+          : [];
+
+        let lecturerRangeOverrides: LecturerRangeOverridePayload[] = [];
+
+        if (rawOverrides.length > 0) {
+          const overrideMap = new Map<string, LecturerRangeOverridePayload>();
+
+          const isValidIpv4 = (ip: string): boolean => {
+            const segments = ip.split('.');
+            if (segments.length !== 4) return false;
+
+            return segments.every(segment => {
+              if (!/^\d+$/.test(segment)) return false;
+              const value = Number(segment);
+              return value >= 0 && value <= 255;
+            });
+          };
+
+          const isWithinRange = (ip: string, start: number, end: number): boolean => {
+            const segments = ip.split('.');
+            if (segments.length !== 4) return false;
+
+            const lastOctet = Number(segments[3]);
+            if (Number.isNaN(lastOctet)) return false;
+
+            return lastOctet >= start && lastOctet <= end;
+          };
+
+          rawOverrides.forEach((override) => {
+            const {
+              source_part_id,
+              question_id,
+              row_index,
+              col_index,
+              answer,
+              device_id,
+              interface_name,
+              vlan_index
+            } = override;
+
+            if (!source_part_id || !question_id) {
+              return;
+            }
+
+            const sourcePart = partsMap.get(source_part_id);
+            if (!sourcePart || sourcePart.partType !== 'fill_in_blank') {
+              return;
+            }
+
+            const question = sourcePart.questions?.find((q: any) => q.questionId === question_id);
+            if (!question?.ipTableQuestionnaire?.cells) {
+              return;
+            }
+
+            const row = question.ipTableQuestionnaire.cells[row_index];
+            const cell = row?.[col_index];
+
+            if (!cell || (cell.cellType ?? 'input') !== 'input') {
+              return;
+            }
+
+            if (cell.answerType !== 'calculated' || !cell.calculatedAnswer) {
+              return;
+            }
+
+            if (cell.calculatedAnswer.calculationType !== 'vlan_lecturer_range') {
+              return;
+            }
+
+            const { lecturerRangeStart, lecturerRangeEnd } = cell.calculatedAnswer;
+            if (lecturerRangeStart === undefined || lecturerRangeEnd === undefined) {
+              return;
+            }
+
+            const trimmedAnswer = typeof answer === 'string' ? answer.trim() : '';
+            if (!trimmedAnswer || !isValidIpv4(trimmedAnswer) || !isWithinRange(trimmedAnswer, lecturerRangeStart, lecturerRangeEnd)) {
+              console.warn('[Submission] Skipping lecturer-defined override due to invalid IP or out-of-range value', {
+                source_part_id,
+                question_id,
+                row_index,
+                col_index,
+                answer: trimmedAnswer
+              });
+              return;
+            }
+
+            const resolvedDeviceId = cell.calculatedAnswer.deviceId || device_id;
+            const resolvedInterfaceName = cell.calculatedAnswer.interfaceName || interface_name;
+
+            if (!resolvedDeviceId || !resolvedInterfaceName) {
+              console.warn('[Submission] Missing device/interface mapping for lecturer-defined override', {
+                source_part_id,
+                question_id,
+                row_index,
+                col_index
+              });
+              return;
+            }
+
+            const key = `${resolvedDeviceId}.${resolvedInterfaceName}`;
+
+            overrideMap.set(key, {
+              key,
+              ip: trimmedAnswer,
+              metadata: {
+                sourcePartId: source_part_id,
+                questionId: question_id,
+                rowIndex: row_index,
+                colIndex: col_index,
+                lecturerRangeStart,
+                lecturerRangeEnd,
+                deviceId: resolvedDeviceId,
+                interfaceName: resolvedInterfaceName,
+                vlanIndex: cell.calculatedAnswer.vlanIndex ?? vlan_index
+              }
+            });
+          });
+
+          lecturerRangeOverrides = Array.from(overrideMap.values());
+        }
+
         // Generate complete job payload from lab and part data
         const jobPayload = await IPGenerator.generateJobFromLab(
           lab as any, // Cast to ILab type (services return transformed data)
           part as any, // Cast to ILabPart type
           u_id,
-          jobId
+          jobId,
+          lecturerRangeOverrides.length > 0 ? { lecturerRangeOverrides } : undefined
         );
         // Create submission record
         const submission = await SubmissionService.createSubmission({
@@ -93,6 +222,16 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         lab_id: t.String(),
         part_id: t.String(),
         job_id: t.Optional(t.String()),
+        lecturer_range_answers: t.Optional(t.Array(t.Object({
+          source_part_id: t.String(),
+          question_id: t.String(),
+          row_index: t.Number(),
+          col_index: t.Number(),
+          answer: t.String(),
+          device_id: t.Optional(t.String()),
+          interface_name: t.Optional(t.String()),
+          vlan_index: t.Optional(t.Number())
+        })))
       }),
       detail: {
         tags: ["Grading"],
