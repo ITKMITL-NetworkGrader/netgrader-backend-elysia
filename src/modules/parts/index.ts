@@ -231,6 +231,14 @@ function calculateNetworkAddress(ip: string, subnetMask: number): string {
   ].join('.');
 }
 
+function ipToNumber(ip: string): number {
+  const octets = ip.split('.').map(Number);
+  if (octets.length !== 4 || octets.some(octet => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+    return Number.NaN;
+  }
+  return ((octets[0] << 24) >>> 0) + (octets[1] << 16) + (octets[2] << 8) + octets[3];
+}
+
 /**
  * Helper function to calculate broadcast address from IP and subnet mask
  */
@@ -320,6 +328,13 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
       throw new Error(`IP variable ${interfaceName} not found for device ${deviceId}`);
     }
 
+    if (ipVariable.inputType === 'fullIP' && ipVariable.fullIp) {
+      console.log(`[Device Interface IP] Using static fullIP for ${deviceId}.${interfaceName}:`, {
+        fullIp: ipVariable.fullIp
+      });
+      return ipVariable.fullIp;
+    }
+
     // ❌ REJECT MANAGEMENT INTERFACES
     if (ipVariable.isManagementInterface) {
       throw new Error(
@@ -366,7 +381,14 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
     }
 
     // Regular (non-VLAN) interface - use basic calculation with hostOffset
-    return calculateStudentIdBasedIP(baseNetwork, studentId, ipVariable.hostOffset);
+    const hostOffset =
+      typeof ipVariable.hostOffset === 'number'
+        ? ipVariable.hostOffset
+        : typeof ipVariable.interfaceOffset === 'number'
+          ? ipVariable.interfaceOffset
+          : 1;
+
+    return calculateStudentIdBasedIP(baseNetwork, studentId, hostOffset);
   }
 
   // Handle VLAN-based calculations (for network addresses, broadcast, etc.)
@@ -1048,8 +1070,36 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
                     }
                   }
 
-                  // Compare answers (case-insensitive IP comparison)
-                  const isCorrect = studentAnswer.toLowerCase() === expectedAnswer.toLowerCase();
+                  let isCorrect = studentAnswer.toLowerCase() === expectedAnswer.toLowerCase();
+
+                  if (cell.answerType === 'calculated' && cell.calculatedAnswer?.calculationType === 'vlan_lecturer_range') {
+                    const calc = cell.calculatedAnswer;
+                    const lecturerStart = calc.lecturerRangeStart ?? calc.lecturerOffset ?? null;
+                    const lecturerEnd = calc.lecturerRangeEnd ?? calc.lecturerRangeStart ?? calc.lecturerOffset ?? null;
+
+                    const vlan = typeof calc.vlanIndex === 'number'
+                      ? lab.network?.vlanConfiguration?.vlans?.[calc.vlanIndex]
+                      : undefined;
+
+                    const subnetMask = vlan?.subnetMask ?? lab.network?.topology?.subnetMask ?? 24;
+
+                    if (lecturerStart !== null && lecturerEnd !== null && expectedAnswer) {
+                      const networkAddr = calculateNetworkAddress(expectedAnswer, subnetMask);
+                      const networkNum = ipToNumber(networkAddr);
+                      const studentNum = ipToNumber(studentAnswer);
+
+                      if (!Number.isNaN(networkNum) && !Number.isNaN(studentNum)) {
+                        const minNum = networkNum + lecturerStart;
+                        const maxNum = networkNum + lecturerEnd;
+                        isCorrect = studentNum >= minNum && studentNum <= maxNum;
+                      } else {
+                        isCorrect = false;
+                      }
+                    } else {
+                      isCorrect = false;
+                    }
+                  }
+
                   cellDetails[rowIndex][colIndex] = { isCorrect };
 
                   if (isCorrect) {

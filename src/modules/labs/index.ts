@@ -507,7 +507,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
             networkConfiguration: {
               managementIp: networkConfig.managementIp,
               ipMappings: networkConfig.ipMappings,
-              vlanMappings: networkConfig.vlanMappings
+              vlanMappings: networkConfig.vlanMappings,
+              vlanSubnets: networkConfig.vlanSubnets
             }
           }
         };
@@ -577,7 +578,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
             networkConfiguration: {
               managementIp: networkConfig.managementIp,
               ipMappings: networkConfig.ipMappings,
-              vlanMappings: networkConfig.vlanMappings
+              vlanMappings: networkConfig.vlanMappings,
+              vlanSubnets: networkConfig.vlanSubnets
             }
           }
         };

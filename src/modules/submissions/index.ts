@@ -72,13 +72,72 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
             });
           };
 
-          const isWithinRange = (ip: string, start: number, end: number): boolean => {
-            const segments = ip.split('.');
-            if (segments.length !== 4) return false;
+          const ipv4ToNumber = (ip: string): number | null => {
+            const octets = ip.split('.').map(part => Number(part));
+            if (octets.length !== 4) return null;
+            if (octets.some(octet => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+              return null;
+            }
+            return ((octets[0] << 24) >>> 0) + (octets[1] << 16) + (octets[2] << 8) + octets[3];
+          };
 
-            const lastOctet = Number(segments[3]);
-            if (Number.isNaN(lastOctet)) return false;
+          const getVlanSubnetContext = (vlanIndex?: number | null) => {
+            if (typeof vlanIndex !== 'number' || vlanIndex < 0) {
+              return null;
+            }
 
+            const vlanConfig = lab.network?.vlanConfiguration;
+            const vlan = vlanConfig?.vlans?.[vlanIndex];
+            if (!vlan) return null;
+
+            const baseNetwork = vlan.baseNetwork || lab.network?.topology?.baseNetwork;
+            const subnetMask = typeof vlan.subnetMask === 'number'
+              ? vlan.subnetMask
+              : lab.network?.topology?.subnetMask;
+            if (!baseNetwork || typeof subnetMask !== 'number') {
+              return null;
+            }
+
+            const baseNumber = ipv4ToNumber(baseNetwork);
+            if (baseNumber === null) return null;
+
+            const blockSize = Math.pow(2, 32 - subnetMask);
+            const rawSubnetIndex = typeof vlan.subnetIndex === 'number'
+              ? vlan.subnetIndex
+              : vlanIndex + 1; // Ensure 1-based index like advanced student IP calc
+
+            const subnetIndex = rawSubnetIndex > 0 ? rawSubnetIndex : 1;
+            const networkNumber = baseNumber + (subnetIndex - 1) * blockSize;
+
+            return {
+              networkNumber,
+              blockSize
+            };
+          };
+
+          const isWithinRange = (
+            ip: string,
+            start: number,
+            end: number,
+            vlanIndex?: number | null
+          ): boolean => {
+            const ipNumber = ipv4ToNumber(ip);
+            if (ipNumber === null) return false;
+
+            const context = getVlanSubnetContext(vlanIndex);
+            if (context) {
+              const offset = ipNumber - context.networkNumber;
+
+              // Usable host addresses exclude network (offset 0) and broadcast (offset blockSize - 1)
+              if (offset <= 0 || offset >= context.blockSize - 1) {
+                return false;
+              }
+
+              return offset >= start && offset <= end;
+            }
+
+            // Fallback to last octet comparison if we cannot resolve subnet context
+            const lastOctet = ipNumber & 255;
             return lastOctet >= start && lastOctet <= end;
           };
 
@@ -129,7 +188,11 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
             }
 
             const trimmedAnswer = typeof answer === 'string' ? answer.trim() : '';
-            if (!trimmedAnswer || !isValidIpv4(trimmedAnswer) || !isWithinRange(trimmedAnswer, lecturerRangeStart, lecturerRangeEnd)) {
+            const effectiveVlanIndex = cell.calculatedAnswer.vlanIndex ?? vlan_index ?? null;
+
+            if (!trimmedAnswer ||
+                !isValidIpv4(trimmedAnswer) ||
+                !isWithinRange(trimmedAnswer, lecturerRangeStart, lecturerRangeEnd, effectiveVlanIndex)) {
               console.warn('[Submission] Skipping lecturer-defined override due to invalid IP or out-of-range value', {
                 source_part_id,
                 question_id,
@@ -167,7 +230,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
                 lecturerRangeEnd,
                 deviceId: resolvedDeviceId,
                 interfaceName: resolvedInterfaceName,
-                vlanIndex: cell.calculatedAnswer.vlanIndex ?? vlan_index
+                vlanIndex: effectiveVlanIndex
               }
             });
           });

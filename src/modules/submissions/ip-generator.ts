@@ -35,6 +35,23 @@ export interface LecturerRangeOverridePayload {
   };
 }
 
+const ipToNumber = (ip: string): number => {
+  const octets = ip.split('.').map(Number);
+  if (octets.length !== 4 || octets.some(octet => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+    return Number.NaN;
+  }
+  return ((octets[0] << 24) >>> 0) + (octets[1] << 16) + (octets[2] << 8) + octets[3];
+};
+
+const numberToIp = (num: number): string => {
+  return [
+    (num >>> 24) & 255,
+    (num >>> 16) & 255,
+    (num >>> 8) & 255,
+    num & 255
+  ].join('.');
+};
+
 export class IPGenerator {
   /**
    * Generate IP address based on inputType
@@ -323,6 +340,7 @@ export class IPGenerator {
     managementIp: string;
     ipMappings: Record<string, { ip: string; vlan: number | null }>;
     vlanMappings: Record<string, number>;
+    vlanSubnets: Record<number, { baseNetwork: string; subnetMask: number; subnetIndex?: number }>;
     sessionInfo: {
       sessionId: string;
       status: string;
@@ -345,10 +363,72 @@ export class IPGenerator {
 
     console.log(`[Lab Start] Student ${studentId} - Generated ${Object.keys(ipMappings).length} IP mappings, ${Object.keys(vlanMappings).length} VLAN mappings`);
 
+    const vlanSubnets: Record<number, { baseNetwork: string; subnetMask: number; subnetIndex?: number }> = {};
+    const vlanConfig = lab.network?.vlanConfiguration;
+    const topologyBase = lab.network?.topology?.baseNetwork;
+    const topologyMask = lab.network?.topology?.subnetMask;
+
+    if (vlanConfig?.vlans?.length) {
+      const vlanInterfaceIps: Record<number, string[]> = {};
+
+      lab.network?.devices?.forEach(device => {
+        device.ipVariables?.forEach(ipVar => {
+          if (!ipVar?.isVlanInterface || typeof ipVar.vlanIndex !== 'number') return;
+          const key = `${device.deviceId}.${ipVar.name}`;
+          const mapping = ipMappings[key];
+          if (mapping?.ip) {
+            if (!vlanInterfaceIps[ipVar.vlanIndex]) {
+              vlanInterfaceIps[ipVar.vlanIndex] = [];
+            }
+            vlanInterfaceIps[ipVar.vlanIndex].push(mapping.ip);
+          }
+        });
+      });
+
+      vlanConfig.vlans.forEach((vlan, idx) => {
+        const vlanIndex = typeof vlan.vlanIndex === 'number' ? vlan.vlanIndex : idx;
+        const subnetMask = typeof vlan.subnetMask === 'number' ? vlan.subnetMask : topologyMask;
+        if (typeof subnetMask !== 'number') return;
+
+        let baseNetwork = vlan.baseNetwork || topologyBase;
+
+        if (baseNetwork) {
+          const baseNum = ipToNumber(baseNetwork);
+          if (!Number.isNaN(baseNum)) {
+            const blockSize = Math.pow(2, 32 - subnetMask);
+            if (typeof vlan.subnetIndex === 'number') {
+              const subnetIndex = vlan.subnetIndex >= 1 ? vlan.subnetIndex : 1;
+              baseNetwork = numberToIp(baseNum + (subnetIndex - 1) * blockSize);
+            }
+          }
+        }
+
+        if (!baseNetwork) {
+          const sampleIp = vlanInterfaceIps[vlanIndex]?.[0];
+          if (sampleIp) {
+            const ipNum = ipToNumber(sampleIp);
+            if (!Number.isNaN(ipNum)) {
+              const mask = ~((1 << (32 - subnetMask)) - 1) >>> 0;
+              baseNetwork = numberToIp((ipNum & mask) >>> 0);
+            }
+          }
+        }
+
+        if (baseNetwork) {
+          vlanSubnets[vlanIndex] = {
+            baseNetwork,
+            subnetMask,
+            subnetIndex: typeof vlan.subnetIndex === 'number' ? vlan.subnetIndex : undefined
+          };
+        }
+      });
+    }
+
     return {
       managementIp,
       ipMappings,
       vlanMappings,
+      vlanSubnets,
       sessionInfo: {
         sessionId: session.id?.toString() || '',
         status: session.status,
