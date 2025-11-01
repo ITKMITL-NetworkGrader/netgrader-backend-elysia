@@ -52,6 +52,37 @@ const numberToIp = (num: number): string => {
   ].join('.');
 };
 
+const normalizeInterfaceName = (name: string): string => {
+  if (!name) return name;
+
+  let normalized = name
+    .replace(/\s+/g, '')
+    .replace(/GigabitEthernet/gi, 'gig')
+    .replace(/FastEthernet/gi, 'fa')
+    .replace(/Ethernet/gi, 'eth')
+    .replace(/Loopback/gi, 'loopback')
+    .replace(/Serial/gi, 'serial')
+    .replace(/Port-channel/gi, 'po')
+    .replace(/InterfaceVlan/gi, 'interfacevlan')
+    .replace(/Vlan/gi, 'vlan')
+    .replace(/-/g, '_')
+    .replace(/\./g, '_')
+    .replace(/\//g, '_')
+    .toLowerCase();
+
+  normalized = normalized.replace(/__+/g, '_');
+
+  return normalized;
+};
+
+const normalizeOverrideKey = (key: string): string => {
+  const [deviceId, interfaceName] = key.split('.');
+  if (!deviceId || !interfaceName) {
+    return key;
+  }
+  return `${deviceId}.${normalizeInterfaceName(interfaceName)}`;
+};
+
 export class IPGenerator {
   /**
    * Generate IP address based on inputType
@@ -238,9 +269,12 @@ export class IPGenerator {
 
         // Create mapping with device.variableName format (e.g., "router1.loopback0")
         const key = `${device.deviceId}.${ipVar.name}`;
+        const normalizedKey = normalizeOverrideKey(key);
 
         if (overrideMap?.has(key)) {
           ip = overrideMap.get(key) as string;
+        } else if (overrideMap?.has(normalizedKey)) {
+          ip = overrideMap.get(normalizedKey) as string;
         }
 
         mappings[key] = { ip, vlan: vlanId };
@@ -464,8 +498,22 @@ export class IPGenerator {
     const devices = await this.generateDevices(lab, studentId, managementIp);
     const overrideMap = new Map<string, string>();
 
+    const registerOverride = (key: string, ip: string) => {
+      if (!key) return;
+      overrideMap.set(key, ip);
+      const normalizedKey = normalizeOverrideKey(key);
+      if (normalizedKey !== key) {
+        overrideMap.set(normalizedKey, ip);
+      }
+    };
+
     options?.lecturerRangeOverrides?.forEach(override => {
-      overrideMap.set(override.key, override.ip);
+      registerOverride(override.key, override.ip);
+
+      const { deviceId, interfaceName } = override.metadata;
+      if (deviceId && interfaceName) {
+        registerOverride(`${deviceId}.${normalizeInterfaceName(interfaceName)}`, override.ip);
+      }
     });
 
     const ipMappings = this.generateIPMappings(

@@ -190,10 +190,8 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
             const trimmedAnswer = typeof answer === 'string' ? answer.trim() : '';
             const effectiveVlanIndex = cell.calculatedAnswer.vlanIndex ?? vlan_index ?? null;
 
-            if (!trimmedAnswer ||
-                !isValidIpv4(trimmedAnswer) ||
-                !isWithinRange(trimmedAnswer, lecturerRangeStart, lecturerRangeEnd, effectiveVlanIndex)) {
-              console.warn('[Submission] Skipping lecturer-defined override due to invalid IP or out-of-range value', {
+            if (!trimmedAnswer || !isValidIpv4(trimmedAnswer)) {
+              console.warn('[Submission] Skipping lecturer-defined override due to invalid IP value', {
                 source_part_id,
                 question_id,
                 row_index,
@@ -202,6 +200,11 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
               });
               return;
             }
+
+            // Range check left intact in case we want to surface diagnostics later,
+            // but we no longer warn if the value lands outside the configured offset.
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const withinRange = isWithinRange(trimmedAnswer, lecturerRangeStart, lecturerRangeEnd, effectiveVlanIndex);
 
             const resolvedDeviceId = cell.calculatedAnswer.deviceId || device_id;
             const resolvedInterfaceName = cell.calculatedAnswer.interfaceName || interface_name;
@@ -256,6 +259,8 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           labSessionId: jobPayload.lab_session_id,
           labAttemptNumber: jobPayload.lab_attempt_number
         });
+
+        // console.log('[Submission] Enqueuing job payload for RabbitMQ:', JSON.stringify(jobPayload, null, 2));
 
         // Send job to queue
         channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
