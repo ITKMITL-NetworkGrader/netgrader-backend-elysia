@@ -73,7 +73,7 @@ const LabBodySchema = t.Object({
         isManagementInterface: t.Optional(t.Boolean()),
         isVlanInterface: t.Optional(t.Boolean()),
         vlanIndex: t.Optional(t.Number({ minimum: 0, maximum: 9 })),
-        interfaceOffset: t.Optional(t.Number({ minimum: 1, maximum: 50 })),
+        interfaceOffset: t.Optional(t.Number({ minimum: 1, maximum: 256 })),
         isStudentGenerated: t.Optional(t.Boolean()),
         description: t.Optional(t.String()),
         readonly: t.Optional(t.Boolean())
@@ -462,36 +462,36 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
         }
 
         
-        // Check if lab is published
-        if (!lab.publishedAt) {
-          set.status = 403;
-          return {
-            success: false,
-            message: "Lab is not published yet"
-          };
-        }
+        // // Check if lab is published
+        // if (!lab.publishedAt) {
+        //   set.status = 403;
+        //   return {
+        //     success: false,
+        //     message: "Lab is not published yet"
+        //   };
+        // }
 
-        // // Check if lab is available (within availableFrom and availableUntil window)
-        const now = new Date();
-        if (lab.availableFrom && now < lab.availableFrom) {
-          console.log("Gay2")
-          set.status = 403;
-          return {
-            success: false,
-            message: "Lab is not available yet",
-            availableFrom: lab.availableFrom
-          };
-        }
+        // // // Check if lab is available (within availableFrom and availableUntil window)
+        // const now = new Date();
+        // if (lab.availableFrom && now < lab.availableFrom) {
+        //   console.log("Gay2")
+        //   set.status = 403;
+        //   return {
+        //     success: false,
+        //     message: "Lab is not available yet",
+        //     availableFrom: lab.availableFrom
+        //   };
+        // }
 
-        if (lab.availableUntil && now > lab.availableUntil) {
-          console.log("Gay3")
-          set.status = 403;
-          return {
-            success: false,
-            message: "Lab is no longer available",
-            availableUntil: lab.availableUntil
-          };
-        }
+        // if (lab.availableUntil && now > lab.availableUntil) {
+        //   console.log("Gay3")
+        //   set.status = 403;
+        //   return {
+        //     success: false,
+        //     message: "Lab is no longer available",
+        //     availableUntil: lab.availableUntil
+        //   };
+        // }
 
         // Generate complete network configuration
         const networkConfig = await IPGenerator.generateStudentNetworkConfiguration(lab, u_id);

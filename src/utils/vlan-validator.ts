@@ -76,7 +76,7 @@ export class VlanValidator {
       // Validate that subnetIndex doesn't cause fourth octet overflow
       const blockSize = Math.pow(2, 32 - vlan.subnetMask);
       const maxHostAddress = vlan.subnetIndex * blockSize;
-      if (maxHostAddress > 254) {
+      if (maxHostAddress > 254 && vlan.subnetMask < 24 && vlan.subnetIndex > 0) {
         errors.push(
           `VLAN ${index}: subnetIndex ${vlan.subnetIndex} with /${vlan.subnetMask} subnet ` +
           `would start at .${maxHostAddress}, exceeding valid range (max .254). ` +
