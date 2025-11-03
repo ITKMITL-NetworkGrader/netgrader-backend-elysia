@@ -198,7 +198,8 @@ export class IPGenerator {
   static async generateDevices(
     lab: ILab,
     studentId: string,
-    managementIp: string
+    managementIp: string,
+    overrideMap?: Map<string, string>
   ): Promise<GeneratedDevice[]> {
     const devices: GeneratedDevice[] = [];
 
@@ -210,12 +211,23 @@ export class IPGenerator {
         continue;
       }
 
-      const resolvedManagementIP = this.generateIP(
+      let resolvedManagementIP = this.generateIP(
         managementInterface,
         lab,
         studentId,
         managementIp
       );
+
+      if (managementInterface.name) {
+        const overrideKey = `${labDevice.deviceId}.${managementInterface.name}`;
+        const normalizedOverrideKey = normalizeOverrideKey(overrideKey);
+
+        if (overrideMap?.has(overrideKey)) {
+          resolvedManagementIP = overrideMap.get(overrideKey) as string;
+        } else if (overrideMap?.has(normalizedOverrideKey)) {
+          resolvedManagementIP = overrideMap.get(normalizedOverrideKey) as string;
+        }
+      }
 
       const platform = await this.getPlatformFromTemplate(labDevice.templateId.toString());
 
@@ -494,8 +506,6 @@ export class IPGenerator {
 
     console.log(`[IP Resolution] Student ${studentId} - Lab ${labId} - Management IP: ${managementIp}`);
 
-    // Generate devices, IP mappings, and VLAN mappings
-    const devices = await this.generateDevices(lab, studentId, managementIp);
     const overrideMap = new Map<string, string>();
 
     const registerOverride = (key: string, ip: string) => {
@@ -515,6 +525,14 @@ export class IPGenerator {
         registerOverride(`${deviceId}.${normalizeInterfaceName(interfaceName)}`, override.ip);
       }
     });
+
+    // Generate devices, IP mappings, and VLAN mappings
+    const devices = await this.generateDevices(
+      lab,
+      studentId,
+      managementIp,
+      overrideMap.size > 0 ? overrideMap : undefined
+    );
 
     const ipMappings = this.generateIPMappings(
       lab,
