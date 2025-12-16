@@ -62,6 +62,8 @@ export interface ILab extends Document {
         description?: string;
         readonly?: boolean;
       }>;
+      connectionType?: 'ssh' | 'telnet' | 'console';
+      sshPort?: number;
       credentials: {
         usernameTemplate: string;
         passwordTemplate: string;
@@ -124,7 +126,7 @@ const labSchema = new Schema<ILab>({
     enum: ['lab', 'exam'],
     default: 'lab'
   },
-  
+
   // Embedded Network Configuration
   network: {
     name: {
@@ -300,6 +302,18 @@ const labSchema = new Schema<ILab>({
           default: false
         }
       }],
+      connectionType: {
+        type: String,
+        enum: ['ssh', 'telnet', 'console'],
+        required: false,
+        default: 'ssh'
+      },
+      sshPort: {
+        type: Number,
+        required: false,
+        min: 1,
+        max: 65535
+      },
       credentials: {
         usernameTemplate: {
           type: String,
