@@ -246,6 +246,8 @@ export class PlaygroundService {
             student_id: userId,
             lab_id: lab.id?.toString(),
             is_playground: true,  // Mark as playground job
+            // Callback URL for playground - points to playground endpoints instead of submissions
+            callback_url: `${process.env.ELYSIA_CALLBACK_URL || 'http://localhost:4000'}/v0/playground`,
             part: {
                 part_id: part.partId,
                 title: part.title,
