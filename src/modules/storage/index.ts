@@ -60,17 +60,20 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
           file.type
         );
 
-        // Update user in database
+        // Update user in database with object path (not presigned URL)
         await User.findOneAndUpdate(
           { u_id },
-          { profilePicture: result.url }
+          { profilePicture: result.objectPath }
         );
+
+        // Generate presigned URL for immediate response
+        const presignedUrl = await storageService.getPresignedUrl(result.objectPath);
 
         return {
           message: 'Profile picture uploaded successfully',
           data: {
             objectName: result.objectName,
-            url: result.url,
+            url: presignedUrl,
           },
         };
       } catch (error) {
@@ -192,14 +195,17 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
           file.type
         );
 
-        // Update course in database
-        await Course.findByIdAndUpdate(courseId, { bannerUrl: result.url });
+        // Update course in database with object path (not presigned URL)
+        await Course.findByIdAndUpdate(courseId, { bannerUrl: result.objectPath });
+
+        // Generate presigned URL for immediate response
+        const presignedUrl = await storageService.getPresignedUrl(result.objectPath);
 
         return {
           message: 'Course banner uploaded successfully',
           data: {
             objectName: result.objectName,
-            url: result.url,
+            url: presignedUrl,
           },
         };
       } catch (error) {

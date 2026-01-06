@@ -16,7 +16,7 @@ export interface UploadResult {
   objectName: string;
   etag: string;
   versionId?: string;
-  url: string;
+  objectPath: string; // MinIO object path (e.g., "courses/123/banner.jpg")
 }
 
 /**
@@ -106,13 +106,11 @@ export class StorageService {
         }
       );
 
-      const url = await this.getFileUrl(objectName);
-
       return {
         objectName,
         etag: result.etag,
         ...(result.versionId !== null ? { versionId: result.versionId } : {}),
-        url,
+        objectPath: objectName,
       };
     } catch (error) {
       console.error('Error uploading file to MinIO:', error);

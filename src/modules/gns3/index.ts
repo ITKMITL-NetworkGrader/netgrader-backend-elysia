@@ -152,6 +152,52 @@ export const gns3Routes = new Elysia({ prefix: "/playground/gns3" })
     )
 
     /**
+     * List all projects on GNS3 server
+     */
+    .post(
+        "/list-projects",
+        async ({ body, set }) => {
+            const config = {
+                serverIp: body.serverIp,
+                serverPort: body.serverPort,
+                auth: body.requiresAuth ? {
+                    username: body.username || '',
+                    password: body.password || '',
+                } : undefined,
+            };
+
+            const result = await GNS3Service.listProjects(config);
+
+            if (!result.success) {
+                set.status = 400;
+                return {
+                    success: false,
+                    error: result.error,
+                };
+            }
+
+            return {
+                success: true,
+                projects: result.projects,
+            };
+        },
+        {
+            body: t.Object({
+                serverIp: t.String({ minLength: 1 }),
+                serverPort: t.Number({ minimum: 1, maximum: 65535 }),
+                requiresAuth: t.Optional(t.Boolean()),
+                username: t.Optional(t.String()),
+                password: t.Optional(t.String()),
+            }),
+            detail: {
+                tags: ["Playground"],
+                summary: "List GNS3 Projects",
+                description: "List all projects on the GNS3 server",
+            },
+        }
+    )
+
+    /**
      * List nodes in a GNS3 project
      */
     .post(

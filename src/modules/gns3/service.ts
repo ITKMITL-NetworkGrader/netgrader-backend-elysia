@@ -172,6 +172,55 @@ export class GNS3Service {
     }
 
     /**
+     * List all projects on GNS3 server
+     */
+    static async listProjects(config: GNS3Config): Promise<{
+        success: boolean;
+        projects?: GNS3Project[];
+        error?: string;
+    }> {
+        try {
+            const url = `${this.buildBaseUrl(config)}/v2/projects`;
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: this.buildHeaders(config),
+                signal: AbortSignal.timeout(10000),
+            });
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    return {
+                        success: false,
+                        error: 'Authentication failed. Check your username and password.',
+                    };
+                }
+                return {
+                    success: false,
+                    error: `Failed to list projects: ${response.statusText}`,
+                };
+            }
+
+            const projects = (await response.json()) as GNS3Project[];
+            return {
+                success: true,
+                projects,
+            };
+        } catch (error) {
+            const err = error as Error;
+            if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+                return {
+                    success: false,
+                    error: 'Connection timed out. Check if the server is running and accessible.',
+                };
+            }
+            return {
+                success: false,
+                error: `Failed to list projects: ${err.message}`,
+            };
+        }
+    }
+
+    /**
      * Find a project by name
      */
     static async findProjectByName(
