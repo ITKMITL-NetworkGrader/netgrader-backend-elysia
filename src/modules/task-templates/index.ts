@@ -1,6 +1,9 @@
 import { Elysia, t } from "elysia";
 import { TaskTemplateService } from "./service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
+import { getMinioClient, BUCKET_NAME } from "../../config/minio";
+import { clearCustomTaskTemplateCache } from "./custom-template-source";
+import { env } from "process";
 
 const TaskTemplateCreateSchema = t.Object({
   templateId: t.String({ description: "Unique template identifier" }),
@@ -36,7 +39,7 @@ const TaskTemplateUpdateSchema = t.Object({
 
 export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
   .use(authPlugin)
-  
+
   // Get all task templates
   .get(
     "/",
@@ -59,10 +62,10 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
         };
       } catch (error) {
         set.status = 500;
-        return { 
+        return {
           success: false,
           message: "Error fetching task templates",
-          error: (error as Error).message 
+          error: (error as Error).message
         };
       }
     },
@@ -117,7 +120,7 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     async ({ params, set }) => {
       try {
         const template = await TaskTemplateService.getTaskTemplateById(params.id);
-        
+
         if (!template) {
           set.status = 404;
           return {
@@ -156,7 +159,7 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     async ({ params, set }) => {
       try {
         const template = await TaskTemplateService.getTaskTemplateByTemplateId(params.templateId);
-        
+
         if (!template) {
           set.status = 404;
           return {
@@ -195,7 +198,7 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     async ({ params, body, set }) => {
       try {
         const updatedTemplate = await TaskTemplateService.updateTaskTemplate(params.id, body);
-        
+
         if (!updatedTemplate) {
           set.status = 404;
           return {
@@ -236,7 +239,7 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     async ({ params, set }) => {
       try {
         const deletedTemplate = await TaskTemplateService.deleteTaskTemplate(params.id);
-        
+
         if (!deletedTemplate) {
           set.status = 404;
           return {
@@ -266,6 +269,82 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
       detail: {
         tags: ["Task Templates"],
         summary: "Delete Task Template"
+      }
+    }
+  )
+
+  // Upload custom task template to MinIO
+  .post(
+    "/upload",
+    async ({ body, set }) => {
+      try {
+        const { filename, content } = body;
+
+        // Validate filename
+        if (!filename.endsWith('.yaml') && !filename.endsWith('.yml')) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "Filename must end with .yaml or .yml"
+          };
+        }
+
+        // Sanitize filename
+        const sanitizedFilename = filename
+          .toLowerCase()
+          .replace(/[^a-z0-9_.-]/g, '_');
+
+        // Get MinIO client and upload
+        const client = getMinioClient();
+        const prefix = env.MINIO_TASK_TEMPLATE_PREFIX || 'custom_tasks';
+        const objectName = `${prefix}/${sanitizedFilename}`;
+
+        // Convert content to buffer
+        const buffer = Buffer.from(content, 'utf-8');
+
+        // Upload to MinIO
+        await client.putObject(
+          BUCKET_NAME,
+          objectName,
+          buffer,
+          buffer.length,
+          {
+            'Content-Type': 'text/yaml',
+          }
+        );
+
+        // Clear template cache to pick up new template
+        clearCustomTaskTemplateCache();
+
+        set.status = 201;
+        return {
+          success: true,
+          message: "Template uploaded successfully",
+          data: {
+            filename: sanitizedFilename,
+            objectName,
+            bucket: BUCKET_NAME
+          }
+        };
+      } catch (error) {
+        console.error("Failed to upload template:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error uploading template",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      body: t.Object({
+        filename: t.String({ description: "Filename for the template (must end with .yaml or .yml)" }),
+        content: t.String({ description: "YAML content of the template" })
+      }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: {
+        tags: ["Task Templates"],
+        summary: "Upload Custom Task Template to MinIO"
       }
     }
   );
