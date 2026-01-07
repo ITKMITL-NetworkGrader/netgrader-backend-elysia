@@ -12,6 +12,7 @@ import { deviceTemplateRoutes } from "./device-templates";
 import { sessionCleanupRoutes } from "./admin/session-cleanup-routes";
 import { storageRoutes } from "./storage";
 import { gns3Routes } from "./gns3";
+import { gns3StudentLabRoutes } from "./gns3-student-lab";
 import { playgroundRoutes } from "./playground";
 
 export const routes = new Elysia()
@@ -29,5 +30,6 @@ export const routes = new Elysia()
         .use(sessionCleanupRoutes)
         .use(storageRoutes)
         .use(gns3Routes)
+        .use(gns3StudentLabRoutes)
         .use(playgroundRoutes)
     )
