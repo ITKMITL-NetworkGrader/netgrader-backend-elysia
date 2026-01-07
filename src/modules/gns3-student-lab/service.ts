@@ -50,6 +50,7 @@ export interface SetupResult {
         username: string;
         password: string;
     };
+    loginUrl?: string;
     projectUrl?: string;
     projectId?: string;
     projectName?: string;
@@ -487,12 +488,17 @@ export class GNS3v3Service {
 
     /**
      * Generate project URL for student access
-     * Uses login page with returnUrl to redirect to project after authentication
+     * Direct link to project - works if already logged in
      */
     static buildProjectUrl(projectId: string, config: GNS3v3Config = DEFAULT_CONFIG): string {
-        const projectPath = `/controller/1/project/${projectId}`;
-        const encodedReturnUrl = encodeURIComponent(projectPath);
-        return `http://${config.serverIp}:${config.serverPort}/static/web-ui/controller/1/login?returnUrl=${encodedReturnUrl}`;
+        return `http://${config.serverIp}:${config.serverPort}/static/web-ui/controller/1/project/${projectId}`;
+    }
+
+    /**
+     * Generate login URL for GNS3 web UI
+     */
+    static buildLoginUrl(config: GNS3v3Config = DEFAULT_CONFIG): string {
+        return `http://${config.serverIp}:${config.serverPort}/static/web-ui/controller/1/login`;
     }
 
     /**
@@ -588,12 +594,14 @@ export class GNS3v3Service {
                 return { success: false, error: aceResult.error || 'Failed to create access permissions' };
             }
 
-            // Build project URL
+            // Build URLs
             const projectUrl = this.buildProjectUrl(projectResult.projectId, config);
+            const loginUrl = this.buildLoginUrl(config);
 
             return {
                 success: true,
                 credentials: { username, password: '(Use your IT password)' },
+                loginUrl,
                 projectUrl,
                 projectId: projectResult.projectId,
                 projectName: projectResult.projectName,

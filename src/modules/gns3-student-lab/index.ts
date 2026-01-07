@@ -34,6 +34,7 @@ export const gns3StudentLabRoutes = new Elysia({ prefix: "/student-lab/gns3" })
             return {
                 success: true,
                 credentials: result.credentials,
+                loginUrl: result.loginUrl,
                 projectUrl: result.projectUrl,
                 projectId: result.projectId,
                 projectName: result.projectName,
