@@ -5,9 +5,12 @@ import {
   getAllCustomTaskTemplates,
   getCustomTaskTemplateById,
   getCustomTaskTemplateByTemplateId,
+  getRawYamlContent,
+  updateTemplateFile,
+  deleteTemplateFile,
 } from "./custom-template-source";
 
-type TaskTemplateDTO = CustomTaskTemplate;
+type TaskTemplateDTO = CustomTaskTemplate & { rawYaml?: string };
 
 /**
  * TaskTemplate Service - Business logic for task template operations
@@ -98,15 +101,21 @@ export class TaskTemplateService {
   /**
    * Get task template by ID
    */
-  static async getTaskTemplateById(id: string) {
+  static async getTaskTemplateById(id: string, includeRawYaml: boolean = true) {
     try {
       let template = null;
       if (Types.ObjectId.isValid(id)) {
         template = await TaskTemplate.findById(id).lean();
       }
-      
+
       if (!template) {
-        return getCustomTaskTemplateById(id);
+        const minioTemplate = await getCustomTaskTemplateById(id);
+        if (minioTemplate && includeRawYaml) {
+          // Fetch raw YAML content for MinIO templates
+          const rawYaml = await getRawYamlContent(id);
+          return { ...minioTemplate, rawYaml: rawYaml || undefined };
+        }
+        return minioTemplate;
       }
 
       return TaskTemplateService.normalizeMongoTemplate(template);
@@ -121,7 +130,7 @@ export class TaskTemplateService {
   static async getTaskTemplateByTemplateId(templateId: string) {
     try {
       const template = await TaskTemplate.findOne({ templateId }).lean();
-      
+
       if (!template) {
         const externalTemplate = await getCustomTaskTemplateByTemplateId(templateId);
         if (externalTemplate) {
@@ -149,7 +158,7 @@ export class TaskTemplateService {
 
       const allowedFields = ['templateId', 'name', 'description', 'parameterSchema', 'defaultTestCases'];
       const updateFields: any = {};
-      
+
       allowedFields.forEach(field => {
         if (filteredData[field] !== undefined) {
           updateFields[field] = filteredData[field];
@@ -192,17 +201,17 @@ export class TaskTemplateService {
       if (!Types.ObjectId.isValid(id)) {
         const externalTemplate = await getCustomTaskTemplateById(id);
         if (externalTemplate) {
-          throw new Error('Custom templates managed in MinIO cannot be deleted through this API.');
+          throw new Error('Custom templates managed in MinIO cannot be deleted through this API. Use deleteMinioTemplate instead.');
         }
         return null;
       }
 
       const deletedTemplate = await TaskTemplate.findByIdAndDelete(id);
-      
+
       if (!deletedTemplate) {
         const externalTemplate = await getCustomTaskTemplateById(id);
         if (externalTemplate) {
-          throw new Error('Custom templates managed in MinIO cannot be deleted through this API.');
+          throw new Error('Custom templates managed in MinIO cannot be deleted through this API. Use deleteMinioTemplate instead.');
         }
         return null;
       }
@@ -210,6 +219,43 @@ export class TaskTemplateService {
       return TaskTemplateService.normalizeMongoTemplate(deletedTemplate.toObject());
     } catch (error) {
       throw new Error(`Error deleting task template: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Update a MinIO template with new YAML content
+   */
+  static async updateMinioTemplate(id: string, content: string) {
+    try {
+      const template = await getCustomTaskTemplateById(id);
+      if (!template) {
+        throw new Error(`MinIO template '${id}' not found`);
+      }
+
+      await updateTemplateFile(id, content);
+
+      // Fetch the updated template
+      return await TaskTemplateService.getTaskTemplateById(id);
+    } catch (error) {
+      throw new Error(`Error updating MinIO template: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Delete a MinIO template
+   */
+  static async deleteMinioTemplate(id: string) {
+    try {
+      const template = await getCustomTaskTemplateById(id);
+      if (!template) {
+        throw new Error(`MinIO template '${id}' not found`);
+      }
+
+      await deleteTemplateFile(id);
+
+      return template;
+    } catch (error) {
+      throw new Error(`Error deleting MinIO template: ${(error as Error).message}`);
     }
   }
 

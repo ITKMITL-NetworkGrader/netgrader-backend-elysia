@@ -102,6 +102,109 @@ export function clearCustomTaskTemplateCache(): void {
   cache = null;
 }
 
+/**
+ * Get the raw YAML content for a MinIO template by its templateId
+ * @param templateId - The template ID to get raw content for
+ * @returns The raw YAML content as a string, or null if not found
+ */
+export async function getRawYamlContent(templateId: string): Promise<string | null> {
+  try {
+    const client = getSafeMinioClient();
+    if (!client) {
+      return null;
+    }
+
+    // First, get the template to find its objectName
+    const template = await getCustomTaskTemplateById(templateId);
+    if (!template || !template.metadata?.objectName) {
+      return null;
+    }
+
+    // Load the raw content from MinIO
+    const rawContent = await loadObjectData(client, template.metadata.objectName);
+    return rawContent;
+  } catch (error) {
+    console.error(`Failed to get raw YAML content for template '${templateId}':`, (error as Error).message);
+    return null;
+  }
+}
+
+/**
+ * Update a MinIO template file with new YAML content
+ * @param templateId - The template ID to update
+ * @param content - The new YAML content
+ * @returns True if successful, false otherwise
+ */
+export async function updateTemplateFile(templateId: string, content: string): Promise<boolean> {
+  try {
+    const client = getSafeMinioClient();
+    if (!client) {
+      throw new Error('MinIO client not available');
+    }
+
+    // Get the existing template to find its objectName
+    const template = await getCustomTaskTemplateById(templateId);
+    if (!template || !template.metadata?.objectName) {
+      throw new Error(`Template '${templateId}' not found in MinIO`);
+    }
+
+    const objectName = template.metadata.objectName;
+    const buffer = Buffer.from(content, 'utf-8');
+
+    // Upload the updated content
+    await client.putObject(
+      BUCKET_NAME,
+      objectName,
+      buffer,
+      buffer.length,
+      {
+        'Content-Type': 'text/yaml',
+      }
+    );
+
+    // Clear cache to pick up the changes
+    clearCustomTaskTemplateCache();
+
+    return true;
+  } catch (error) {
+    console.error(`Failed to update template file '${templateId}':`, (error as Error).message);
+    throw error;
+  }
+}
+
+/**
+ * Delete a MinIO template file
+ * @param templateId - The template ID to delete
+ * @returns True if successful, false otherwise
+ */
+export async function deleteTemplateFile(templateId: string): Promise<boolean> {
+  try {
+    const client = getSafeMinioClient();
+    if (!client) {
+      throw new Error('MinIO client not available');
+    }
+
+    // Get the existing template to find its objectName
+    const template = await getCustomTaskTemplateById(templateId);
+    if (!template || !template.metadata?.objectName) {
+      throw new Error(`Template '${templateId}' not found in MinIO`);
+    }
+
+    const objectName = template.metadata.objectName;
+
+    // Delete the object from MinIO
+    await client.removeObject(BUCKET_NAME, objectName);
+
+    // Clear cache to reflect the deletion
+    clearCustomTaskTemplateCache();
+
+    return true;
+  } catch (error) {
+    console.error(`Failed to delete template file '${templateId}':`, (error as Error).message);
+    throw error;
+  }
+}
+
 function getSafeMinioClient() {
   try {
     return getMinioClient();
@@ -168,8 +271,8 @@ function normalizeTemplate(raw: Record<string, any>, item: BucketItem): CustomTa
 
   const parameterSchema = Array.isArray(raw?.parameters)
     ? raw.parameters
-        .map((parameter: any) => normalizeParameter(parameter))
-        .filter(Boolean) as NormalizedParameter[]
+      .map((parameter: any) => normalizeParameter(parameter))
+      .filter(Boolean) as NormalizedParameter[]
     : [];
 
   const defaultTestCases = normalizeValidation(raw?.validation);

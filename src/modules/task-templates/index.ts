@@ -347,4 +347,153 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
         summary: "Upload Custom Task Template to MinIO"
       }
     }
+  )
+
+  // Get raw YAML content for a MinIO template
+  .get(
+    "/minio/:id/raw",
+    async ({ params, set }) => {
+      try {
+        const template = await TaskTemplateService.getTaskTemplateById(params.id);
+
+        if (!template) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Template not found"
+          };
+        }
+
+        if (template.source !== 'minio') {
+          set.status = 400;
+          return {
+            success: false,
+            message: "This endpoint only supports MinIO templates. Use the standard GET endpoint for MongoDB templates."
+          };
+        }
+
+        const rawYaml = (template as any).rawYaml;
+        if (!rawYaml) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Raw YAML content not found for this template"
+          };
+        }
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Raw YAML content fetched successfully",
+          data: {
+            templateId: template.templateId,
+            name: template.name,
+            rawYaml
+          }
+        };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error fetching raw YAML content",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      detail: {
+        tags: ["Task Templates"],
+        summary: "Get Raw YAML Content for MinIO Template"
+      }
+    }
+  )
+
+  // Update MinIO template
+  .put(
+    "/minio/:id",
+    async ({ params, body, set }) => {
+      try {
+        const updatedTemplate = await TaskTemplateService.updateMinioTemplate(params.id, body.content);
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "MinIO template updated successfully",
+          data: updatedTemplate
+        };
+      } catch (error) {
+        const errorMessage = (error as Error).message;
+
+        if (errorMessage.includes('not found')) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "MinIO template not found",
+            error: errorMessage
+          };
+        }
+
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error updating MinIO template",
+          error: errorMessage
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      body: t.Object({
+        content: t.String({ description: "Updated YAML content" })
+      }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: {
+        tags: ["Task Templates"],
+        summary: "Update MinIO Task Template"
+      }
+    }
+  )
+
+  // Delete MinIO template
+  .delete(
+    "/minio/:id",
+    async ({ params, set }) => {
+      try {
+        const deletedTemplate = await TaskTemplateService.deleteMinioTemplate(params.id);
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "MinIO template deleted successfully",
+          data: deletedTemplate
+        };
+      } catch (error) {
+        const errorMessage = (error as Error).message;
+
+        if (errorMessage.includes('not found')) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "MinIO template not found",
+            error: errorMessage
+          };
+        }
+
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error deleting MinIO template",
+          error: errorMessage
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: {
+        tags: ["Task Templates"],
+        summary: "Delete MinIO Task Template"
+      }
+    }
   );
