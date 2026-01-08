@@ -79,8 +79,8 @@ const LabBodySchema = t.Object({
         readonly: t.Optional(t.Boolean())
       })),
       credentials: t.Object({
-        usernameTemplate: t.String(),
-        passwordTemplate: t.String(),
+        usernameTemplate: t.String({ default: "" }),
+        passwordTemplate: t.String({ default: "" }),
         enablePassword: t.String({ default: "" })
       })
     }))
@@ -93,7 +93,7 @@ const LabBodySchema = t.Object({
 
 export const labRoutes = new Elysia({ prefix: "/labs" })
   .use(authPlugin)
-  
+
   // Get all labs
   .get(
     "/",
@@ -119,10 +119,10 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
         };
       } catch (error) {
         set.status = 500;
-        return { 
-          success: false, 
+        return {
+          success: false,
           message: "Error fetching labs",
-          error: (error as Error).message 
+          error: (error as Error).message
         };
       }
     },
@@ -264,7 +264,7 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
   )
 
   // Get lab by ID
-.get(
+  .get(
     "/:id",
     async ({ params, query, set, authPlugin }) => {
       try {
@@ -461,7 +461,7 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           };
         }
 
-        
+
         // // Check if lab is published
         // if (!lab.publishedAt) {
         //   set.status = 403;
@@ -960,7 +960,7 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
         const lab = await LabService.getLabWithDetails(params.id);
         const { StudentLabSessionService } = await import('../student-lab-sessions/service');
         const capacity = await StudentLabSessionService.calculateIpCapacity(lab as ILab);
-        
+
         if (!lab) {
           set.status = 404;
           return {
@@ -1001,7 +1001,7 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
     async ({ set, query }) => {
       try {
         const { courseId } = query;
-        
+
         const stats = await LabService.getLabStatistics(courseId);
 
         set.status = 200;

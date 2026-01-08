@@ -2,10 +2,12 @@
  * GNS3 v3 Service - Handles communication with GNS3 API v3
  * Used for student lab environment setup with Resource Pool-based permissions
  */
+import { env } from "process";
 
 interface GNS3v3Config {
     serverIp: string;
     serverPort: number;
+    serverVersion: string;
 }
 
 interface LoginResponse {
@@ -60,13 +62,14 @@ export interface SetupResult {
 
 // Default GNS3 Server Configuration
 const DEFAULT_CONFIG: GNS3v3Config = {
-    serverIp: '10.70.38.8',
-    serverPort: 80,
+    serverIp: env.GNS3_SERVER || 'localhost',
+    serverPort: parseInt(env.GNS3_PORT || '3080'),
+    serverVersion: env.GNS3_VERSION || 'v3',
 };
 
 const ADMIN_CREDENTIALS = {
-    username: 'admin',
-    password: 'P@ssw0rd#gns3',
+    username: env.GNS3_USERNAME || 'admin',
+    password: env.GNS3_PASSWORD || 'admin',
 };
 
 export class GNS3v3Service {
@@ -74,7 +77,7 @@ export class GNS3v3Service {
      * Build base URL for GNS3 API v3
      */
     private static buildBaseUrl(config: GNS3v3Config = DEFAULT_CONFIG): string {
-        return `http://${config.serverIp}:${config.serverPort}`;
+        return `http://${config.serverIp}:${config.serverPort}/${config.serverVersion}`;
     }
 
     /**
@@ -102,7 +105,7 @@ export class GNS3v3Service {
         password: string = ADMIN_CREDENTIALS.password
     ): Promise<{ success: boolean; accessToken?: string; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/access/users/login`;
+            const url = `${this.buildBaseUrl(config)}/access/users/login`;
 
             // GNS3 v3 login requires x-www-form-urlencoded format
             const formData = new URLSearchParams();
@@ -143,7 +146,7 @@ export class GNS3v3Service {
         config: GNS3v3Config = DEFAULT_CONFIG
     ): Promise<{ success: boolean; userId?: string; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/access/users`;
+            const url = `${this.buildBaseUrl(config)}/access/users`;
             const response = await fetch(url, {
                 method: 'POST',
                 headers: this.buildHeaders(token),
@@ -186,7 +189,7 @@ export class GNS3v3Service {
         config: GNS3v3Config = DEFAULT_CONFIG
     ): Promise<{ success: boolean; userId?: string; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/access/users`;
+            const url = `${this.buildBaseUrl(config)}/access/users`;
             const response = await fetch(url, {
                 method: 'GET',
                 headers: this.buildHeaders(token),
@@ -219,7 +222,7 @@ export class GNS3v3Service {
         config: GNS3v3Config = DEFAULT_CONFIG
     ): Promise<{ success: boolean; projectId?: string; projectName?: string; isExisting?: boolean; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/projects`;
+            const url = `${this.buildBaseUrl(config)}/projects`;
             const response = await fetch(url, {
                 method: 'POST',
                 headers: this.buildHeaders(token),
@@ -269,7 +272,7 @@ export class GNS3v3Service {
         config: GNS3v3Config = DEFAULT_CONFIG
     ): Promise<{ success: boolean; projectId?: string; projectName?: string; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/projects`;
+            const url = `${this.buildBaseUrl(config)}/projects`;
             const response = await fetch(url, {
                 method: 'GET',
                 headers: this.buildHeaders(token),
@@ -302,7 +305,7 @@ export class GNS3v3Service {
         config: GNS3v3Config = DEFAULT_CONFIG
     ): Promise<{ success: boolean; poolId?: string; isExisting?: boolean; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/pools`;
+            const url = `${this.buildBaseUrl(config)}/pools`;
             const response = await fetch(url, {
                 method: 'POST',
                 headers: this.buildHeaders(token),
@@ -339,7 +342,7 @@ export class GNS3v3Service {
         config: GNS3v3Config = DEFAULT_CONFIG
     ): Promise<{ success: boolean; poolId?: string; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/pools`;
+            const url = `${this.buildBaseUrl(config)}/pools`;
             const response = await fetch(url, {
                 method: 'GET',
                 headers: this.buildHeaders(token),
@@ -374,7 +377,7 @@ export class GNS3v3Service {
         config: GNS3v3Config = DEFAULT_CONFIG
     ): Promise<{ success: boolean; isExisting?: boolean; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/pools/${poolId}/resources/${projectId}`;
+            const url = `${this.buildBaseUrl(config)}/pools/${poolId}/resources/${projectId}`;
             const response = await fetch(url, {
                 method: 'PUT',
                 headers: this.buildHeaders(token),
@@ -412,7 +415,7 @@ export class GNS3v3Service {
         config: GNS3v3Config = DEFAULT_CONFIG
     ): Promise<{ success: boolean; roleId?: string; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/access/roles`;
+            const url = `${this.buildBaseUrl(config)}/access/roles`;
             const response = await fetch(url, {
                 method: 'GET',
                 headers: this.buildHeaders(token),
@@ -450,7 +453,7 @@ export class GNS3v3Service {
         config: GNS3v3Config = DEFAULT_CONFIG
     ): Promise<{ success: boolean; aceId?: string; error?: string }> {
         try {
-            const url = `${this.buildBaseUrl(config)}/v3/access/acl`;
+            const url = `${this.buildBaseUrl(config)}/access/acl`;
 
             // Path must be in URI format: /pools/{pool_id}
             const aclPath = `/pools/${aceData.poolId}`;
@@ -578,21 +581,21 @@ export class GNS3v3Service {
             }
 
             // Step 5: Get Student Role
-            onProgress?.('creating_ace');
-            const roleResult = await this.getStudentRoleId(token, config);
-            if (!roleResult.success || !roleResult.roleId) {
-                return { success: false, error: roleResult.error || 'Failed to get Student role' };
-            }
+            // onProgress?.('creating_ace');
+            // const roleResult = await this.getStudentRoleId(token, config);
+            // if (!roleResult.success || !roleResult.roleId) {
+            //     return { success: false, error: roleResult.error || 'Failed to get Student role' };
+            // }
 
-            // Step 6: Create ACE
-            const aceResult = await this.createACE(token, {
-                userId: userResult.userId,
-                roleId: roleResult.roleId,
-                poolId: poolResult.poolId,
-            }, config);
-            if (!aceResult.success) {
-                return { success: false, error: aceResult.error || 'Failed to create access permissions' };
-            }
+            // // Step 6: Create ACE
+            // const aceResult = await this.createACE(token, {
+            //     userId: userResult.userId,
+            //     roleId: roleResult.roleId,
+            //     poolId: poolResult.poolId,
+            // }, config);
+            // if (!aceResult.success) {
+            //     return { success: false, error: aceResult.error || 'Failed to create access permissions' };
+            // }
 
             // Build URLs
             const projectUrl = this.buildProjectUrl(projectResult.projectId, config);

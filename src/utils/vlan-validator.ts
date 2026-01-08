@@ -204,8 +204,8 @@ export class VlanValidator {
 
       if (ipVar.interfaceOffset === undefined || ipVar.interfaceOffset === null) {
         errors.push(`interfaceOffset is required for ${ipVar.inputType} inputType`);
-      } else if (ipVar.interfaceOffset < 1 || ipVar.interfaceOffset > 50) {
-        errors.push(`interfaceOffset must be between 1 and 50, got ${ipVar.interfaceOffset}`);
+      } else if (ipVar.interfaceOffset < 1 || ipVar.interfaceOffset > 254) {
+        errors.push(`interfaceOffset must be between 1 and 254, got ${ipVar.interfaceOffset}`);
       }
     }
 

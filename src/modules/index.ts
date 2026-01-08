@@ -10,6 +10,7 @@ import { partRoutes } from "./parts";
 import { taskTemplateRoutes } from "./task-templates";
 import { deviceTemplateRoutes } from "./device-templates";
 import { sessionCleanupRoutes } from "./admin/session-cleanup-routes";
+import { gns3SyncRoutes } from "./admin/gns3-sync-routes";
 import { storageRoutes } from "./storage";
 import { gns3Routes } from "./gns3";
 import { gns3StudentLabRoutes } from "./gns3-student-lab";
@@ -28,6 +29,7 @@ export const routes = new Elysia()
         .use(taskTemplateRoutes)
         .use(deviceTemplateRoutes)
         .use(sessionCleanupRoutes)
+        .use(gns3SyncRoutes)
         .use(storageRoutes)
         .use(gns3Routes)
         .use(gns3StudentLabRoutes)

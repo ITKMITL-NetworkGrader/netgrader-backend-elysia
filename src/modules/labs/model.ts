@@ -285,7 +285,7 @@ const labSchema = new Schema<ILab>({
           type: Number,
           required: false,
           min: 1,
-          max: 50
+          max: 254
         },
         isStudentGenerated: {
           type: Boolean,
@@ -317,11 +317,11 @@ const labSchema = new Schema<ILab>({
       credentials: {
         usernameTemplate: {
           type: String,
-          required: true
+          required: false
         },
         passwordTemplate: {
           type: String,
-          required: true
+          required: false
         },
         enablePassword: {
           type: String,
