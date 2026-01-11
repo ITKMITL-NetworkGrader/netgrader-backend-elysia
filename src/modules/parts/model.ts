@@ -10,16 +10,21 @@ export interface ILabPart extends Document {
   order: number;           // Display sequence
 
   // Part Type (to distinguish between different part types)
-  partType: 'fill_in_blank' | 'network_config' | 'dhcp_config';
+  partType: 'fill_in_blank' | 'network_config';
 
   // Fill-in-Blank Questions
   questions?: Array<{
     questionId: string;
     questionText: string;
     questionType: 'network_address' | 'first_usable_ip' | 'last_usable_ip' | 'broadcast_address' |
-                  'subnet_mask' | 'ip_address' | 'number' | 'custom_text' | 'ip_table_questionnaire';
+    'subnet_mask' | 'ip_address' | 'number' | 'custom_text' | 'ip_table_questionnaire' |
+    // IPv6 Question Types
+    'ipv6_network_prefix' | 'ipv6_address' | 'ipv6_link_local' |
+    'ipv6_global_unicast' | 'ipv6_prefix_length' | 'ipv6_slaac_address';
     order: number;
     points: number;
+    // Whether this field can be updated later (like SLAAC/DHCP fields)
+    isUpdatable?: boolean;
     schemaMapping?: {
       vlanIndex: number;
       field: 'networkAddress' | 'subnetMask' | 'firstUsableIp' | 'lastUsableIp' | 'broadcastAddress';
@@ -59,8 +64,11 @@ export interface ILabPart extends Document {
         staticAnswer?: string;
         calculatedAnswer?: {
           calculationType: 'vlan_network_address' | 'vlan_first_usable' | 'vlan_last_usable' |
-                          'vlan_broadcast' | 'vlan_subnet_mask' | 'vlan_lecturer_offset' |
-                          'vlan_lecturer_range' | 'device_interface_ip' | 'vlan_id';
+          'vlan_broadcast' | 'vlan_subnet_mask' | 'vlan_lecturer_offset' |
+          'vlan_lecturer_range' | 'device_interface_ip' | 'vlan_id' |
+          // IPv6 Calculation Types
+          'ipv6_network_prefix' | 'ipv6_address' | 'ipv6_interface_id' |
+          'ipv6_link_local' | 'ipv6_slaac';
           vlanIndex?: number;
           lecturerOffset?: number;
           lecturerRangeStart?: number;
@@ -94,16 +102,16 @@ export interface ILabPart extends Document {
     // Execution Configuration
     executionDevice: string;     // Device ID from lab.network.devices
     targetDevices: string[];     // Device IDs for multi-device tasks
-    
+
     // Task Parameters (passed to Ansible template)
     parameters: Record<string, any>;
-    
+
     // Grading Configuration
     testCases: Array<{
       comparison_type: string;  // Type of comparison: equals, contains, regex, success, ssh_success, greater_than
       expected_result: any;     // Expected value/result for comparison 
     }>;
-    
+
     order: number;
     points: number;              // Total points for task
   }>;
@@ -116,7 +124,7 @@ export interface ILabPart extends Document {
     continue_on_failure: boolean;
     timeout_seconds: number;
   }>;
-  
+
   // Part Configuration
   prerequisites: string[];       // Part IDs that must be completed first
   totalPoints: number;          // Sum of task points
@@ -196,7 +204,7 @@ const labPartSchema = new Schema<ILabPart>({
   // Part Type
   partType: {
     type: String,
-    enum: ['fill_in_blank', 'network_config', 'dhcp_config'],
+    enum: ['fill_in_blank', 'network_config'],
     required: true,
     default: 'network_config'
   },
@@ -209,11 +217,16 @@ const labPartSchema = new Schema<ILabPart>({
     questionType: {
       type: String,
       enum: ['network_address', 'first_usable_ip', 'last_usable_ip', 'broadcast_address',
-             'subnet_mask', 'ip_address', 'number', 'custom_text', 'ip_table_questionnaire'],
+        'subnet_mask', 'ip_address', 'number', 'custom_text', 'ip_table_questionnaire',
+        // IPv6 Question Types
+        'ipv6_network_prefix', 'ipv6_address', 'ipv6_link_local',
+        'ipv6_global_unicast', 'ipv6_prefix_length', 'ipv6_slaac_address'],
       required: true
     },
     order: { type: Number, required: true },
     points: { type: Number, required: true },
+    // Whether this field can be updated later (like SLAAC/DHCP fields)
+    isUpdatable: { type: Boolean, required: false, default: false },
     schemaMapping: {
       _id: false,
       vlanIndex: Number,
@@ -280,8 +293,11 @@ const labPartSchema = new Schema<ILabPart>({
             calculationType: {
               type: String,
               enum: ['vlan_network_address', 'vlan_first_usable', 'vlan_last_usable',
-                     'vlan_broadcast', 'vlan_subnet_mask', 'vlan_lecturer_offset',
-                     'vlan_lecturer_range', 'device_interface_ip', 'vlan_id']
+                'vlan_broadcast', 'vlan_subnet_mask', 'vlan_lecturer_offset',
+                'vlan_lecturer_range', 'device_interface_ip', 'vlan_id',
+                // IPv6 Calculation Types
+                'ipv6_network_prefix', 'ipv6_address', 'ipv6_interface_id',
+                'ipv6_link_local', 'ipv6_slaac']
             },
             vlanIndex: Number,
             lecturerOffset: Number,
@@ -357,14 +373,14 @@ const labPartSchema = new Schema<ILabPart>({
     targetDevices: [{
       type: String
     }],
-    
+
     // Task Parameters
     parameters: {
       type: Schema.Types.Mixed,
       required: true,
       default: {}
     },
-    
+
     // Grading Configuration
     testCases: [{
       comparison_type: {
@@ -376,7 +392,7 @@ const labPartSchema = new Schema<ILabPart>({
         required: true
       }
     }],
-    
+
     order: {
       type: Number,
       required: true
@@ -386,7 +402,7 @@ const labPartSchema = new Schema<ILabPart>({
       required: true
     }
   }],
-  
+
   task_groups: [{
     group_id: {
       type: String,
@@ -419,7 +435,7 @@ const labPartSchema = new Schema<ILabPart>({
       required: true
     }
   }],
-  
+
   // Part Configuration
   prerequisites: {
     type: [String],

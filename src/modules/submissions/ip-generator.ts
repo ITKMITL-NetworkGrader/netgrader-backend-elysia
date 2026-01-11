@@ -11,6 +11,11 @@ import {
   calculateAdvancedStudentIP,
   calculateStudentVLANs
 } from './ip-calculator';
+import {
+  generateStudentIPv6Address,
+  generateLinkLocalAddress,
+  getVlanAlphabet
+} from './ipv6-calculator';
 
 interface GeneratedDevice {
   id: string;
@@ -162,6 +167,63 @@ export class IPGenerator {
     }
 
     throw new Error(`Unable to generate IP for inputType: ${ipVariable.inputType}`);
+  }
+
+  /**
+   * Generate IPv6 address based on ipv6InputType
+   * Format: 2001:<VLAN_Alphabet><VLAN_Number>:<Last3DigitsStudentID>::<InterfaceIdentifier>/64
+   */
+  static generateIPv6(
+    ipVariable: {
+      ipv6InputType?: string;
+      fullIpv6?: string;
+      ipv6InterfaceId?: string;
+      ipv6VlanIndex?: number;
+      isIpv6Variable?: boolean;
+    },
+    lab: ILab,
+    studentId: string,
+    vlanMappings: Record<string, number>
+  ): string | null {
+    // Skip if not an IPv6 variable
+    if (!ipVariable.isIpv6Variable && !ipVariable.ipv6InputType) {
+      return null;
+    }
+
+    // For fullIPv6 type, use it directly
+    if (ipVariable.ipv6InputType === 'fullIPv6' && ipVariable.fullIpv6) {
+      return ipVariable.fullIpv6;
+    }
+
+    // For link-local address
+    if (ipVariable.ipv6InputType === 'linkLocal') {
+      const interfaceId = ipVariable.ipv6InterfaceId || '1';
+      return generateLinkLocalAddress(interfaceId);
+    }
+
+    // For VLAN IPv6 addresses (studentVlan6_0 through studentVlan6_9)
+    if (ipVariable.ipv6InputType?.startsWith('studentVlan6_')) {
+      // Extract VLAN index from type (studentVlan6_0 -> 0)
+      const vlanIndex = parseInt(ipVariable.ipv6InputType.replace('studentVlan6_', ''), 10);
+      if (isNaN(vlanIndex)) {
+        throw new Error(`Invalid IPv6 VLAN input type: ${ipVariable.ipv6InputType}`);
+      }
+
+      // Get VLAN ID from vlanMappings
+      const vlanKey = `vlan${vlanIndex}`;
+      const vlanId = vlanMappings[vlanKey];
+      if (vlanId === undefined) {
+        throw new Error(`VLAN ID not found for ${vlanKey}`);
+      }
+
+      // Get interface identifier from lecturer config or default to 1
+      const interfaceId = ipVariable.ipv6InterfaceId || '1';
+
+      // Generate the IPv6 address
+      return generateStudentIPv6Address(studentId, vlanIndex, vlanId, interfaceId);
+    }
+
+    return null;
   }
 
   /**
