@@ -16,6 +16,10 @@ import {
   generateLinkLocalAddress,
   getVlanAlphabet
 } from './ipv6-calculator';
+import {
+  generateIPv6FromTemplate,
+  calculateStudentVariables
+} from './ipv6-config';
 
 interface GeneratedDevice {
   id: string;
@@ -171,7 +175,8 @@ export class IPGenerator {
 
   /**
    * Generate IPv6 address based on ipv6InputType
-   * Format: 2001:<VLAN_Alphabet><VLAN_Number>:<Last3DigitsStudentID>::<InterfaceIdentifier>/64
+   * Uses the configurable template from lab.network.ipv6Config.template
+   * Default template: 2001:{X}:{Y}:{VLAN}::{offset}/64
    */
   static generateIPv6(
     ipVariable: {
@@ -216,11 +221,24 @@ export class IPGenerator {
         throw new Error(`VLAN ID not found for ${vlanKey}`);
       }
 
-      // Get interface identifier from lecturer config or default to 1
-      const interfaceId = ipVariable.ipv6InterfaceId || '1';
+      // Get interface identifier (offset) from lecturer config or default to 1
+      const interfaceOffset = parseInt(ipVariable.ipv6InterfaceId || '1', 10) || 1;
 
-      // Generate the IPv6 address
-      return generateStudentIPv6Address(studentId, vlanIndex, vlanId, interfaceId);
+      // Check if lab has IPv6 template configuration
+      const ipv6Config = lab.network.ipv6Config;
+      if (ipv6Config?.enabled && ipv6Config.template) {
+        // Use template-based generation
+        return generateIPv6FromTemplate(
+          ipv6Config.template,
+          studentId,
+          vlanId.toString(),
+          interfaceOffset
+        );
+      } else {
+        // Fallback: Use legacy format for backward compatibility
+        // Format: 2001:<VLAN_Alphabet><VLAN_ID>:<Last3StudentID>::<offset>/64
+        return generateStudentIPv6Address(studentId, vlanIndex, vlanId, interfaceOffset.toString());
+      }
     }
 
     return null;

@@ -225,7 +225,24 @@ export function generateIPv6Mappings(
                     const vlanConfig = lab.network.vlanConfiguration?.vlans?.[vlanIndex];
                     if (vlanConfig && vlanId !== null) {
                         const interfaceId = ipVar.ipv6InterfaceId || '1';
-                        ipv6 = generateStudentIPv6Address(studentId, vlanIndex, vlanId, interfaceId);
+                        const interfaceOffset = parseInt(interfaceId, 10) || 1;
+
+                        // Check if lab has IPv6 template configuration
+                        const ipv6LabConfig = lab.network.ipv6Config;
+                        if (ipv6LabConfig?.enabled && ipv6LabConfig.template) {
+                            // Use template-based generation
+                            // Import inline to avoid circular dependencies
+                            const { generateIPv6FromTemplate } = require('./ipv6-config');
+                            ipv6 = generateIPv6FromTemplate(
+                                ipv6LabConfig.template,
+                                studentId,
+                                vlanId.toString(),
+                                interfaceOffset
+                            );
+                        } else {
+                            // Fallback: Use legacy format
+                            ipv6 = generateStudentIPv6Address(studentId, vlanIndex, vlanId, interfaceId);
+                        }
                     }
                 }
             }
