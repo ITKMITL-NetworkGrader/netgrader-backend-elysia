@@ -5,6 +5,7 @@ import { IGradingResult } from "./model";
 import { IPGenerator, type LecturerRangeOverridePayload } from "./ip-generator";
 import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
+import { GNS3v3Service, type GNS3Node } from "../gns3-student-lab/service";
 import { env } from "process";
 import { authPlugin } from "../../plugins/plugins";
 import { sseService } from "../../services/sse-emitter";
@@ -241,13 +242,33 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           lecturerRangeOverrides = Array.from(overrideMap.values());
         }
 
+        // Fetch GNS3 nodes to map console/aux ports
+        let gns3Nodes: GNS3Node[] | undefined;
+        if (body.project_id) {
+          const loginResult = await GNS3v3Service.login();
+          if (loginResult.success && loginResult.accessToken) {
+            const nodesResult = await GNS3v3Service.getProjectNodes(loginResult.accessToken, body.project_id);
+            if (nodesResult.success && nodesResult.nodes) {
+              gns3Nodes = nodesResult.nodes;
+              console.log(`[GNS3] Fetched ${gns3Nodes.length} nodes from project ${body.project_id}`);
+            } else {
+              console.warn(`[GNS3] Failed to fetch nodes: ${nodesResult.error}`);
+            }
+          } else {
+            console.warn(`[GNS3] Failed to login: ${loginResult.error}`);
+          }
+        }
+
         // Generate complete job payload from lab and part data
         const jobPayload = await IPGenerator.generateJobFromLab(
           lab as any, // Cast to ILab type (services return transformed data)
           part as any, // Cast to ILabPart type
           u_id,
           jobId,
-          lecturerRangeOverrides.length > 0 ? { lecturerRangeOverrides } : undefined
+          {
+            ...(lecturerRangeOverrides.length > 0 ? { lecturerRangeOverrides } : {}),
+            ...(gns3Nodes ? { gns3Nodes } : {})
+          }
         );
         // Create submission record
         const submission = await SubmissionService.createSubmission({
@@ -263,12 +284,12 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         // console.log('[Submission] Enqueuing job payload for RabbitMQ:', JSON.stringify(jobPayload, null, 2));
 
         // Send job to queue
-        channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
-          persistent: true,
-        });
+        // channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
+        //   persistent: true,
+        // });
 
-        return { 
-          status: "success", 
+        return {
+          status: "success",
           message: "Job submitted to queue",
           submission_id: submission._id,
           job_id: jobPayload.job_id,
@@ -289,6 +310,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
       body: t.Object({
         lab_id: t.String(),
         part_id: t.String(),
+        project_id: t.String(),
         job_id: t.Optional(t.String()),
         lecturer_range_answers: t.Optional(t.Array(t.Object({
           source_part_id: t.String(),

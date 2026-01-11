@@ -27,7 +27,7 @@ interface PlaygroundConfig {
         };
     };
     deviceMappings: DeviceMapping[];
-    customIpMappings: Record<string, string>;   // "router1.gig0_1" -> "192.168.1.1"
+    customIpMappings: Record<string, string>;   // "8.gig0_1" -> "192.168.1.1"
     customVlanMappings: Record<string, number>; // "vlan0" -> 100
 }
 

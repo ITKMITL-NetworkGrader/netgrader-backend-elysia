@@ -91,13 +91,19 @@ export function calculateAdvancedStudentIP(
     throw new Error(`Invalid student ID: ${studentId}`);
   }
 
-  // Validate subnet parameters
-  if (vlanConfig.subnetMask < 8 || vlanConfig.subnetMask > 30) {
-    throw new Error(`Invalid subnet mask: ${vlanConfig.subnetMask}. Must be between 8 and 30.`);
+  // Validate subnet parameters - ensure they are valid numbers
+  if (typeof vlanConfig.subnetMask !== 'number' || isNaN(vlanConfig.subnetMask) ||
+    vlanConfig.subnetMask < 8 || vlanConfig.subnetMask > 30) {
+    throw new Error(`Invalid subnet mask: ${vlanConfig.subnetMask}. Must be a number between 8 and 30.`);
   }
 
-  if (vlanConfig.subnetIndex < 1) {
-    throw new Error(`Invalid subnet index: ${vlanConfig.subnetIndex}. Must be >= 1.`);
+  if (typeof vlanConfig.subnetIndex !== 'number' || isNaN(vlanConfig.subnetIndex) ||
+    vlanConfig.subnetIndex < 1) {
+    throw new Error(`Invalid subnet index: ${vlanConfig.subnetIndex}. Must be a number >= 1.`);
+  }
+
+  if (typeof interfaceOffset !== 'number' || isNaN(interfaceOffset)) {
+    throw new Error(`Invalid interface offset: ${interfaceOffset}. Must be a number.`);
   }
 
   // Calculate dec2 (second octet for 172.x.x.x)

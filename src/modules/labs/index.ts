@@ -78,6 +78,7 @@ const LabBodySchema = t.Object({
         description: t.Optional(t.String()),
         readonly: t.Optional(t.Boolean())
       })),
+      connectionType: t.Union([t.Literal('ssh'), t.Literal('telnet'), t.Literal('console')]),
       credentials: t.Object({
         usernameTemplate: t.String({ default: "" }),
         passwordTemplate: t.String({ default: "" }),

@@ -306,7 +306,7 @@ const labSchema = new Schema<ILab>({
         type: String,
         enum: ['ssh', 'telnet', 'console'],
         required: false,
-        default: 'ssh'
+        default: 'console'
       },
       sshPort: {
         type: Number,

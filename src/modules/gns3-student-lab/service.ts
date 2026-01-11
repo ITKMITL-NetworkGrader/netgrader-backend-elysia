@@ -45,6 +45,17 @@ interface ACEResponse {
     path: string;
 }
 
+/** GNS3 Node response from /projects/{project_id}/nodes API */
+export interface GNS3Node {
+    name: string;
+    node_id: string;
+    console: number | null;
+    console_type: string | null;
+    aux: number | null;
+    aux_type: string | null;
+    status: string;
+}
+
 export interface SetupResult {
     success: boolean;
     error?: string;
@@ -293,6 +304,36 @@ export class GNS3v3Service {
         } catch (error) {
             const err = error as Error;
             return { success: false, error: `Failed to find project: ${err.message}` };
+        }
+    }
+
+    /**
+     * Get all nodes from a GNS3 project
+     * Used to fetch console/aux ports for device mapping
+     */
+    static async getProjectNodes(
+        token: string,
+        projectId: string,
+        config: GNS3v3Config = DEFAULT_CONFIG
+    ): Promise<{ success: boolean; nodes?: GNS3Node[]; error?: string }> {
+        try {
+            const url = `${this.buildBaseUrl(config)}/projects/${projectId}/nodes`;
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: this.buildHeaders(token),
+                signal: AbortSignal.timeout(15000),
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                return { success: false, error: `Failed to get project nodes: ${errorText}` };
+            }
+
+            const nodes = (await response.json()) as GNS3Node[];
+            return { success: true, nodes };
+        } catch (error) {
+            const err = error as Error;
+            return { success: false, error: `Failed to get project nodes: ${err.message}` };
         }
     }
 

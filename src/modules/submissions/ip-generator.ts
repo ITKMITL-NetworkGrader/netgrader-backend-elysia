@@ -3,7 +3,9 @@ import { ILabPart } from '../parts/model';
 import { TaskTemplateService } from '../task-templates/service';
 import { DeviceTemplateService } from '../device-templates/service';
 import { StudentLabSessionService } from '../student-lab-sessions/service';
+import { GNS3Node } from '../gns3-student-lab/service';
 import { Types } from 'mongoose';
+import { env } from 'process';
 import {
   calculateStudentIdBasedIP,
   calculateAdvancedStudentIP,
@@ -13,9 +15,11 @@ import {
 interface GeneratedDevice {
   id: string;
   ip_address: string;
+  port: number;
   connection_type: string;
-  credentials: Record<string, string>;
   platform: string;
+  device_os: string;
+  credentials: Record<string, string>;
   role: string;
 }
 
@@ -193,15 +197,50 @@ export class IPGenerator {
   }
 
   /**
+   * Determine platform for netmiko based on connectionType and template platform
+   * 
+   * | connectionType | platform (if cisco_ios) | platform (if linux) |
+   * |----------------|-------------------------|---------------------|
+   * | `console`      | `generic_termserver_telnet` | `generic_termserver_telnet` |
+   * | `ssh`          | `cisco_ios`             | `linux`             |
+   * | `telnet`       | `cisco_ios_telnet`      | `generic_telnet`    |
+   */
+  static mapPlatform(connectionType: 'ssh' | 'telnet' | 'console' | undefined, templatePlatform: string): string {
+    const connType = connectionType || 'console';
+    const isCiscoIOS = templatePlatform.toLowerCase().includes('cisco_ios');
+
+    switch (connType) {
+      case 'console':
+        return 'generic_termserver_telnet';
+      case 'ssh':
+        return isCiscoIOS ? 'cisco_ios' : templatePlatform;
+      case 'telnet':
+        return isCiscoIOS ? 'cisco_ios_telnet' : 'generic_telnet';
+      default:
+        return 'generic_termserver_telnet';
+    }
+  }
+
+  /**
    * Generate devices array for grading job
+   * Now accepts GNS3 nodes to map console/aux ports
    */
   static async generateDevices(
     lab: ILab,
     studentId: string,
     managementIp: string,
+    gns3Nodes?: GNS3Node[],
     overrideMap?: Map<string, string>
   ): Promise<GeneratedDevice[]> {
     const devices: GeneratedDevice[] = [];
+
+    // Build node lookup map by name for efficient matching
+    const nodeMap = new Map<string, GNS3Node>();
+    if (gns3Nodes) {
+      for (const node of gns3Nodes) {
+        nodeMap.set(node.name, node);
+      }
+    }
 
     for (const labDevice of lab.network.devices) {
       const managementInterface = this.findManagementInterface(labDevice);
@@ -229,12 +268,37 @@ export class IPGenerator {
         }
       }
 
-      const platform = await this.getPlatformFromTemplate(labDevice.templateId.toString());
+      // Get template platform (device_os)
+      const templatePlatform = await this.getPlatformFromTemplate(labDevice.templateId.toString());
+
+      // Look up GNS3 node by deviceId to get console/aux port
+      const gns3Node = nodeMap.get(labDevice.deviceId);
+
+      // Prioritize aux port over console port
+      let port = 0;
+      if (gns3Node) {
+        port = gns3Node.aux ?? gns3Node.console ?? 0;
+        console.log(`[Device Mapping] ${labDevice.deviceId} -> GNS3 node "${gns3Node.name}" (port: ${port}, aux: ${gns3Node.aux}, console: ${gns3Node.console})`);
+      } else if (gns3Nodes && gns3Nodes.length > 0) {
+        console.warn(`[Device Mapping] No GNS3 node found for device "${labDevice.deviceId}"`);
+      }
+
+      // Map platform based on connectionType and template platform
+      const platform = this.mapPlatform(labDevice.connectionType, templatePlatform);
+
+      // For console connections, use GNS3 server IP instead of device management IP
+      const connectionType = labDevice.connectionType || 'console';
+      const ipAddress = connectionType === 'console'
+        ? (env.GNS3_SERVER || 'localhost')
+        : resolvedManagementIP;
 
       const device: GeneratedDevice = {
         id: labDevice.deviceId,
-        ip_address: resolvedManagementIP,
-        connection_type: 'ssh',
+        ip_address: ipAddress,
+        port,
+        connection_type: connectionType,
+        platform,
+        device_os: templatePlatform,
         credentials: {
           username: labDevice.credentials.usernameTemplate,
           password: labDevice.credentials.passwordTemplate,
@@ -242,7 +306,6 @@ export class IPGenerator {
             enable_pass: labDevice.credentials.enablePassword
           })
         },
-        platform,
         role: 'direct'
       };
 
@@ -432,7 +495,7 @@ export class IPGenerator {
       });
 
       vlanConfig.vlans.forEach((vlan, idx) => {
-        const vlanIndex = typeof vlan.vlanIndex === 'number' ? vlan.vlanIndex : idx;
+        const vlanIndex = idx;
         const subnetMask = typeof vlan.subnetMask === 'number' ? vlan.subnetMask : topologyMask;
         if (typeof subnetMask !== 'number') return;
 
@@ -497,6 +560,7 @@ export class IPGenerator {
     jobId: string,
     options?: {
       lecturerRangeOverrides?: LecturerRangeOverridePayload[];
+      gns3Nodes?: GNS3Node[];
     }
   ): Promise<any> {
     // Get or create student lab session to get permanent Management IP
@@ -531,6 +595,7 @@ export class IPGenerator {
       lab,
       studentId,
       managementIp,
+      options?.gns3Nodes,
       overrideMap.size > 0 ? overrideMap : undefined
     );
 
