@@ -33,7 +33,18 @@ export interface ILab extends Document {
         subnetIndex: number;   // Which subnet block to use (0-based, e.g., 0=first, 1=second)
         groupModifier?: number; // For lecturer_group mode
         isStudentGenerated: boolean;
+        // IPv6 Configuration per VLAN
+        ipv6Enabled?: boolean;         // Whether IPv6 is enabled for this VLAN
+        ipv6VlanAlphabet?: string;     // A, B, C, etc. (auto-assigned based on VLAN index)
+        ipv6SubnetId?: string;         // Custom subnet ID for template (e.g., "141")
       }>;
+    };
+    // IPv6 Template Configuration
+    ipv6Config?: {
+      enabled: boolean;                // Master toggle for IPv6
+      template: string;                // e.g., "2001:{X}:{Y}:{VLAN}::{offset}/64"
+      managementTemplate?: string;     // e.g., "2001:{X}:{Y}:306::{offset}/64"
+      presetName?: 'standard_exam' | 'university_network' | 'simple_lab' | 'custom';
     };
     devices: Array<{
       deviceId: string;        // "router1", "pc1"
@@ -43,11 +54,11 @@ export interface ILab extends Document {
         name: string;          // "mgmt_interface", "gig0_0_vlan_1"
         interface?: string;    // "GigabitEthernet0/0", "eth0"
 
-        // Input type system - defines how IP is determined
+        // Input type system - defines how IPv4 is determined
         inputType: 'fullIP' | 'studentManagement' | 'studentVlan0' | 'studentVlan1' | 'studentVlan2' | 'studentVlan3' | 'studentVlan4' | 'studentVlan5' | 'studentVlan6' | 'studentVlan7' | 'studentVlan8' | 'studentVlan9';
 
-        // For fullIP type - manually specified IP
-        fullIp?: string;       // Full IP address for static assignments
+        // For fullIP type - manually specified IPv4
+        fullIp?: string;       // Full IPv4 address for static assignments
 
         // Management interface flag
         isManagementInterface?: boolean;
@@ -61,6 +72,13 @@ export interface ILab extends Document {
         isStudentGenerated?: boolean;
         description?: string;
         readonly?: boolean;
+
+        // IPv6 Configuration (separate variable for dual-stack)
+        ipv6InputType?: 'fullIPv6' | 'studentVlan6_0' | 'studentVlan6_1' | 'studentVlan6_2' | 'studentVlan6_3' | 'studentVlan6_4' | 'studentVlan6_5' | 'studentVlan6_6' | 'studentVlan6_7' | 'studentVlan6_8' | 'studentVlan6_9' | 'linkLocal';
+        fullIpv6?: string;           // Full IPv6 address for static assignments
+        ipv6InterfaceId?: string;    // Lecturer-defined interface identifier (last part after ::)
+        isIpv6Variable?: boolean;    // Whether this is an IPv6 variable
+        ipv6VlanIndex?: number;      // Which VLAN for IPv6 (0-based)
       }>;
       connectionType?: 'ssh' | 'telnet' | 'console';
       sshPort?: number;
@@ -226,8 +244,48 @@ const labSchema = new Schema<ILab>({
             type: Boolean,
             required: true,
             default: true
+          },
+          // IPv6 Configuration
+          ipv6Enabled: {
+            type: Boolean,
+            required: false,
+            default: false
+          },
+          ipv6VlanAlphabet: {
+            type: String,
+            required: false
+          },
+          ipv6SubnetId: {
+            type: String,
+            required: false
           }
         }]
+      },
+      required: false
+    },
+    // IPv6 Template Configuration
+    ipv6Config: {
+      type: {
+        enabled: {
+          type: Boolean,
+          required: true,
+          default: false
+        },
+        template: {
+          type: String,
+          required: false,
+          default: '2001:{X}:{Y}:{VLAN}::{offset}/64'
+        },
+        managementTemplate: {
+          type: String,
+          required: false
+        },
+        presetName: {
+          type: String,
+          enum: ['standard_exam', 'university_network', 'simple_lab', 'custom'],
+          required: false,
+          default: 'standard_exam'
+        }
       },
       required: false
     },
@@ -300,6 +358,31 @@ const labSchema = new Schema<ILab>({
           type: Boolean,
           required: false,
           default: false
+        },
+        // IPv6 Configuration
+        ipv6InputType: {
+          type: String,
+          enum: ['fullIPv6', 'studentVlan6_0', 'studentVlan6_1', 'studentVlan6_2', 'studentVlan6_3', 'studentVlan6_4', 'studentVlan6_5', 'studentVlan6_6', 'studentVlan6_7', 'studentVlan6_8', 'studentVlan6_9', 'linkLocal'],
+          required: false
+        },
+        fullIpv6: {
+          type: String,
+          required: false
+        },
+        ipv6InterfaceId: {
+          type: String,
+          required: false
+        },
+        isIpv6Variable: {
+          type: Boolean,
+          required: false,
+          default: false
+        },
+        ipv6VlanIndex: {
+          type: Number,
+          required: false,
+          min: 0,
+          max: 9
         }
       }],
       connectionType: {
