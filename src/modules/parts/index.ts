@@ -10,6 +10,12 @@ import {
   calculateAdvancedStudentIP,
   calculateStudentVLANs
 } from "../submissions/ip-calculator";
+import {
+  generateIPv6FromTemplate
+} from "../submissions/ipv6-config";
+import {
+  generateLinkLocalAddress
+} from "../submissions/ipv6-calculator";
 
 // Rich content schema
 const RichContentSchema = t.Object({
@@ -564,6 +570,94 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
         });
         return studentIP;
       }
+
+      // IPv6 Calculation Types
+      case 'ipv6_network_prefix': {
+        // Generate IPv6 prefix from template
+        const ipv6Config = lab.network?.ipv6Config;
+        if (!ipv6Config?.enabled || !ipv6Config.template) {
+          throw new Error('IPv6 configuration is not enabled for this lab');
+        }
+
+        // Calculate VLAN ID for template
+        let vlanIdForIpv6: number;
+        if (lab.network?.vlanConfiguration?.mode === 'calculated_vlan' && vlan.calculationMultiplier) {
+          const vlanIds = calculateStudentVLANs(studentId, [vlan.calculationMultiplier]);
+          vlanIdForIpv6 = vlanIds[0];
+        } else {
+          vlanIdForIpv6 = vlan.vlanId || vlanIndex;
+        }
+
+        // Generate full address and extract just the prefix
+        const fullAddress = generateIPv6FromTemplate(
+          ipv6Config.template,
+          studentId,
+          vlanIdForIpv6.toString(),
+          0 // No interface offset for prefix
+        );
+        // Convert to network prefix format (e.g., 2001:6507:41:141::/64)
+        const result = fullAddress.replace(/::.*\//, '::/').replace('::0/', '::/');
+        console.log(`[IPv6 Network Prefix] VLAN ${vlanIndex}:`, {
+          studentId,
+          vlanId: vlanIdForIpv6,
+          template: ipv6Config.template,
+          result
+        });
+        return result;
+      }
+
+      case 'ipv6_address': {
+        // Generate full IPv6 address from template
+        const ipv6Config = lab.network?.ipv6Config;
+        if (!ipv6Config?.enabled || !ipv6Config.template) {
+          throw new Error('IPv6 configuration is not enabled for this lab');
+        }
+
+        // Calculate VLAN ID for template
+        let vlanIdForIpv6: number;
+        if (lab.network?.vlanConfiguration?.mode === 'calculated_vlan' && vlan.calculationMultiplier) {
+          const vlanIds = calculateStudentVLANs(studentId, [vlan.calculationMultiplier]);
+          vlanIdForIpv6 = vlanIds[0];
+        } else {
+          vlanIdForIpv6 = vlan.vlanId || vlanIndex;
+        }
+
+        const result = generateIPv6FromTemplate(
+          ipv6Config.template,
+          studentId,
+          vlanIdForIpv6.toString(),
+          lecturerOffset || 1
+        );
+        console.log(`[IPv6 Address] VLAN ${vlanIndex}:`, {
+          studentId,
+          vlanId: vlanIdForIpv6,
+          lecturerOffset,
+          template: ipv6Config.template,
+          result
+        });
+        return result;
+      }
+
+      case 'ipv6_link_local': {
+        // Generate link-local address
+        const interfaceId = calculatedAnswer.ipv6InterfaceId || (lecturerOffset || 1).toString();
+        const result = generateLinkLocalAddress(interfaceId);
+        console.log(`[IPv6 Link-Local]:`, {
+          interfaceId,
+          result
+        });
+        return result;
+      }
+
+      case 'ipv6_slaac': {
+        // SLAAC cells use student-provided answer (like vlan_lecturer_range)
+        // The student enters their SLAAC-assigned IPv6 address
+        // For grading, we compare against what they submitted
+        console.log(`[IPv6 SLAAC] VLAN ${vlanIndex}: Student-updatable cell (uses override)`);
+        // Return empty string as placeholder - actual value comes from lecturerRangeOverrides
+        return '';
+      }
+
       default:
         throw new Error(`Unknown calculation type: ${calculationType}`);
     }
