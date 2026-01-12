@@ -45,7 +45,30 @@ const LabBodySchema = t.Object({
         subnetMask: t.Number({ minimum: 8, maximum: 30 }),
         subnetIndex: t.Number({ minimum: 0, default: 1 }),
         groupModifier: t.Optional(t.Number()),
-        isStudentGenerated: t.Boolean()
+        isStudentGenerated: t.Boolean(),
+        // IPv6 Configuration per VLAN
+        ipv6Enabled: t.Optional(t.Boolean()),
+        ipv6VlanAlphabet: t.Optional(t.String()),
+        ipv6SubnetId: t.Optional(t.String())
+      }))
+    })),
+    // IPv6 Global Configuration
+    ipv6Config: t.Optional(t.Object({
+      enabled: t.Boolean(),
+      template: t.Optional(t.String()),
+      managementTemplate: t.Optional(t.String()),
+      presetName: t.Optional(t.Union([
+        t.Literal("standard_exam"),
+        t.Literal("university_network"),
+        t.Literal("simple_lab"),
+        t.Literal("custom")
+      ])),
+      globalPrefix: t.Optional(t.String()),
+      prefixMode: t.Optional(t.Union([t.Literal("template"), t.Literal("structured")])),
+      managementOverride: t.Optional(t.Object({
+        enabled: t.Boolean(),
+        fixedPrefix: t.String(),
+        useStudentIdSuffix: t.Boolean()
       }))
     })),
     devices: t.Array(t.Object({
@@ -55,7 +78,9 @@ const LabBodySchema = t.Object({
       ipVariables: t.Array(t.Object({
         name: t.String(),
         interface: t.Optional(t.String()),
+        // IPv4 Configuration
         inputType: t.Union([
+          t.Literal("none"),
           t.Literal("fullIP"),
           t.Literal("studentManagement"),
           t.Literal("studentVlan0"),
@@ -76,7 +101,26 @@ const LabBodySchema = t.Object({
         interfaceOffset: t.Optional(t.Number({ minimum: 1, maximum: 256 })),
         isStudentGenerated: t.Optional(t.Boolean()),
         description: t.Optional(t.String()),
-        readonly: t.Optional(t.Boolean())
+        readonly: t.Optional(t.Boolean()),
+        // IPv6 Configuration (for dual-stack)
+        ipv6InputType: t.Optional(t.Union([
+          t.Literal("none"),
+          t.Literal("fullIPv6"),
+          t.Literal("linkLocal"),
+          t.Literal("studentVlan6_0"),
+          t.Literal("studentVlan6_1"),
+          t.Literal("studentVlan6_2"),
+          t.Literal("studentVlan6_3"),
+          t.Literal("studentVlan6_4"),
+          t.Literal("studentVlan6_5"),
+          t.Literal("studentVlan6_6"),
+          t.Literal("studentVlan6_7"),
+          t.Literal("studentVlan6_8"),
+          t.Literal("studentVlan6_9")
+        ])),
+        fullIpv6: t.Optional(t.String()),
+        ipv6InterfaceId: t.Optional(t.String()),
+        ipv6VlanIndex: t.Optional(t.Number({ minimum: 0, maximum: 9 }))
       })),
       connectionType: t.Optional(t.Union([t.Literal('ssh'), t.Literal('telnet'), t.Literal('console')])),
       credentials: t.Object({

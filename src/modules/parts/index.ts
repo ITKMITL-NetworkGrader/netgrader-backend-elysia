@@ -10,6 +10,12 @@ import {
   calculateAdvancedStudentIP,
   calculateStudentVLANs
 } from "../submissions/ip-calculator";
+import {
+  generateIPv6FromTemplate
+} from "../submissions/ipv6-config";
+import {
+  generateLinkLocalAddress
+} from "../submissions/ipv6-calculator";
 
 // Rich content schema
 const RichContentSchema = t.Object({
@@ -55,14 +61,27 @@ const IpTableQuestionnaireSchema = t.Object({
         t.Literal('vlan_lecturer_offset'),
         t.Literal('vlan_lecturer_range'),
         t.Literal('device_interface_ip'),
-        t.Literal('vlan_id')
+        t.Literal('vlan_id'),
+        // IPv6 Calculation Types
+        t.Literal('ipv6_network_prefix'),
+        t.Literal('ipv6_address'),
+        t.Literal('ipv6_interface_id'),
+        t.Literal('ipv6_link_local'),
+        t.Literal('ipv6_slaac')
       ]),
       vlanIndex: t.Optional(t.Number()),
       lecturerOffset: t.Optional(t.Number()),
       lecturerRangeStart: t.Optional(t.Number()),
       lecturerRangeEnd: t.Optional(t.Number()),
       deviceId: t.Optional(t.String()),
-      interfaceName: t.Optional(t.String())
+      interfaceName: t.Optional(t.String()),
+      // IPv6-specific fields
+      ipv6Prefix: t.Optional(t.String()),           // Expected prefix for SLAAC validation
+      ipv6InterfaceIdType: t.Optional(t.Union([     // How interface ID is determined
+        t.Literal('eui64'),
+        t.Literal('random'),
+        t.Literal('manual')
+      ]))
     })),
     readonlyContent: t.Optional(t.String()),
     blankReason: t.Optional(t.String()),
@@ -551,6 +570,94 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
         });
         return studentIP;
       }
+
+      // IPv6 Calculation Types
+      case 'ipv6_network_prefix': {
+        // Generate IPv6 prefix from template
+        const ipv6Config = lab.network?.ipv6Config;
+        if (!ipv6Config?.enabled || !ipv6Config.template) {
+          throw new Error('IPv6 configuration is not enabled for this lab');
+        }
+
+        // Calculate VLAN ID for template
+        let vlanIdForIpv6: number;
+        if (lab.network?.vlanConfiguration?.mode === 'calculated_vlan' && vlan.calculationMultiplier) {
+          const vlanIds = calculateStudentVLANs(studentId, [vlan.calculationMultiplier]);
+          vlanIdForIpv6 = vlanIds[0];
+        } else {
+          vlanIdForIpv6 = vlan.vlanId || vlanIndex;
+        }
+
+        // Generate full address and extract just the prefix
+        const fullAddress = generateIPv6FromTemplate(
+          ipv6Config.template,
+          studentId,
+          vlanIdForIpv6.toString(),
+          0 // No interface offset for prefix
+        );
+        // Convert to network prefix format (e.g., 2001:6507:41:141::/64)
+        const result = fullAddress.replace(/::.*\//, '::/').replace('::0/', '::/');
+        console.log(`[IPv6 Network Prefix] VLAN ${vlanIndex}:`, {
+          studentId,
+          vlanId: vlanIdForIpv6,
+          template: ipv6Config.template,
+          result
+        });
+        return result;
+      }
+
+      case 'ipv6_address': {
+        // Generate full IPv6 address from template
+        const ipv6Config = lab.network?.ipv6Config;
+        if (!ipv6Config?.enabled || !ipv6Config.template) {
+          throw new Error('IPv6 configuration is not enabled for this lab');
+        }
+
+        // Calculate VLAN ID for template
+        let vlanIdForIpv6: number;
+        if (lab.network?.vlanConfiguration?.mode === 'calculated_vlan' && vlan.calculationMultiplier) {
+          const vlanIds = calculateStudentVLANs(studentId, [vlan.calculationMultiplier]);
+          vlanIdForIpv6 = vlanIds[0];
+        } else {
+          vlanIdForIpv6 = vlan.vlanId || vlanIndex;
+        }
+
+        const result = generateIPv6FromTemplate(
+          ipv6Config.template,
+          studentId,
+          vlanIdForIpv6.toString(),
+          lecturerOffset || 1
+        );
+        console.log(`[IPv6 Address] VLAN ${vlanIndex}:`, {
+          studentId,
+          vlanId: vlanIdForIpv6,
+          lecturerOffset,
+          template: ipv6Config.template,
+          result
+        });
+        return result;
+      }
+
+      case 'ipv6_link_local': {
+        // Generate link-local address
+        const interfaceId = calculatedAnswer.ipv6InterfaceId || (lecturerOffset || 1).toString();
+        const result = generateLinkLocalAddress(interfaceId);
+        console.log(`[IPv6 Link-Local]:`, {
+          interfaceId,
+          result
+        });
+        return result;
+      }
+
+      case 'ipv6_slaac': {
+        // SLAAC cells use student-provided answer (like vlan_lecturer_range)
+        // The student enters their SLAAC-assigned IPv6 address
+        // For grading, we compare against what they submitted
+        console.log(`[IPv6 SLAAC] VLAN ${vlanIndex}: Student-updatable cell (uses override)`);
+        // Return empty string as placeholder - actual value comes from lecturerRangeOverrides
+        return '';
+      }
+
       default:
         throw new Error(`Unknown calculation type: ${calculationType}`);
     }
@@ -561,7 +668,7 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
 
 export const partRoutes = new Elysia({ prefix: "/parts" })
   .use(authPlugin)
-  
+
   // Get all parts with filtering
   .get(
     "/",
@@ -636,7 +743,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     async ({ params, set }) => {
       try {
         const part = await PartService.getPartById(params.id);
-        
+
         if (!part) {
           set.status = 404;
           return { error: "Part not found" };
@@ -671,7 +778,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     async ({ params, body, set }) => {
       try {
         const updatedPart = await PartService.updatePart(params.id, body);
-        
+
         if (!updatedPart) {
           set.status = 404;
           return { error: "Part not found" };
@@ -707,7 +814,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     async ({ params, set }) => {
       try {
         const deletedPart = await PartService.deletePart(params.id);
-        
+
         if (!deletedPart) {
           set.status = 404;
           return { error: "Part not found" };
@@ -747,7 +854,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
           page ? parseInt(page) : undefined,
           limit ? parseInt(limit) : undefined
         );
-        
+
         set.status = 200;
         return result;
       } catch (error) {
@@ -896,7 +1003,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
           id,
           labId as string
         );
-        
+
         if (!part) {
           set.status = 404;
           return { error: "Part not found" };

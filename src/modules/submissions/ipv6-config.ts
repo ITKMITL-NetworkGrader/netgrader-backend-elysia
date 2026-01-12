@@ -224,3 +224,147 @@ export function calculateVlanSubnetId(studentId: string, vlanIndex: number): num
     // Base offset + VLAN index * 100 to keep VLANs separate
     return (vars.sequence % 100) + (vlanIndex * 100) + 100;
 }
+
+/**
+ * IPv6 Lab Configuration for address generation
+ */
+export interface IPv6LabConfig {
+    enabled: boolean;
+    template: string;
+    managementTemplate?: string;
+    presetName?: string;
+    globalPrefix?: string;
+    prefixMode?: 'template' | 'structured';
+    managementOverride?: {
+        enabled: boolean;
+        fixedPrefix: string;
+        useStudentIdSuffix: boolean;
+    };
+}
+
+/**
+ * Generate IPv6 address using structured prefix mode
+ * 
+ * Format: [GlobalPrefix]:[X]:[Y]:[VLAN_ID]::[InterfaceID]/64
+ * 
+ * @param globalPrefix Base prefix (e.g., "2001:3c8:1106:4")
+ * @param studentId 8-digit student ID
+ * @param vlanId VLAN ID or identifier
+ * @param interfaceOffset Interface offset (1, 2, 3, etc.)
+ * @returns Full IPv6 address with /64 prefix
+ * 
+ * @example
+ * generateStructuredIPv6("2001:3c8:1106:4", "65070041", "141", 1)
+ * // Returns: "2001:3c8:1106:4:6507:41:141::1/64"
+ */
+export function generateStructuredIPv6(
+    globalPrefix: string,
+    studentId: string,
+    vlanId: string | number,
+    interfaceOffset: number
+): string {
+    const vars = calculateStudentVariables(studentId);
+
+    // Build the address: [GlobalPrefix]:[X]:[Y]:[VLAN]::[offset]/64
+    return `${globalPrefix}:${vars.X}:${vars.Y}:${vlanId}::${interfaceOffset}/64`;
+}
+
+/**
+ * Generate IPv6 address based on lab configuration
+ * 
+ * Intelligently selects between template mode and structured mode
+ * based on the lab's ipv6Config settings.
+ * 
+ * @param config Lab's IPv6 configuration
+ * @param studentId 8-digit student ID
+ * @param vlanId VLAN ID or identifier
+ * @param interfaceOffset Interface offset
+ * @param isManagement Whether this is a management interface
+ * @returns Full IPv6 address with prefix length
+ */
+export function generateIPv6Address(
+    config: IPv6LabConfig,
+    studentId: string,
+    vlanId: string | number,
+    interfaceOffset: number,
+    isManagement: boolean = false
+): string {
+    if (!config.enabled) {
+        throw new Error('IPv6 is not enabled for this lab');
+    }
+
+    // Handle management interface with override
+    if (isManagement && config.managementOverride?.enabled) {
+        const { generateManagementIPv6Address } = require('./ipv6-management');
+        return generateManagementIPv6Address(studentId, config.managementOverride, interfaceOffset);
+    }
+
+    // Use management template if available for management interfaces
+    if (isManagement && config.managementTemplate) {
+        return generateIPv6FromTemplate(config.managementTemplate, studentId, vlanId, interfaceOffset);
+    }
+
+    // Use structured mode if configured
+    if (config.prefixMode === 'structured' && config.globalPrefix) {
+        return generateStructuredIPv6(config.globalPrefix, studentId, vlanId, interfaceOffset);
+    }
+
+    // Default: Use template mode
+    return generateIPv6FromTemplate(config.template, studentId, vlanId, interfaceOffset);
+}
+
+/**
+ * Generate a preview of IPv6 addresses for lab wizard display
+ * 
+ * Shows example addresses for different scenarios to help lecturers
+ * understand the addressing scheme.
+ * 
+ * @param config Lab's IPv6 configuration
+ * @param sampleStudentId Sample student ID (default: "65070041")
+ * @param vlanIds Sample VLAN IDs
+ * @returns Object with preview addresses for various scenarios
+ */
+export function generateIPv6ConfigPreview(
+    config: IPv6LabConfig,
+    sampleStudentId: string = '65070041',
+    vlanIds: (string | number)[] = ['141', '241']
+): {
+    vlans: Record<string, string>;
+    management?: string;
+    studentVariables: StudentIPv6Variables;
+} {
+    const vars = calculateStudentVariables(sampleStudentId);
+    const vlans: Record<string, string> = {};
+
+    // Generate preview for each VLAN
+    vlanIds.forEach((vlanId, index) => {
+        const key = `VLAN ${vlanId}`;
+        try {
+            vlans[key] = generateIPv6Address(config, sampleStudentId, vlanId, index + 1, false);
+        } catch {
+            vlans[key] = 'Configuration error';
+        }
+    });
+
+    // Generate management preview if override is enabled
+    let management: string | undefined;
+    if (config.managementOverride?.enabled) {
+        try {
+            management = generateIPv6Address(config, sampleStudentId, '0', 1, true);
+        } catch {
+            management = 'Configuration error';
+        }
+    } else if (config.managementTemplate) {
+        try {
+            management = generateIPv6FromTemplate(config.managementTemplate, sampleStudentId, 'mgmt', 1);
+        } catch {
+            management = 'Configuration error';
+        }
+    }
+
+    return {
+        vlans,
+        management,
+        studentVariables: vars
+    };
+}

@@ -13,6 +13,7 @@
  */
 
 import { ILab } from '../labs/model';
+import type { IPv6LabConfig } from './ipv6-config';
 
 /**
  * Get VLAN alphabet letter from index (A=0, B=1, C=2, etc.)
@@ -193,6 +194,11 @@ export function generateLinkLocalAddress(interfaceId: string): string {
 /**
  * Generate IPv6 mappings for all VLAN interfaces in a lab
  * Similar to IPv4 generateIPMappings but for IPv6
+ * 
+ * Now supports:
+ * - Template mode: Uses template string with placeholders
+ * - Structured mode: Uses globalPrefix + X/Y calculation
+ * - Management override: Fixed prefix for firewall traversal
  */
 export function generateIPv6Mappings(
     lab: ILab,
@@ -200,6 +206,10 @@ export function generateIPv6Mappings(
     vlanMappings: Record<string, number>
 ): Record<string, { ipv6: string; vlan: number | null }> {
     const mappings: Record<string, { ipv6: string; vlan: number | null }> = {};
+
+    // Import the new unified IPv6 generation function
+    const { generateIPv6Address } = require('./ipv6-config');
+    const { generateManagementIPv6Address } = require('./ipv6-management');
 
     for (const device of lab.network.devices) {
         for (const ipVar of device.ipVariables) {
@@ -227,24 +237,42 @@ export function generateIPv6Mappings(
                         const interfaceId = ipVar.ipv6InterfaceId || '1';
                         const interfaceOffset = parseInt(interfaceId, 10) || 1;
 
-                        // Check if lab has IPv6 template configuration
+                        // Check if lab has IPv6 configuration
                         const ipv6LabConfig = lab.network.ipv6Config;
-                        if (ipv6LabConfig?.enabled && ipv6LabConfig.template) {
-                            // Use template-based generation
-                            // Import inline to avoid circular dependencies
-                            const { generateIPv6FromTemplate } = require('./ipv6-config');
-                            ipv6 = generateIPv6FromTemplate(
-                                ipv6LabConfig.template,
-                                studentId,
-                                vlanId.toString(),
-                                interfaceOffset
-                            );
+                        if (ipv6LabConfig?.enabled) {
+                            // Determine if this is a management interface
+                            const isManagement = ipVar.isManagementInterface || false;
+
+                            // Use the unified generateIPv6Address function
+                            try {
+                                ipv6 = generateIPv6Address(
+                                    ipv6LabConfig as IPv6LabConfig,
+                                    studentId,
+                                    vlanConfig.ipv6SubnetId || vlanId.toString(),
+                                    interfaceOffset,
+                                    isManagement
+                                );
+                            } catch {
+                                // Fallback: Use legacy format
+                                ipv6 = generateStudentIPv6Address(studentId, vlanIndex, vlanId, interfaceId);
+                            }
                         } else {
                             // Fallback: Use legacy format
                             ipv6 = generateStudentIPv6Address(studentId, vlanIndex, vlanId, interfaceId);
                         }
                     }
                 }
+            }
+
+            // Handle management interface with override
+            if (ipVar.isManagementInterface && lab.network.ipv6Config?.managementOverride?.enabled) {
+                const interfaceOffset = parseInt(ipVar.ipv6InterfaceId || '1', 10) || 1;
+                ipv6 = generateManagementIPv6Address(
+                    studentId,
+                    lab.network.ipv6Config.managementOverride,
+                    interfaceOffset
+                );
+                vlanId = null; // Management is not associated with a VLAN
             }
 
             if (ipv6) {

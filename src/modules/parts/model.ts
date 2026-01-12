@@ -75,6 +75,9 @@ export interface ILabPart extends Document {
           lecturerRangeEnd?: number;
           deviceId?: string;
           interfaceName?: string;
+          // IPv6-specific fields
+          ipv6Prefix?: string;           // Expected prefix for SLAAC validation
+          ipv6InterfaceIdType?: 'eui64' | 'random' | 'manual';
         };
         readonlyContent?: string;
         blankReason?: string;
@@ -304,7 +307,13 @@ const labPartSchema = new Schema<ILabPart>({
             lecturerRangeStart: Number,
             lecturerRangeEnd: Number,
             deviceId: String,
-            interfaceName: String
+            interfaceName: String,
+            // IPv6-specific fields
+            ipv6Prefix: String,
+            ipv6InterfaceIdType: {
+              type: String,
+              enum: ['eui64', 'random', 'manual']
+            }
           },
           readonlyContent: String,
           blankReason: String,
