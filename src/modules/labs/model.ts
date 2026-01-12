@@ -45,6 +45,15 @@ export interface ILab extends Document {
       template: string;                // e.g., "2001:{X}:{Y}:{VLAN}::{offset}/64"
       managementTemplate?: string;     // e.g., "2001:{X}:{Y}:306::{offset}/64"
       presetName?: 'standard_exam' | 'university_network' | 'simple_lab' | 'custom';
+      // Enhanced configurable prefix support
+      globalPrefix?: string;           // e.g., "2001:3c8:1106:4" - base prefix for all addresses
+      prefixMode?: 'template' | 'structured'; // 'template' = use template string, 'structured' = use globalPrefix + X/Y
+      // Management Network Override (for firewall traversal / Internet access)
+      managementOverride?: {
+        enabled: boolean;              // Whether management uses a special fixed format
+        fixedPrefix: string;           // e.g., "2001:3c8:1106:4306"
+        useStudentIdSuffix: boolean;   // Whether to use last 3 digits as interface ID suffix
+      };
     };
     devices: Array<{
       deviceId: string;        // "router1", "pc1"
@@ -55,7 +64,7 @@ export interface ILab extends Document {
         interface?: string;    // "GigabitEthernet0/0", "eth0"
 
         // Input type system - defines how IPv4 is determined
-        inputType: 'fullIP' | 'studentManagement' | 'studentVlan0' | 'studentVlan1' | 'studentVlan2' | 'studentVlan3' | 'studentVlan4' | 'studentVlan5' | 'studentVlan6' | 'studentVlan7' | 'studentVlan8' | 'studentVlan9';
+        inputType: 'none' | 'fullIP' | 'studentManagement' | 'studentVlan0' | 'studentVlan1' | 'studentVlan2' | 'studentVlan3' | 'studentVlan4' | 'studentVlan5' | 'studentVlan6' | 'studentVlan7' | 'studentVlan8' | 'studentVlan9';
 
         // For fullIP type - manually specified IPv4
         fullIp?: string;       // Full IPv4 address for static assignments
@@ -74,7 +83,7 @@ export interface ILab extends Document {
         readonly?: boolean;
 
         // IPv6 Configuration (separate variable for dual-stack)
-        ipv6InputType?: 'fullIPv6' | 'studentVlan6_0' | 'studentVlan6_1' | 'studentVlan6_2' | 'studentVlan6_3' | 'studentVlan6_4' | 'studentVlan6_5' | 'studentVlan6_6' | 'studentVlan6_7' | 'studentVlan6_8' | 'studentVlan6_9' | 'linkLocal';
+        ipv6InputType?: 'none' | 'fullIPv6' | 'studentVlan6_0' | 'studentVlan6_1' | 'studentVlan6_2' | 'studentVlan6_3' | 'studentVlan6_4' | 'studentVlan6_5' | 'studentVlan6_6' | 'studentVlan6_7' | 'studentVlan6_8' | 'studentVlan6_9' | 'linkLocal';
         fullIpv6?: string;           // Full IPv6 address for static assignments
         ipv6InterfaceId?: string;    // Lecturer-defined interface identifier (last part after ::)
         isIpv6Variable?: boolean;    // Whether this is an IPv6 variable
@@ -285,6 +294,36 @@ const labSchema = new Schema<ILab>({
           enum: ['standard_exam', 'university_network', 'simple_lab', 'custom'],
           required: false,
           default: 'standard_exam'
+        },
+        // Enhanced configurable prefix support
+        globalPrefix: {
+          type: String,
+          required: false
+        },
+        prefixMode: {
+          type: String,
+          enum: ['template', 'structured'],
+          required: false,
+          default: 'template'
+        },
+        // Management Network Override
+        managementOverride: {
+          _id: false,
+          enabled: {
+            type: Boolean,
+            required: false,
+            default: false
+          },
+          fixedPrefix: {
+            type: String,
+            required: false,
+            default: '2001:3c8:1106:4306'
+          },
+          useStudentIdSuffix: {
+            type: Boolean,
+            required: false,
+            default: true
+          }
         }
       },
       required: false
@@ -316,7 +355,7 @@ const labSchema = new Schema<ILab>({
         },
         inputType: {
           type: String,
-          enum: ['fullIP', 'studentManagement', 'studentVlan0', 'studentVlan1', 'studentVlan2', 'studentVlan3', 'studentVlan4', 'studentVlan5', 'studentVlan6', 'studentVlan7', 'studentVlan8', 'studentVlan9'],
+          enum: ['none', 'fullIP', 'studentManagement', 'studentVlan0', 'studentVlan1', 'studentVlan2', 'studentVlan3', 'studentVlan4', 'studentVlan5', 'studentVlan6', 'studentVlan7', 'studentVlan8', 'studentVlan9'],
           required: true
         },
         fullIp: {
@@ -362,7 +401,7 @@ const labSchema = new Schema<ILab>({
         // IPv6 Configuration
         ipv6InputType: {
           type: String,
-          enum: ['fullIPv6', 'studentVlan6_0', 'studentVlan6_1', 'studentVlan6_2', 'studentVlan6_3', 'studentVlan6_4', 'studentVlan6_5', 'studentVlan6_6', 'studentVlan6_7', 'studentVlan6_8', 'studentVlan6_9', 'linkLocal'],
+          enum: ['none', 'fullIPv6', 'studentVlan6_0', 'studentVlan6_1', 'studentVlan6_2', 'studentVlan6_3', 'studentVlan6_4', 'studentVlan6_5', 'studentVlan6_6', 'studentVlan6_7', 'studentVlan6_8', 'studentVlan6_9', 'linkLocal'],
           required: false
         },
         fullIpv6: {

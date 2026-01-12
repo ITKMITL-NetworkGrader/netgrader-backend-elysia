@@ -55,14 +55,27 @@ const IpTableQuestionnaireSchema = t.Object({
         t.Literal('vlan_lecturer_offset'),
         t.Literal('vlan_lecturer_range'),
         t.Literal('device_interface_ip'),
-        t.Literal('vlan_id')
+        t.Literal('vlan_id'),
+        // IPv6 Calculation Types
+        t.Literal('ipv6_network_prefix'),
+        t.Literal('ipv6_address'),
+        t.Literal('ipv6_interface_id'),
+        t.Literal('ipv6_link_local'),
+        t.Literal('ipv6_slaac')
       ]),
       vlanIndex: t.Optional(t.Number()),
       lecturerOffset: t.Optional(t.Number()),
       lecturerRangeStart: t.Optional(t.Number()),
       lecturerRangeEnd: t.Optional(t.Number()),
       deviceId: t.Optional(t.String()),
-      interfaceName: t.Optional(t.String())
+      interfaceName: t.Optional(t.String()),
+      // IPv6-specific fields
+      ipv6Prefix: t.Optional(t.String()),           // Expected prefix for SLAAC validation
+      ipv6InterfaceIdType: t.Optional(t.Union([     // How interface ID is determined
+        t.Literal('eui64'),
+        t.Literal('random'),
+        t.Literal('manual')
+      ]))
     })),
     readonlyContent: t.Optional(t.String()),
     blankReason: t.Optional(t.String()),
@@ -561,7 +574,7 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
 
 export const partRoutes = new Elysia({ prefix: "/parts" })
   .use(authPlugin)
-  
+
   // Get all parts with filtering
   .get(
     "/",
@@ -636,7 +649,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     async ({ params, set }) => {
       try {
         const part = await PartService.getPartById(params.id);
-        
+
         if (!part) {
           set.status = 404;
           return { error: "Part not found" };
@@ -671,7 +684,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     async ({ params, body, set }) => {
       try {
         const updatedPart = await PartService.updatePart(params.id, body);
-        
+
         if (!updatedPart) {
           set.status = 404;
           return { error: "Part not found" };
@@ -707,7 +720,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     async ({ params, set }) => {
       try {
         const deletedPart = await PartService.deletePart(params.id);
-        
+
         if (!deletedPart) {
           set.status = 404;
           return { error: "Part not found" };
@@ -747,7 +760,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
           page ? parseInt(page) : undefined,
           limit ? parseInt(limit) : undefined
         );
-        
+
         set.status = 200;
         return result;
       } catch (error) {
@@ -896,7 +909,7 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
           id,
           labId as string
         );
-        
+
         if (!part) {
           set.status = 404;
           return { error: "Part not found" };

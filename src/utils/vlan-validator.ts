@@ -395,4 +395,209 @@ export class VlanValidator {
 
     return false;
   }
+
+  // ============================================================
+  // IPv6 Validation Methods
+  // ============================================================
+
+  /**
+   * Validate IPv6 address format (supports both full and compressed formats)
+   */
+  static isValidIPv6(ip: string): boolean {
+    if (!ip) return false;
+
+    // Remove prefix length if present
+    const addressPart = ip.split('/')[0];
+
+    // Handle special cases
+    if (addressPart === '::1') return true;  // Loopback
+    if (addressPart === '::') return true;   // Unspecified
+
+    // Full IPv6 regex (8 groups of 1-4 hex chars)
+    const fullIPv6Regex = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/;
+
+    // Compressed IPv6 regex (handles :: compression)
+    const compressedIPv6Regex = /^(([0-9a-fA-F]{1,4}:){0,7}[0-9a-fA-F]{1,4})?::?(([0-9a-fA-F]{1,4}:){0,7}[0-9a-fA-F]{1,4})?$/;
+
+    return fullIPv6Regex.test(addressPart) || compressedIPv6Regex.test(addressPart);
+  }
+
+  /**
+   * Validate IPv6 prefix length
+   */
+  static isValidIPv6PrefixLength(length: number): boolean {
+    return Number.isInteger(length) && length >= 0 && length <= 128;
+  }
+
+  /**
+   * Validate IPv6 template syntax with placeholders
+   */
+  static validateIPv6Template(template: string): {
+    valid: boolean;
+    errors: string[];
+    warnings: string[]
+  } {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (!template) {
+      errors.push('Template is required');
+      return { valid: false, errors, warnings };
+    }
+
+    // Check for required placeholders
+    const requiredPlaceholders = ['{VLAN}', '{offset}'];
+    const recommendedPlaceholders = ['{X}', '{Y}'];
+    const validPlaceholders = ['{X}', '{Y}', '{Z}', '{VLAN}', '{offset}', '{last3}', '{X_hex}', '{Y_hex}'];
+
+    for (const placeholder of requiredPlaceholders) {
+      if (!template.includes(placeholder)) {
+        errors.push(`Missing required placeholder: ${placeholder}`);
+      }
+    }
+
+    for (const placeholder of recommendedPlaceholders) {
+      if (!template.includes(placeholder)) {
+        warnings.push(`Consider using placeholder: ${placeholder} for student uniqueness`);
+      }
+    }
+
+    // Check for valid IPv6 structure
+    if (!template.includes('::') && !template.includes(':')) {
+      errors.push('Template must contain IPv6 colons');
+    }
+
+    // Check for prefix length
+    if (!template.includes('/')) {
+      warnings.push('Template should include prefix length (e.g., /64)');
+    }
+
+    // Check for unknown placeholders
+    const placeholderRegex = /\{[^}]+\}/g;
+    const foundPlaceholders = template.match(placeholderRegex) || [];
+
+    for (const found of foundPlaceholders) {
+      if (!validPlaceholders.includes(found)) {
+        errors.push(`Unknown placeholder: ${found}`);
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings
+    };
+  }
+
+  /**
+   * Validate IPv6 configuration for a VLAN
+   */
+  static validateVlanIPv6Configuration(
+    vlanConfig: {
+      ipv6Enabled?: boolean;
+      ipv6VlanAlphabet?: string;
+      ipv6SubnetId?: string;
+    },
+    ipv6Config?: {
+      enabled: boolean;
+      template?: string;
+      globalPrefix?: string;
+      prefixMode?: 'template' | 'structured';
+    }
+  ): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    // If VLAN has IPv6 enabled but lab doesn't, that's an error
+    if (vlanConfig.ipv6Enabled && !ipv6Config?.enabled) {
+      errors.push('VLAN has IPv6 enabled but lab IPv6 is disabled');
+    }
+
+    // Validate VLAN alphabet if provided
+    if (vlanConfig.ipv6VlanAlphabet) {
+      if (!/^[A-Z]$/.test(vlanConfig.ipv6VlanAlphabet)) {
+        errors.push(`Invalid VLAN alphabet '${vlanConfig.ipv6VlanAlphabet}'. Must be a single uppercase letter A-Z`);
+      }
+    }
+
+    // Validate subnet ID if provided
+    if (vlanConfig.ipv6SubnetId) {
+      // Subnet ID should be valid hex (1-4 chars) or a number
+      if (!/^[0-9a-fA-F]{1,4}$/.test(vlanConfig.ipv6SubnetId) && isNaN(parseInt(vlanConfig.ipv6SubnetId, 10))) {
+        errors.push(`Invalid subnet ID '${vlanConfig.ipv6SubnetId}'. Must be 1-4 hex characters or a number`);
+      }
+    }
+
+    // If structured mode, global prefix is required
+    if (ipv6Config?.prefixMode === 'structured' && !ipv6Config.globalPrefix) {
+      errors.push('Global prefix is required for structured prefix mode');
+    }
+
+    // Validate global prefix format if provided
+    if (ipv6Config?.globalPrefix) {
+      const prefixParts = ipv6Config.globalPrefix.split(':');
+      for (const part of prefixParts) {
+        if (part && !/^[0-9a-fA-F]{1,4}$/.test(part)) {
+          errors.push(`Invalid hex group in global prefix: ${part}`);
+          break;
+        }
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  /**
+   * Check if an IPv6 address is a link-local address (starts with fe80::)
+   */
+  static isLinkLocalIPv6(address: string): boolean {
+    if (!address) return false;
+    const normalized = address.toLowerCase().split('/')[0];
+    return normalized.startsWith('fe80:');
+  }
+
+  /**
+   * Expand compressed IPv6 address to full format for comparison
+   */
+  static expandIPv6Address(address: string): string {
+    if (!address) return '';
+
+    // Remove prefix length
+    const [addressPart] = address.split('/');
+
+    // Handle :: compression
+    const parts = addressPart.split('::');
+    let groups: string[];
+
+    if (parts.length === 2) {
+      const left = parts[0] ? parts[0].split(':') : [];
+      const right = parts[1] ? parts[1].split(':') : [];
+      const fillCount = 8 - left.length - right.length;
+      const fill = Array(fillCount).fill('0000');
+      groups = [...left, ...fill, ...right];
+    } else {
+      groups = addressPart.split(':');
+    }
+
+    // Pad each group to 4 characters
+    const expandedGroups = groups.map(g => g.padStart(4, '0').toLowerCase());
+
+    return expandedGroups.join(':');
+  }
+
+  /**
+   * Compare two IPv6 addresses for equality (handles compression and case)
+   */
+  static compareIPv6Addresses(addr1: string, addr2: string): boolean {
+    if (!addr1 || !addr2) return false;
+
+    // Remove prefix length for comparison
+    const clean1 = addr1.split('/')[0];
+    const clean2 = addr2.split('/')[0];
+
+    // Compare expanded forms
+    return this.expandIPv6Address(clean1) === this.expandIPv6Address(clean2);
+  }
 }

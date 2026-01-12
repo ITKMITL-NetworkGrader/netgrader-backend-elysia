@@ -179,12 +179,17 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
               return;
             }
 
-            if (cell.calculatedAnswer.calculationType !== 'vlan_lecturer_range') {
+            const calcType = cell.calculatedAnswer.calculationType;
+            // Accept both DHCP (vlan_lecturer_range) and IPv6 SLAAC (ipv6_slaac) student-updatable cells
+            if (calcType !== 'vlan_lecturer_range' && calcType !== 'ipv6_slaac') {
               return;
             }
 
+            // For lecturer range, validate the range values exist
+            // For SLAAC, we skip range validation (any valid IPv6 in the prefix is accepted)
+            const isSlaac = calcType === 'ipv6_slaac';
             const { lecturerRangeStart, lecturerRangeEnd } = cell.calculatedAnswer;
-            if (lecturerRangeStart === undefined || lecturerRangeEnd === undefined) {
+            if (!isSlaac && (lecturerRangeStart === undefined || lecturerRangeEnd === undefined)) {
               return;
             }
 
