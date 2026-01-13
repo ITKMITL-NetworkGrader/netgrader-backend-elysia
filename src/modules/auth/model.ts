@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { getDateWithTimezone } from "../../utils/helpers.js"; 
+import { getDateWithTimezone } from "../../utils/helpers.js";
 
 export interface IUser extends Document {
   u_id: string;
@@ -33,7 +33,7 @@ const UserSchema = new Schema<IUser>({
   },
   role: {
     type: String,
-    enum: ["ADMIN", "STUDENT", "VIEWER"],
+    enum: ["ADMIN", "STUDENT", "VIEWER", "INSTRUCTOR"],
     default: "STUDENT"
   },
   ldapAuthenticated: {

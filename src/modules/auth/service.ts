@@ -50,7 +50,7 @@ export class AuthService {
 
   static async createUser(userData: IUser): Promise<IUser | null> {
     try {
-      console.log("Creating user with data:", userData);
+      // console.log("Creating user with data:", userData);
       const newUser = new User(userData);
       newUser.password = this.hashPassword(newUser.password || ""); // Hash password if provided
       newUser.lastLogin = getDateWithTimezone(7); // Set last login to current time with timezone offset
