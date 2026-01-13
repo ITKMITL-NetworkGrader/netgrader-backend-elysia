@@ -820,7 +820,9 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         }
       });
 
-      // Return Response with proper headers (including CORS for cross-origin SSE)
+      // Return Response with proper headers
+      // NOTE: CORS headers are handled by Elysia's CORS middleware - do NOT add them manually here
+      // as that would cause duplicate header values and fail CORS validation
       return new Response(stream, {
         status: 200,
         headers: {
@@ -828,9 +830,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           'Cache-Control': 'no-cache, no-transform',
           'Connection': 'keep-alive',
           'X-Accel-Buffering': 'no',
-          'Transfer-Encoding': 'chunked',
-          'Access-Control-Allow-Origin': origin,
-          'Access-Control-Allow-Credentials': 'true'
+          'Transfer-Encoding': 'chunked'
         }
       });
     },
