@@ -828,9 +828,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         headers: {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache, no-transform',
-          'Connection': 'keep-alive',
-          'X-Accel-Buffering': 'no',
-          'Transfer-Encoding': 'chunked'
+          'X-Accel-Buffering': 'no'
         }
       });
     },

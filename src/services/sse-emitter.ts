@@ -28,7 +28,7 @@ export class SSEService {
     }
 
     const client: SSEClient = {
-      channelId,
+      jobId: channelId,
       controller,
       connectionTime: new Date()
     };
@@ -72,7 +72,12 @@ export class SSEService {
       return; // No clients listening
     }
 
-    const eventData = JSON.stringify(data);
+    // Format percentage to 2 decimal places
+    const formattedData = {
+      ...data,
+      percentage: parseFloat(data.percentage.toFixed(2))
+    };
+    const eventData = JSON.stringify(formattedData);
     const sseMessage = `event: progress\ndata: ${eventData}\n\n`;
 
     jobClients.forEach(client => {
@@ -130,33 +135,31 @@ export class SSEService {
     const eventData = JSON.stringify(data);
     const sseMessage = `event: completed\ndata: ${eventData}\n\n`;
 
-    console.log(`[SSE] Sending result to ${jobClients.size} client(s) for job ${jobId}: ${data.total_points_earned}/${data.total_points_possible} points`);
-
     jobClients.forEach(client => {
       try {
         // Send the completion event
-        client.controller.enqueue(new TextEncoder().encode(sseMessage));
+        const encodedMessage = new TextEncoder().encode(sseMessage);
+        client.controller.enqueue(encodedMessage);
 
-        // Close connection after a delay to ensure message is received
+        // Close connection after a longer delay to ensure message is fully received by browser
         setTimeout(() => {
           try {
             client.controller.close();
-            console.log(`[SSE] Connection closed for client on job ${jobId}`);
           } catch (error) {
             // Ignore errors if already closed
+            // console.log(`[SSE DEBUG] Connection already closed or error closing:`, error);
           }
-        }, 500); // 500ms delay to ensure browser receives the message
+        }, 2000); // Increased from 500ms to 2000ms to give browser more time
       } catch (error) {
-        console.error(`[SSE] Failed to send result to client:`, error);
       }
     });
 
     // Clean up all clients for this job after delay
     setTimeout(() => {
       this.clients.delete(jobId);
-      console.log(`[SSE] Cleaned up clients for job ${jobId}`);
-    }, 1000);
+    }, 3000); // Increased from 1000ms to 3000ms
   }
+
 
   /**
    * Send error event to clients
