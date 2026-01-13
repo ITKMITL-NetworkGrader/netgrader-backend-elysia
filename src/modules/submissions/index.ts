@@ -336,9 +336,9 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         // console.log('[Submission] Enqueuing job payload for RabbitMQ:', JSON.stringify(jobPayload, null, 2));
 
         // Send job to queue
-        // channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
-        //   persistent: true,
-        // });
+        channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(jobPayload)), {
+          persistent: true,
+        });
 
         return {
           status: "success",
