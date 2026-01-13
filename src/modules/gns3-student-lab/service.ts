@@ -543,7 +543,7 @@ export class GNS3v3Service {
      * Generate login URL for GNS3 web UI
      */
     static buildLoginUrl(config: GNS3v3Config = DEFAULT_CONFIG): string {
-        return `http://${config.serverIp}:${config.serverPort}/static/web-ui/controller/1/login`;
+        return 'http://gns3.it.kmitl.ac.th';
     }
 
     /**
