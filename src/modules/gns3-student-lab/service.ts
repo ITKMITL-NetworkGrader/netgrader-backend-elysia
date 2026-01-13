@@ -240,6 +240,7 @@ export class GNS3v3Service {
                 body: JSON.stringify({
                     name: projectName,
                     auto_open: false,
+                    auto_close: false
                 }),
                 signal: AbortSignal.timeout(15000),
             });
