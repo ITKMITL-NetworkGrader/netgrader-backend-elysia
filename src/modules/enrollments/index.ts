@@ -382,4 +382,108 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
         description: "Bulk update roles and remove members from a course."
       }
     }
+  )
+  // Admin endpoint to change their own enrollment role
+  .put(
+    "/admin/self/:c_id",
+    async ({ params, body, authPlugin, set }) => {
+      const { u_id = "" } = authPlugin || {};
+      const { c_id } = params;
+      const { newRole } = body;
+
+      try {
+        // Verify user is a global ADMIN
+        const user = await User.findOne({ u_id }, "role");
+        if (!user || user.role !== "ADMIN") {
+          set.status = 403;
+          return {
+            success: false,
+            message: "Only global admins can use this endpoint."
+          };
+        }
+
+        // Find and update the enrollment
+        const courseId = new ObjectId(c_id).toString();
+        const enrollment = await EnrollmentService.getUserEnrollmentStatus(courseId, u_id);
+
+        if (!enrollment.isEnrolled) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "You are not enrolled in this course."
+          };
+        }
+
+        // Update the enrollment role directly
+        const { Enrollment } = await import("./model");
+        const result = await Enrollment.findOneAndUpdate(
+          { u_id, c_id: courseId },
+          { u_role: newRole },
+          { new: true }
+        );
+
+        if (!result) {
+          set.status = 404;
+          return {
+            success: false,
+            message: "Enrollment not found."
+          };
+        }
+
+        set.status = 200;
+        return {
+          success: true,
+          message: `Your enrollment role has been changed to ${newRole}.`,
+          enrollment: {
+            u_id: result.u_id,
+            c_id: result.c_id,
+            u_role: result.u_role,
+            enrollmentDate: result.enrollmentDate
+          }
+        };
+      } catch (error) {
+        set.status = 400;
+        return {
+          success: false,
+          message: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({
+        c_id: t.String()
+      }),
+      body: t.Object({
+        newRole: t.Union([t.Literal("STUDENT"), t.Literal("TA"), t.Literal("INSTRUCTOR")])
+      }),
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          enrollment: t.Object({
+            u_id: t.String(),
+            c_id: t.String(),
+            u_role: t.String(),
+            enrollmentDate: t.Date()
+          })
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String()
+        }),
+        403: t.Object({
+          success: t.Boolean(),
+          message: t.String()
+        }),
+        404: t.Object({
+          success: t.Boolean(),
+          message: t.String()
+        })
+      },
+      detail: {
+        tags: ["Enrollments"],
+        summary: "Admin: Change Own Enrollment Role",
+        description: "Allows global admins to change their own enrollment role in a course."
+      }
+    }
   );

@@ -35,6 +35,17 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           };
         }
 
+        // Check if lab is still accepting submissions
+        const now = new Date();
+        if (lab.availableUntil && now > new Date(lab.availableUntil)) {
+          set.status = 403;
+          return {
+            status: "error",
+            message: "Lab is no longer accepting submissions",
+            availableUntil: lab.availableUntil
+          };
+        }
+
         // Find the specific part
         const parts = await PartService.getPartsByLab(body.lab_id);
         const part = parts.parts.find(p => p.partId === body.part_id);
@@ -44,6 +55,42 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
             status: "error",
             message: `Part not found with ID: ${body.part_id} in lab ${body.lab_id}`
           };
+        }
+
+        // Prerequisite validation: Check if all prerequisite parts are completed
+        if (part.prerequisites && part.prerequisites.length > 0) {
+          for (const prereqPartId of part.prerequisites) {
+            const prereqSubmission = await SubmissionService.getLatestSubmission(u_id, body.lab_id, prereqPartId);
+            const isCompleted = prereqSubmission &&
+              prereqSubmission.status === 'completed' &&
+              prereqSubmission.gradingResult?.total_points_earned === prereqSubmission.gradingResult?.total_points_possible;
+
+            if (!isCompleted) {
+              const prereqPart = parts.parts.find(p => p.partId === prereqPartId);
+              set.status = 403;
+              return {
+                status: "error",
+                message: `You must complete "${prereqPart?.title || prereqPartId}" before attempting this part`,
+                prerequisitePartId: prereqPartId
+              };
+            }
+          }
+        }
+
+        // Rate limiting: Check if student submitted recently for this part
+        const latestSubmission = await SubmissionService.getLatestSubmission(u_id, body.lab_id, body.part_id);
+        if (latestSubmission && latestSubmission.submittedAt) {
+          const cooldownMs = part.partType === 'fill_in_blank' ? 10000 : 30000; // 10s for IP Table, 30s for network config
+          const timeSinceLastSubmission = Date.now() - new Date(latestSubmission.submittedAt).getTime();
+          if (timeSinceLastSubmission < cooldownMs) {
+            const waitSeconds = Math.ceil((cooldownMs - timeSinceLastSubmission) / 1000);
+            set.status = 429;
+            return {
+              status: "error",
+              message: `Please wait ${waitSeconds} seconds before submitting again`,
+              retryAfterMs: cooldownMs - timeSinceLastSubmission
+            };
+          }
         }
         // Generate job ID if not provided
         const jobId = body.job_id || `${u_id}-${body.lab_id}-${body.part_id}-${Date.now()}`;
