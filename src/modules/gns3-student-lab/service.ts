@@ -88,7 +88,8 @@ export class GNS3v3Service {
      * Build base URL for GNS3 API v3
      */
     private static buildBaseUrl(config: GNS3v3Config = DEFAULT_CONFIG): string {
-        return `http://${config.serverIp}:${config.serverPort}/${config.serverVersion}`;
+        // return `http://${config.serverIp}:${config.serverPort}/${config.serverVersion}`;
+        return `https://${config.serverIp}:/${config.serverVersion}`;
     }
 
     /**
