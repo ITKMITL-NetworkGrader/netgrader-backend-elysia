@@ -27,6 +27,7 @@ const ALLOWED_IMAGE_TYPES = [
   'image/jpg',
   'image/png',
   'image/webp',
+  'image/gif',
 ];
 
 /**
@@ -69,6 +70,7 @@ export class StorageService {
       'image/jpg': 'jpg',
       'image/png': 'png',
       'image/webp': 'webp',
+      'image/gif': 'gif',
     };
     return typeMap[contentType.toLowerCase()] || 'jpg';
   }
@@ -240,7 +242,7 @@ export class StorageService {
    */
   async deleteProfilePicture(userId: string): Promise<void> {
     // Try deleting all possible extensions
-    const extensions = ['jpg', 'png', 'webp'];
+    const extensions = ['jpg', 'png', 'webp', 'gif'];
 
     for (const ext of extensions) {
       try {
@@ -259,7 +261,7 @@ export class StorageService {
    */
   async deleteCourseBanner(courseId: string): Promise<void> {
     // Try deleting all possible extensions
-    const extensions = ['jpg', 'png', 'webp'];
+    const extensions = ['jpg', 'png', 'webp', 'gif'];
 
     for (const ext of extensions) {
       try {

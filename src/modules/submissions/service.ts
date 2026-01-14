@@ -19,7 +19,7 @@ export class SubmissionService {
 
     return latestSubmission ? latestSubmission.attempt + 1 : 1;
   }
-  
+
   /**
    * Create a new submission record or increment attempt for existing student/lab/part
    */
@@ -68,7 +68,7 @@ export class SubmissionService {
   static async markJobStarted(jobId: string): Promise<ISubmission | null> {
     return await Submission.findOneAndUpdate(
       { jobId },
-      { 
+      {
         status: 'running',
         startedAt: new Date()
       },
@@ -97,7 +97,7 @@ export class SubmissionService {
 
     return await Submission.findOneAndUpdate(
       { jobId },
-      { 
+      {
         $push: { progressHistory: progressUpdate }
       },
       { new: true }
@@ -132,7 +132,7 @@ export class SubmissionService {
     // Release IP ONLY if ALL parts of the lab are completed with 100%
     if (submission && gradingResult.status === 'completed') {
       const isPerfectScore = gradingResult.total_points_earned === gradingResult.total_points_possible &&
-                            gradingResult.total_points_possible > 0;
+        gradingResult.total_points_possible > 0;
 
       if (isPerfectScore) {
         try {
@@ -254,15 +254,15 @@ export class SubmissionService {
     }
   ): Promise<ISubmission[]> {
     const query: any = { studentId };
-    
+
     if (options?.labId) {
       query.labId = new Types.ObjectId(options.labId);
     }
-    
+
     if (options?.status) {
       query.status = options.status;
     }
-    
+
     if (options?.labSessionId) {
       if (options.labSessionId instanceof Types.ObjectId) {
         query.labSessionId = options.labSessionId;
@@ -301,7 +301,7 @@ export class SubmissionService {
     }
   ): Promise<any[]> {
     const matchStage: any = { labId: new Types.ObjectId(labId) };
-    
+
     if (options?.status) {
       matchStage.status = options.status;
     }
@@ -403,7 +403,7 @@ export class SubmissionService {
     stats.forEach(stat => {
       result.total += stat.count;
       result[stat._id as keyof typeof result] = stat.count;
-      
+
       if (stat._id === 'completed') {
         totalEarnedPoints += stat.totalPoints || 0;
         totalPossiblePoints += stat.maxPoints || 0;
@@ -422,7 +422,7 @@ export class SubmissionService {
    */
   static async getCurrentProgress(jobId: string): Promise<IProgressUpdate | null> {
     const submission = await Submission.findOne({ jobId }).select('progressHistory');
-    
+
     if (!submission || submission.progressHistory.length === 0) {
       return null;
     }
@@ -436,7 +436,7 @@ export class SubmissionService {
   static async cancelSubmission(jobId: string, reason?: string): Promise<ISubmission | null> {
     return await Submission.findOneAndUpdate(
       { jobId, status: { $in: ['pending', 'running'] } },
-      { 
+      {
         status: 'cancelled',
         completedAt: new Date(),
         'gradingResult.cancelled_reason': reason || 'Cancelled by user'
@@ -698,6 +698,13 @@ export class SubmissionService {
       submissionType: { $ne: 'ip_answers' }
     };
 
+    // Fetch lab parts to get order and title information
+    const partsResponse = await PartService.getPartsByLab(labId.toString());
+    const partOrderMap = new Map<string, { order: number; title: string }>();
+    partsResponse.parts.forEach(part => {
+      partOrderMap.set(part.partId, { order: part.order, title: part.title });
+    });
+
     if (options?.labSessionId) {
       if (options.labSessionId instanceof Types.ObjectId) {
         matchStage.labSessionId = options.labSessionId;
@@ -745,6 +752,8 @@ export class SubmissionService {
 
       interface PartHistory {
         partId: string;
+        partOrder: number;
+        partTitle: string;
         submissions: Array<{
           _id: any;
           attempt: number;
@@ -799,10 +808,13 @@ export class SubmissionService {
 
         const sessionGroup = groupedBySession.get(sessionKey)!;
         const partId = submission.partId?.toString?.() ?? submission.partId;
+        const partInfo = partOrderMap.get(partId) || { order: 999, title: partId };
 
         if (!sessionGroup.parts.has(partId)) {
           sessionGroup.parts.set(partId, {
             partId,
+            partOrder: partInfo.order,
+            partTitle: partInfo.title,
             submissions: []
           });
         }
@@ -832,8 +844,10 @@ export class SubmissionService {
 
           const parts = Array.from(sessionGroup.parts.values()).map(partHistory => ({
             partId: partHistory.partId,
+            partOrder: partHistory.partOrder,
+            partTitle: partHistory.partTitle,
             submissions: partHistory.submissions.sort((a, b) => b.attempt - a.attempt)
-          })).sort((a, b) => a.partId.localeCompare(b.partId));
+          })).sort((a, b) => a.partOrder - b.partOrder);
 
           return {
             labSessionId: sessionGroup.sessionId,
@@ -918,12 +932,19 @@ export class SubmissionService {
           submissionHistory: 1
         }
       },
-      {
-        $sort: { partId: 1 }
-      }
     ]);
 
-    return history;
+    // Add partOrder and partTitle, then sort by partOrder
+    const enrichedHistory = history.map(item => {
+      const partInfo = partOrderMap.get(item.partId) || { order: 999, title: item.partId };
+      return {
+        ...item,
+        partOrder: partInfo.order,
+        partTitle: partInfo.title
+      };
+    }).sort((a, b) => a.partOrder - b.partOrder);
+
+    return enrichedHistory;
   }
 
   /**
