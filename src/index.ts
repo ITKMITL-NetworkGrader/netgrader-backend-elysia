@@ -10,17 +10,17 @@ import { initializeMinioBucket } from "./config/minio.js";
 import { LabSessionCleanupService } from "./services/lab-session-cleanup.js";
 
 export type JWTPayload = {
-    u_id: string;
-    fullName?: string;
-    role: string;
-    iat: number;
-    exp: number;
+  u_id: string;
+  fullName?: string;
+  role: string;
+  iat: number;
+  exp: number;
 }
 
 declare module 'elysia' {
-    interface GlobalContext {
-        profile?: JWTPayload;
-    }
+  interface GlobalContext {
+    profile?: JWTPayload;
+  }
 }
 await connectDatabase();
 // await connectRedis();
@@ -33,17 +33,17 @@ try {
 }
 
 const app = new Elysia()
-.use(swagger())
-.use(cors({
-  origin: env.FRONTEND_ORIGIN,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  allowedHeaders: ["Content-Type", "ACCEPT", "Authorization"],
-  credentials: true,
-}))
-.use(authPlugin)
-.use(routes)
-.get("/", () => "Hello Elysia")
-  .listen({port : env.PORT || 3000, idleTimeout : 60});
+  // .use(swagger())
+  .use(cors({
+    origin: env.FRONTEND_ORIGIN,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allowedHeaders: ["Content-Type", "ACCEPT", "Authorization"],
+    credentials: true,
+  }))
+  .use(authPlugin)
+  .use(routes)
+  .get("/", () => "Hello Elysia")
+  .listen({ port: env.PORT || 3000, idleTimeout: 60 });
 
 console.log(
   `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
