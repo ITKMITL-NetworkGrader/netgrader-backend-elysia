@@ -223,7 +223,7 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
       }),
       body: t.Object({
         file: t.File({
-          type: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'],
+          type: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'],
           maxSize: MAX_FILE_SIZE.COURSE_BANNER,
         }),
       }),
