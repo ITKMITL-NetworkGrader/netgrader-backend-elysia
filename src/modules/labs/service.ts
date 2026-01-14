@@ -121,7 +121,7 @@ export class LabService {
   static async getLabById(id: string) {
     try {
       const lab = await Lab.findById(id).lean();
-      
+
       if (!lab) {
         return null;
       }
@@ -213,7 +213,7 @@ export class LabService {
     try {
       // First, find all lab parts for this lab
       const labParts = await LabPart.find({ labId: id });
-      
+
       let totalSubmissionsDeleted = 0;
       let totalPartsDeleted = 0;
 
@@ -236,13 +236,13 @@ export class LabService {
 
       // Finally, delete the lab itself
       const deletedLab = await Lab.findByIdAndDelete(id);
-      
+
       if (!deletedLab) {
         return null;
       }
 
       // IP cache no longer used - removed IpAllocationService
-      
+
       return {
         ...deletedLab.toObject(),
         id: deletedLab._id?.toString(),
@@ -331,7 +331,7 @@ export class LabService {
   static async getLabWithDetails(id: string) {
     try {
       const lab = await Lab.findById(id).lean();
-      
+
       if (!lab) {
         return null;
       }
@@ -344,6 +344,111 @@ export class LabService {
       };
     } catch (error) {
       throw new Error(`Error fetching lab with details: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Duplicate a lab to another course (or same course)
+   * @param sourceLabId - The lab ID to duplicate
+   * @param targetCourseId - The destination course ID (can be same as source)
+   * @param newTitle - Optional new title for the duplicated lab
+   * @param includeParts - Whether to duplicate parts (default: true)
+   * @param createdBy - The user ID creating the duplicate
+   */
+  static async duplicateLab(
+    sourceLabId: string,
+    targetCourseId: string,
+    createdBy: string,
+    newTitle?: string,
+    includeParts: boolean = true
+  ) {
+    try {
+      // Find user by u_id and get their MongoDB _id
+      const user = await User.findOne({ u_id: createdBy });
+      if (!user) {
+        throw new Error(`User not found with u_id: ${createdBy}`);
+      }
+
+      // Get source lab
+      const sourceLab = await Lab.findById(sourceLabId).lean();
+      if (!sourceLab) {
+        throw new Error(`Source lab with ID ${sourceLabId} not found`);
+      }
+
+      // Deep clone the lab object, excluding metadata fields
+      const labClone: any = JSON.parse(JSON.stringify(sourceLab));
+      delete labClone._id;
+      delete labClone.createdAt;
+      delete labClone.updatedAt;
+
+      // Set new values
+      labClone.courseId = new ObjectId(targetCourseId);
+      labClone.title = newTitle || `Copy of ${sourceLab.title}`;
+      labClone.createdBy = user._id;
+      labClone.publishedAt = null; // Unpublish by default
+
+      // Create the new lab
+      const newLab = new Lab(labClone);
+      const savedLab = await newLab.save();
+
+      let duplicatedParts: any[] = [];
+
+      // Duplicate parts if requested
+      if (includeParts) {
+        const sourceParts = await LabPart.find({ labId: sourceLabId }).lean();
+
+        for (const part of sourceParts) {
+          // Deep clone the part
+          const partClone: any = JSON.parse(JSON.stringify(part));
+          delete partClone._id;
+          delete partClone.createdAt;
+          delete partClone.updatedAt;
+
+          // Update labId to new lab
+          partClone.labId = savedLab._id;
+
+          // Generate new task IDs for all tasks
+          if (partClone.tasks && Array.isArray(partClone.tasks)) {
+            partClone.tasks = partClone.tasks.map((task: any) => ({
+              ...task,
+              taskId: `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            }));
+          }
+
+          // Update metadata
+          partClone.metadata = {
+            ...partClone.metadata,
+            lastModified: new Date(),
+            version: 1
+          };
+
+          const newPart = new LabPart(partClone);
+          const savedPart = await newPart.save();
+          duplicatedParts.push({
+            id: savedPart._id?.toString(),
+            partId: savedPart.partId,
+            title: savedPart.title,
+            order: savedPart.order
+          });
+        }
+      }
+
+      return {
+        success: true,
+        duplicatedLab: {
+          id: savedLab._id?.toString(),
+          title: savedLab.title,
+          courseId: savedLab.courseId?.toString(),
+          sourceLabId: sourceLabId,
+          type: savedLab.type
+        },
+        parts: {
+          count: duplicatedParts.length,
+          items: duplicatedParts
+        }
+      };
+    } catch (error) {
+      throw new Error(`Error duplicating lab: ${(error as Error).message}`);
     }
   }
 }

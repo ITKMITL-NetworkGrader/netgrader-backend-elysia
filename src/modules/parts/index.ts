@@ -1074,6 +1074,56 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
     }
   )
 
+  // Duplicate a task to another part (or same part)
+  .post(
+    "/:id/tasks/:taskId/duplicate",
+    async ({ params, body, authPlugin, set }) => {
+      try {
+        const { id: sourcePartId, taskId } = params;
+        const { targetPartId, newTaskName } = body;
+
+        const result = await PartService.duplicateTask(
+          sourcePartId,
+          taskId,
+          targetPartId,
+          newTaskName
+        );
+
+        set.status = 201;
+        return result;
+      } catch (error) {
+        set.status = 400;
+        return {
+          success: false,
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({
+        id: t.String({ description: "Source part ID" }),
+        taskId: t.String({ description: "Task ID to duplicate" })
+      }),
+      body: t.Object({
+        targetPartId: t.String({ description: "Destination part ID (can be same as source)" }),
+        newTaskName: t.Optional(t.String({ description: "Optional new name for duplicated task" }))
+      }),
+      response: {
+        201: t.Object({
+          success: t.Boolean(),
+          duplicatedTask: t.Any(),
+          targetPart: t.Any()
+        }),
+        400: t.Object({ success: t.Boolean(), error: t.String() })
+      },
+      detail: {
+        tags: ["Parts"],
+        summary: "Duplicate a task",
+        description: "Duplicate a task to the same part or a different part within the same lab"
+      }
+    }
+  )
+
   // Submit answers for fill-in-blank questions
   .post(
     "/submit-answers",

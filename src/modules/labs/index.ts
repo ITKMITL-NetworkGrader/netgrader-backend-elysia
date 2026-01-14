@@ -986,6 +986,62 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
     }
   )
 
+  // Duplicate lab to another course (or same course)
+  .post(
+    "/:id/duplicate",
+    async ({ params, body, authPlugin, set }) => {
+      try {
+        const { u_id } = authPlugin ?? { u_id: "" };
+
+        if (!u_id) {
+          set.status = 401;
+          return {
+            success: false,
+            message: "Authentication required"
+          };
+        }
+
+        const { targetCourseId, newTitle, includeParts = true } = body;
+
+        const result = await LabService.duplicateLab(
+          params.id,
+          targetCourseId,
+          u_id,
+          newTitle,
+          includeParts
+        );
+
+        set.status = 201;
+        return {
+          success: true,
+          message: "Lab duplicated successfully",
+          data: result
+        };
+      } catch (error) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "Error duplicating lab",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      body: t.Object({
+        targetCourseId: t.String({ description: "Destination course ID (can be same as source)" }),
+        newTitle: t.Optional(t.String({ description: "Optional new title for duplicated lab" })),
+        includeParts: t.Optional(t.Boolean({ description: "Whether to duplicate parts (default: true)", default: true }))
+      }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: {
+        tags: ["Labs"],
+        summary: "Duplicate Lab",
+        description: "Duplicate a lab to the same course or a different course. Optionally includes all parts."
+      }
+    }
+  )
+
   // Get labs by course
   .get(
     "/course/:courseId",

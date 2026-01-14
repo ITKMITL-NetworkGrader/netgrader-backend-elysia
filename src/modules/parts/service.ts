@@ -130,7 +130,7 @@ export class PartService {
 
       // Process rich content for instructions only
       let processedInstructions;
-      
+
       if (typeof partData.instructions === 'string') {
         // Backward compatibility: convert plain HTML string to rich content
         processedInstructions = {
@@ -253,7 +253,7 @@ export class PartService {
     try {
       const part = await LabPart.findById(id)
         .lean();
-      
+
       if (!part) {
         return null;
       }
@@ -284,7 +284,7 @@ export class PartService {
       // Only allow updating specific fields
       const allowedFields = ['partId', 'title', 'description', 'instructions', 'order', 'partType', 'questions', 'dhcpConfiguration', 'tasks', 'task_groups', 'prerequisites', 'totalPoints'];
       const updateFields: any = {};
-      
+
       allowedFields.forEach(field => {
         if (filteredData[field] !== undefined) {
           if (field === 'prerequisites' && Array.isArray(filteredData[field])) {
@@ -581,7 +581,7 @@ export class PartService {
         [`metadata.autoSave.${field}`]: 1,
         'metadata.autoSave.timestamp': 1
       } as Record<string, 1>;
-      
+
       const part = await LabPart.findOne(
         { _id: partId, labId: labId },
         projection
@@ -621,7 +621,7 @@ export class PartService {
   static async getPartWithAutoSave(partId: string, labId: string) {
     try {
       const part = await LabPart.findOne({ _id: partId, labId: labId }).lean();
-      
+
       if (!part) {
         return null;
       }
@@ -629,8 +629,8 @@ export class PartService {
       const hasAutoSave = part.metadata?.autoSave && Object.keys(part.metadata.autoSave).length > 1; // more than just timestamp
       const autoSaveTimestamp = part.metadata?.autoSave?.timestamp;
       const lastModified = part.metadata?.lastModified;
-      
-      const isAutoSaveNewer = hasAutoSave && autoSaveTimestamp && lastModified && 
+
+      const isAutoSaveNewer = hasAutoSave && autoSaveTimestamp && lastModified &&
         new Date(autoSaveTimestamp) > new Date(lastModified);
 
       return {
@@ -686,6 +686,101 @@ export class PartService {
       };
     } catch (error) {
       throw new Error(`Asset cleanup failed: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Duplicate a task to another part (or same part)
+   * @param sourcePartId - The part ID containing the source task
+   * @param taskId - The task ID to duplicate
+   * @param targetPartId - The destination part ID (can be same as source)
+   * @param newTaskName - Optional new name for the duplicated task
+   */
+  static async duplicateTask(
+    sourcePartId: string,
+    taskId: string,
+    targetPartId: string,
+    newTaskName?: string
+  ) {
+    try {
+      // Get source part
+      const sourcePart = await LabPart.findById(sourcePartId);
+      if (!sourcePart) {
+        throw new Error(`Source part with ID ${sourcePartId} not found`);
+      }
+
+      // Find the task to duplicate
+      const sourceTask = sourcePart.tasks?.find((t: any) => t.taskId === taskId);
+      if (!sourceTask) {
+        throw new Error(`Task with ID ${taskId} not found in part ${sourcePartId}`);
+      }
+
+      // Get target part (may be same as source)
+      const targetPart = sourcePartId === targetPartId
+        ? sourcePart
+        : await LabPart.findById(targetPartId);
+
+      if (!targetPart) {
+        throw new Error(`Target part with ID ${targetPartId} not found`);
+      }
+
+      // Ensure target part belongs to the same lab
+      if (sourcePart.labId?.toString() !== targetPart.labId?.toString()) {
+        throw new Error('Cannot duplicate task to a part in a different lab');
+      }
+
+      // Generate new task ID
+      const newTaskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      // Deep clone the task
+      const duplicatedTask = {
+        ...JSON.parse(JSON.stringify(sourceTask)),
+        taskId: newTaskId,
+        name: newTaskName || `Copy of ${sourceTask.name}`,
+        // Update order to be at the end
+        order: (targetPart.tasks?.length || 0) + 1
+      };
+
+      // Add duplicated task to target part
+      const updatedTasks = [...(targetPart.tasks || []), duplicatedTask];
+
+      // Calculate new total points
+      const newTotalPoints = updatedTasks.reduce((sum: number, task: any) => sum + (task.points || 0), 0);
+
+      // Update target part
+      const updatedPart = await LabPart.findByIdAndUpdate(
+        targetPartId,
+        {
+          $push: { tasks: duplicatedTask },
+          $set: {
+            totalPoints: newTotalPoints,
+            'metadata.lastModified': new Date()
+          }
+        },
+        { new: true }
+      );
+
+      if (!updatedPart) {
+        throw new Error('Failed to update target part');
+      }
+
+      return {
+        success: true,
+        duplicatedTask: {
+          ...duplicatedTask,
+          sourceTaskId: taskId,
+          sourcePartId: sourcePartId
+        },
+        targetPart: {
+          id: updatedPart._id?.toString(),
+          partId: updatedPart.partId,
+          title: updatedPart.title,
+          totalPoints: updatedPart.totalPoints,
+          tasksCount: updatedPart.tasks?.length || 0
+        }
+      };
+    } catch (error) {
+      throw new Error(`Error duplicating task: ${(error as Error).message}`);
     }
   }
 }
