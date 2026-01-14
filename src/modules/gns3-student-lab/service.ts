@@ -537,14 +537,14 @@ export class GNS3v3Service {
      * Direct link to project - works if already logged in
      */
     static buildProjectUrl(projectId: string, config: GNS3v3Config = DEFAULT_CONFIG): string {
-        return `http://${config.serverIp}:${config.serverPort}/static/web-ui/controller/1/project/${projectId}`;
+        return `https://${config.serverIp}:${config.serverPort}/static/web-ui/controller/1/project/${projectId}`;
     }
 
     /**
      * Generate login URL for GNS3 web UI
      */
     static buildLoginUrl(config: GNS3v3Config = DEFAULT_CONFIG): string {
-        return 'http://gns3.it.kmitl.ac.th';
+        return `https://${config.serverIp}`;
     }
 
     /**
