@@ -174,14 +174,14 @@ const PartCreateSchema = t.Object({
       expected_result: t.Any({ description: "Expected value/result for comparison" })
     })),
     order: t.Number(),
-    points: t.Number()
+    points: t.Number({ minimum: 0 })
   })),
   task_groups: t.Array(t.Object({
     group_id: t.String(),
     title: t.String(),
     description: t.String({ default: "" }),
     group_type: t.Union([t.Literal("all_or_nothing"), t.Literal("proportional")]),
-    points: t.Number(),
+    points: t.Number({ minimum: 0 }),
     continue_on_failure: t.Boolean(),
     timeout_seconds: t.Number()
   }), { default: [] }),
@@ -216,14 +216,14 @@ const PartUpdateSchema = t.Object({
       expected_result: t.Any({ description: "Expected value/result for comparison" })
     })),
     order: t.Number(),
-    points: t.Number()
+    points: t.Number({ minimum: 0 })
   }))),
   task_groups: t.Array(t.Object({
     group_id: t.String(),
     title: t.String(),
     description: t.String({ default: "" }),
     group_type: t.Union([t.Literal("all_or_nothing"), t.Literal("proportional")]),
-    points: t.Number(),
+    points: t.Number({ minimum: 0 }),
     continue_on_failure: t.Boolean(),
     timeout_seconds: t.Number()
   }), { default: [] }),
