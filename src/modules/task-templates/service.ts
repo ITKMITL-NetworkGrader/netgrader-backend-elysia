@@ -53,7 +53,7 @@ export class TaskTemplateService {
     limit?: number;
   } = {}) {
     try {
-      const { templateId, name, page = 1, limit = 10 } = filters;
+      const { templateId, name, page, limit } = filters;
 
       const dbFilter: any = {};
       if (templateId) dbFilter.templateId = { $regex: templateId, $options: 'i' };
@@ -78,11 +78,26 @@ export class TaskTemplateService {
         return bTime - aTime;
       });
 
-      const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 10;
-      const safePage = Number.isFinite(page) && page > 0 ? page : 1;
+      const totalItems = combined.length;
+
+      // If no pagination filters are provided, return all data
+      if (page === undefined && limit === undefined) {
+        return {
+          templates: combined,
+          pagination: {
+            currentPage: 1,
+            totalPages: 1,
+            totalItems,
+            itemsPerPage: totalItems
+          }
+        };
+      }
+
+      // Apply pagination when explicitly requested
+      const safeLimit = Number.isFinite(limit) && limit! > 0 ? limit! : 10;
+      const safePage = Number.isFinite(page) && page! > 0 ? page! : 1;
       const startIndex = (safePage - 1) * safeLimit;
       const paginatedTemplates = combined.slice(startIndex, startIndex + safeLimit);
-      const totalItems = combined.length;
 
       return {
         templates: paginatedTemplates,
