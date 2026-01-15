@@ -1355,6 +1355,26 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
                     }
                   }
 
+                  // Special handling for IPv6 SLAAC cells - accept any valid IPv6 address
+                  if (cell.answerType === 'calculated' && cell.calculatedAnswer?.calculationType === 'ipv6_slaac') {
+                    // SLAAC assigns addresses dynamically, so we accept any valid IPv6 format
+                    // Basic IPv6 validation: must have at least one colon and valid hex characters
+                    const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$|^([0-9a-fA-F]{0,4}:){1,7}:$|^:(:([0-9a-fA-F]{0,4})){1,7}$|^([0-9a-fA-F]{0,4}:){1,6}:[0-9a-fA-F]{0,4}$|^::([fF]{4}:)?(\d{1,3}\.){3}\d{1,3}$/;
+                    const isValidIPv6 = studentAnswer.includes(':') && (
+                      ipv6Regex.test(studentAnswer) ||
+                      // Also accept common compressed formats like 2001:db8::1
+                      /^[0-9a-fA-F:]+$/.test(studentAnswer)
+                    );
+
+                    isCorrect = isValidIPv6 && studentAnswer.length > 0;
+
+                    console.log(`[IPv6 SLAAC Validation] Row ${rowIndex}, Col ${colIndex}:`, {
+                      studentAnswer,
+                      isValidIPv6,
+                      isCorrect
+                    });
+                  }
+
                   cellDetails[rowIndex][colIndex] = { isCorrect };
 
                   if (isCorrect) {
@@ -1364,6 +1384,61 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
                 });
               });
             }
+
+            // DEBUG: Log all expected answers in a formatted table
+            console.log('\n========================================');
+            console.log('[DEBUG] IP Table Questionnaire - Correct Answers');
+            console.log('========================================');
+            console.log(`Question ID: ${answer.questionId}`);
+            console.log(`Student ID: ${u_id}`);
+            console.log('');
+
+            // Build and log the expected answers table
+            if (question.ipTableQuestionnaire?.cells) {
+              const rows = question.ipTableQuestionnaire.rows || [];
+              const columns = question.ipTableQuestionnaire.columns || [];
+
+              // Print column headers
+              const headerLabels = columns.map((col: any) => col.label || col.columnId);
+              console.log('Row'.padEnd(25) + ' | ' + headerLabels.map((h: string) => h.padEnd(20)).join(' | '));
+              console.log('-'.repeat(25 + (22 * columns.length)));
+
+              question.ipTableQuestionnaire.cells.forEach((row: any[], rowIndex: number) => {
+                const rowInfo = rows[rowIndex];
+                const rowLabel = rowInfo?.displayName || `Row ${rowIndex + 1}`;
+
+                const cellValues: string[] = [];
+                row.forEach((cell: any, colIndex: number) => {
+                  const cellType = cell.cellType || 'input';
+                  let displayValue = '';
+
+                  if (cellType === 'readonly') {
+                    displayValue = `[RO] ${cell.readonlyContent || ''}`;
+                  } else if (cellType === 'blank') {
+                    displayValue = '[BLANK]';
+                  } else if (cellType === 'input') {
+                    if (cell.answerType === 'static') {
+                      displayValue = cell.staticAnswer || '';
+                    } else if (cell.answerType === 'calculated') {
+                      try {
+                        displayValue = calculateCellAnswer(cell.calculatedAnswer, lab, u_id);
+                      } catch (err) {
+                        displayValue = `[ERROR: ${(err as Error).message}]`;
+                      }
+                    }
+                  }
+
+                  cellValues.push(displayValue.padEnd(20));
+                });
+
+                console.log(rowLabel.padEnd(25) + ' | ' + cellValues.join(' | '));
+              });
+            }
+
+            console.log('\n----------------------------------------');
+            console.log(`Correct Cells: ${correctCells}/${totalCells}`);
+            console.log(`Points Earned: ${pointsEarned}`);
+            console.log('========================================\n');
 
             return {
               questionId: answer.questionId,

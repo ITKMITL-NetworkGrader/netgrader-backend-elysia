@@ -6,6 +6,7 @@ interface CourseMember {
   fullName: string;
   u_role: "INSTRUCTOR" | "STUDENT" | "TA";
   enrollmentDate: Date;
+  profilePicture?: string;
 }
 
 export class EnrollmentServiceError extends Error {
@@ -52,7 +53,7 @@ export class EnrollmentService {
     // 1. Course creator is auto-enrolling as instructor, OR
     // 2. Course doesn't have a password
     const isCreatorEnrolling = u_role === "INSTRUCTOR" && course.created_by === u_id;
-    
+
     if (course.password && course.password.trim() !== "" && !isCreatorEnrolling) {
       if (!password) {
         throw new Error("Course requires a password to enroll");
@@ -171,10 +172,34 @@ export class EnrollmentService {
           fullName: "$userInfo.fullName",
           u_role: 1,
           enrollmentDate: 1,
+          profilePicturePath: "$userInfo.profilePicture",
         },
       },
     ]);
-    return members as CourseMember[];
+
+    // Generate presigned URLs for profile pictures
+    const { storageService } = await import('../../services/storage');
+    const membersWithUrls = await Promise.all(
+      members.map(async (member) => {
+        let profilePicture: string | undefined;
+        if (member.profilePicturePath) {
+          try {
+            profilePicture = await storageService.getPresignedUrl(member.profilePicturePath);
+          } catch (error) {
+            console.error(`Error generating presigned URL for ${member.u_id}:`, error);
+          }
+        }
+        return {
+          u_id: member.u_id,
+          fullName: member.fullName,
+          u_role: member.u_role,
+          enrollmentDate: member.enrollmentDate,
+          profilePicture,
+        };
+      })
+    );
+
+    return membersWithUrls as CourseMember[];
   }
 
   static async manageCourseEnrollments(
