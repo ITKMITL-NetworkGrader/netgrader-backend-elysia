@@ -221,7 +221,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         return { success: false, message: "User not found" };
       }
       set.status = 200;
-      return { 
+      return {
         success: true,
         data: data?.role
       };
@@ -231,6 +231,110 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         tags: ["Authentication"],
         summary: "Get User Role",
         description: "Retrieve the authenticated user's role.",
+      },
+    }
+  )
+  //-------------------------------------------------------------------------------------------------------
+  // DEV ONLY - Surrogate Login
+  //-------------------------------------------------------------------------------------------------------
+  .post(
+    "/surrogate",
+    async ({ body, jwt, set, cookie: { auth_token } }) => {
+      // Only allow in development environment
+      if (env.NODE_ENV === "production") {
+        set.status = 403;
+        return {
+          success: false,
+          message: "Surrogate login is only available in development environment",
+        };
+      }
+
+      const { username } = body;
+
+      if (!username) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "Username is required",
+        };
+      }
+
+      const user = await AuthService.getUserByUsername(username);
+
+      if (!user) {
+        set.status = 404;
+        return {
+          success: false,
+          message: "User not found",
+        };
+      }
+
+      // Create JWT token (same format as regular login)
+      const payload: JWTPayload = {
+        u_id: user.u_id,
+        fullName: user.fullName,
+        role: user.role,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
+      };
+
+      const value = await jwt.sign(payload);
+      auth_token.value = value;
+      auth_token.httpOnly = true;
+      set.status = 200;
+
+      console.log(`[DEV] Surrogate login for user: ${user.u_id}`);
+
+      return {
+        success: true,
+        message: "Surrogate login successful (DEV ONLY)",
+        value,
+        user: {
+          id: (user._id as Types.ObjectId).toString(),
+          u_id: user.u_id,
+          fullName: user.fullName,
+          role: user.role,
+          lastLogin: user.lastLogin,
+        },
+      };
+    },
+    {
+      body: t.Object({
+        username: t.String({ minLength: 1 }),
+      }),
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          value: t.Optional(t.String()),
+          user: t.Optional(
+            t.Object({
+              id: t.String(),
+              u_id: t.String(),
+              fullName: t.String(),
+              role: t.String(),
+              lastLogin: t.Date(),
+            })
+          ),
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+        403: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+        404: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+      },
+      detail: {
+        tags: ["Authentication"],
+        summary: "Surrogate Login (DEV ONLY)",
+        description:
+          "Login as any user by username without password. Only available in development environment. Returns 403 in production.",
       },
     }
   );
