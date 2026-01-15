@@ -15,6 +15,7 @@ import { storageRoutes } from "./storage";
 import { gns3Routes } from "./gns3";
 import { gns3StudentLabRoutes } from "./gns3-student-lab";
 import { playgroundRoutes } from "./playground";
+import { profileRoutes } from "./profile";
 
 export const routes = new Elysia()
     .group("/v0", (app) => app
@@ -34,4 +35,5 @@ export const routes = new Elysia()
         .use(gns3Routes)
         .use(gns3StudentLabRoutes)
         .use(playgroundRoutes)
+        .use(profileRoutes)
     )

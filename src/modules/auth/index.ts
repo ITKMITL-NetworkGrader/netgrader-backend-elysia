@@ -195,13 +195,36 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   )
   .get(
     "/me",
-    async ({ jwt, status, cookie: { auth_token } }) => {
+    async ({ jwt, set, cookie: { auth_token } }) => {
       console.log(auth_token.value)
       const profile = await jwt.verify(auth_token.value);
       if (!profile) {
-        status(401, 'Unauthorized');
+        set.status = 401;
+        return { error: 'Unauthorized' };
       }
-      return profile;
+
+      // Fetch additional user data from DB including profilePicture
+      const user = await User.findOne(
+        { u_id: profile.u_id },
+        { profilePicture: 1, bio: 1 }
+      );
+
+      // Generate presigned URL for profile picture if exists
+      let profilePictureUrl: string | undefined;
+      if (user?.profilePicture) {
+        try {
+          const { storageService } = await import('../../services/storage');
+          profilePictureUrl = await storageService.getPresignedUrl(user.profilePicture);
+        } catch (error) {
+          console.error('Error generating presigned URL for profile picture:', error);
+        }
+      }
+
+      return {
+        ...profile,
+        profilePicture: profilePictureUrl,
+        bio: user?.bio || '',
+      };
     },
     {
       detail: {

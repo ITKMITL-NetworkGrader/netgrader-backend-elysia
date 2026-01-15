@@ -945,4 +945,45 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         description: "Retrieve student's IP table questionnaire answers for a specific lab part."
       }
     }
+  )
+  /**
+   * Get all submission history for the authenticated user across all courses/labs
+   * GET /submissions/history/user
+   */
+  .get(
+    "/history/user",
+    async ({ query, set, authPlugin }) => {
+      try {
+        if (!authPlugin) {
+          set.status = 401;
+          return { status: "error", message: "Unauthorized" };
+        }
+
+        const { u_id } = authPlugin;
+        const result = await SubmissionService.getAllUserSubmissionHistory(
+          u_id,
+          {
+            limit: query.limit ? parseInt(query.limit) : 20,
+            offset: query.offset ? parseInt(query.offset) : 0
+          }
+        );
+
+        return { status: "success", ...result };
+      } catch (error) {
+        console.error("Error fetching user submission history:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to fetch submission history" };
+      }
+    },
+    {
+      query: t.Object({
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String())
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get All User Submission History",
+        description: "Get all submissions for the authenticated user across all courses and labs, sorted by date descending with pagination."
+      }
+    }
   );
