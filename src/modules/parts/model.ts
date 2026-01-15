@@ -68,7 +68,7 @@ export interface ILabPart extends Document {
           'vlan_lecturer_range' | 'device_interface_ip' | 'vlan_id' |
           // IPv6 Calculation Types
           'ipv6_network_prefix' | 'ipv6_address' | 'ipv6_interface_id' |
-          'ipv6_link_local' | 'ipv6_slaac';
+          'ipv6_link_local' | 'ipv6_slaac' | 'ipv6_prefix_length' | 'device_interface_ipv6';
           vlanIndex?: number;
           lecturerOffset?: number;
           lecturerRangeStart?: number;
@@ -300,7 +300,7 @@ const labPartSchema = new Schema<ILabPart>({
                 'vlan_lecturer_range', 'device_interface_ip', 'vlan_id',
                 // IPv6 Calculation Types
                 'ipv6_network_prefix', 'ipv6_address', 'ipv6_interface_id',
-                'ipv6_link_local', 'ipv6_slaac']
+                'ipv6_link_local', 'ipv6_slaac', 'ipv6_prefix_length', 'device_interface_ipv6']
             },
             vlanIndex: Number,
             lecturerOffset: Number,
