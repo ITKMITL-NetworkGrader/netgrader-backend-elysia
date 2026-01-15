@@ -67,7 +67,9 @@ const IpTableQuestionnaireSchema = t.Object({
         t.Literal('ipv6_address'),
         t.Literal('ipv6_interface_id'),
         t.Literal('ipv6_link_local'),
-        t.Literal('ipv6_slaac')
+        t.Literal('ipv6_slaac'),
+        t.Literal('ipv6_prefix_length'),
+        t.Literal('device_interface_ipv6')
       ]),
       vlanIndex: t.Optional(t.Number()),
       lecturerOffset: t.Optional(t.Number()),
@@ -410,6 +412,87 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
     return calculateStudentIdBasedIP(baseNetwork, studentId, hostOffset);
   }
 
+  // Handle device interface IPv6 calculation (for dual-stack interfaces from Step 3)
+  if (calculationType === 'device_interface_ipv6') {
+    if (!deviceId || !interfaceName) {
+      throw new Error('deviceId and interfaceName required for device_interface_ipv6');
+    }
+
+    // Find the device and its IP variable configuration
+    const device = lab.network?.devices?.find((d: any) => d.deviceId === deviceId);
+    if (!device) {
+      throw new Error(`Device ${deviceId} not found in lab`);
+    }
+
+    const ipVariable = device.ipVariables?.find((v: any) => v.name === interfaceName);
+    if (!ipVariable) {
+      throw new Error(`IP variable ${interfaceName} not found for device ${deviceId}`);
+    }
+
+    // Check if static fullIpv6 is configured
+    if (ipVariable.ipv6InputType === 'fullIPv6' && ipVariable.fullIpv6) {
+      // Strip prefix length if present and return just the address
+      const result = ipVariable.fullIpv6.split('/')[0];
+      console.log(`[Device Interface IPv6] Using static fullIPv6 for ${deviceId}.${interfaceName}:`, {
+        fullIpv6: ipVariable.fullIpv6,
+        result
+      });
+      return result;
+    }
+
+    // Check if link-local is configured
+    if (ipVariable.ipv6InputType === 'linkLocal') {
+      const interfaceId = ipVariable.ipv6InterfaceId || '1';
+      const result = generateLinkLocalAddress(interfaceId);
+      console.log(`[Device Interface IPv6] Using link-local for ${deviceId}.${interfaceName}:`, {
+        interfaceId,
+        result
+      });
+      return result;
+    }
+
+    // Check if VLAN-based IPv6 is configured (studentVlan6_X)
+    if (ipVariable.ipv6InputType?.startsWith('studentVlan6_')) {
+      const ipv6Config = lab.network?.ipv6Config;
+      if (!ipv6Config?.enabled || !ipv6Config.template) {
+        throw new Error('IPv6 configuration is not enabled for this lab');
+      }
+
+      const ipv6VlanIndex = ipVariable.ipv6VlanIndex ?? 0;
+      const vlans = lab.network?.vlanConfiguration?.vlans || [];
+      const vlan = vlans[ipv6VlanIndex];
+
+      // Calculate VLAN ID for template
+      let vlanIdForIpv6: number;
+      if (lab.network?.vlanConfiguration?.mode === 'calculated_vlan' && vlan?.calculationMultiplier) {
+        const vlanIds = calculateStudentVLANs(studentId, [vlan.calculationMultiplier]);
+        vlanIdForIpv6 = vlanIds[0];
+      } else {
+        vlanIdForIpv6 = vlan?.vlanId || ipv6VlanIndex;
+      }
+
+      const interfaceOffset = parseInt(ipVariable.ipv6InterfaceId || '1', 10) || 1;
+      const fullResult = generateIPv6FromTemplate(
+        ipv6Config.template,
+        studentId,
+        vlanIdForIpv6.toString(),
+        interfaceOffset
+      );
+      // Strip prefix length
+      const result = fullResult.split('/')[0];
+      console.log(`[Device Interface IPv6] Using template for ${deviceId}.${interfaceName}:`, {
+        template: ipv6Config.template,
+        vlanId: vlanIdForIpv6,
+        interfaceOffset,
+        fullResult,
+        result
+      });
+      return result;
+    }
+
+    throw new Error(`Unsupported IPv6 input type for ${deviceId}.${interfaceName}: ${ipVariable.ipv6InputType}`);
+  }
+
   // Handle VLAN-based calculations (for network addresses, broadcast, etc.)
   if (vlanIndex !== undefined && calculationType !== 'device_interface_ip') {
     // Get VLAN configuration from lab (VLANs are in vlanConfiguration.vlans)
@@ -607,7 +690,7 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
       }
 
       case 'ipv6_address': {
-        // Generate full IPv6 address from template
+        // Generate full IPv6 address from template (without prefix length)
         const ipv6Config = lab.network?.ipv6Config;
         if (!ipv6Config?.enabled || !ipv6Config.template) {
           throw new Error('IPv6 configuration is not enabled for this lab');
@@ -622,17 +705,20 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
           vlanIdForIpv6 = vlan.vlanId || vlanIndex;
         }
 
-        const result = generateIPv6FromTemplate(
+        const fullResult = generateIPv6FromTemplate(
           ipv6Config.template,
           studentId,
           vlanIdForIpv6.toString(),
           lecturerOffset || 1
         );
+        // Strip the prefix length (e.g., /64) - return just the address
+        const result = fullResult.split('/')[0];
         console.log(`[IPv6 Address] VLAN ${vlanIndex}:`, {
           studentId,
           vlanId: vlanIdForIpv6,
           lecturerOffset,
           template: ipv6Config.template,
+          fullResult,
           result
         });
         return result;
@@ -656,6 +742,18 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
         console.log(`[IPv6 SLAAC] VLAN ${vlanIndex}: Student-updatable cell (uses override)`);
         // Return empty string as placeholder - actual value comes from lecturerRangeOverrides
         return '';
+      }
+
+      case 'ipv6_prefix_length': {
+        // Return just the prefix length (e.g., /64)
+        // Get from lab's IPv6 config or default to /64
+        const ipv6Config = lab.network?.ipv6Config;
+        const prefixLength = 64; // Standard IPv6 prefix length for /64 subnets
+        const result = `/${prefixLength}`;
+        console.log(`[IPv6 Prefix Length] VLAN ${vlanIndex}:`, {
+          result
+        });
+        return result;
       }
 
       default:

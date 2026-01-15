@@ -1107,4 +1107,132 @@ export class SubmissionService {
 
     return submission.ipMappings as any;
   }
+
+  /**
+   * Get all submission history for a user across all courses/labs
+   * Returns submissions sorted by date descending with lab and course info
+   */
+  static async getAllUserSubmissionHistory(
+    studentId: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<{ data: any[]; total: number; limit: number; offset: number }> {
+    const matchStage: any = {
+      studentId,
+      submissionType: { $ne: 'ip_answers' } // Exclude IP answer saves
+    };
+
+    // Count total before pagination
+    const total = await Submission.countDocuments(matchStage);
+
+    const submissions = await Submission.aggregate([
+      {
+        $match: matchStage
+      },
+      {
+        $sort: { submittedAt: -1 }
+      },
+      {
+        $skip: options?.offset || 0
+      },
+      {
+        $limit: options?.limit || 20
+      },
+      // Join with labs collection
+      {
+        $lookup: {
+          from: 'labs',
+          localField: 'labId',
+          foreignField: '_id',
+          as: 'labInfo'
+        }
+      },
+      {
+        $unwind: {
+          path: '$labInfo',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      // Join with courses collection
+      {
+        $lookup: {
+          from: 'courses',
+          localField: 'labInfo.courseId',
+          foreignField: '_id',
+          as: 'courseInfo'
+        }
+      },
+      {
+        $unwind: {
+          path: '$courseInfo',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      // Join with lab_parts collection to get part info
+      {
+        $lookup: {
+          from: 'lab_parts',
+          let: { labId: '$labId', partId: '$partId' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$lab_id', '$$labId'] },
+                    { $eq: ['$partId', '$$partId'] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: 'partInfo'
+        }
+      },
+      {
+        $unwind: {
+          path: '$partInfo',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          jobId: 1,
+          partId: 1,
+          partTitle: { $ifNull: ['$partInfo.title', '$partId'] },
+          partOrder: { $ifNull: ['$partInfo.order', 0] },
+          status: 1,
+          attempt: 1,
+          submittedAt: 1,
+          completedAt: 1,
+          submissionType: 1,
+          score: {
+            $ifNull: ['$gradingResult.total_points_earned', '$fillInBlankResults.totalPointsEarned', null]
+          },
+          totalPoints: {
+            $ifNull: ['$gradingResult.total_points_possible', '$fillInBlankResults.totalPoints', null]
+          },
+          lab: {
+            _id: '$labInfo._id',
+            title: { $ifNull: ['$labInfo.title', 'Unknown Lab'] }
+          },
+          course: {
+            _id: '$courseInfo._id',
+            title: { $ifNull: ['$courseInfo.title', 'Unknown Course'] },
+            code: ''
+          }
+        }
+      }
+    ]);
+
+    return {
+      data: submissions,
+      total,
+      limit: options?.limit || 20,
+      offset: options?.offset || 0
+    };
+  }
 }
+
