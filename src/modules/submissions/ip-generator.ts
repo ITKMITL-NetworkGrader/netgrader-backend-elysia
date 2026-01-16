@@ -482,20 +482,71 @@ export class IPGenerator {
   }
 
   /**
+   * Generate IPv6 address mappings for task parameters
+   * Returns mapping of device.variableName to IPv6 address
+   * Format: { "router1.gig0_1": "2001:db8:1::1/64" }
+   */
+  static generateIPv6Mappings(
+    lab: ILab,
+    studentId: string,
+    vlanMappings: Record<string, number>
+  ): Record<string, string> {
+    const mappings: Record<string, string> = {};
+
+    for (const device of lab.network.devices) {
+      for (const ipVar of device.ipVariables) {
+        // Generate IPv6 address if the interface has IPv6 configuration
+        const ipv6Address = this.generateIPv6(
+          {
+            ipv6InputType: ipVar.ipv6InputType,
+            fullIpv6: ipVar.fullIpv6,
+            ipv6InterfaceId: ipVar.ipv6InterfaceId,
+            ipv6VlanIndex: ipVar.ipv6VlanIndex,
+            isIpv6Variable: ipVar.isIpv6Variable
+          },
+          lab,
+          studentId,
+          vlanMappings
+        );
+
+        if (ipv6Address) {
+          // Create mapping with device.variableName format (e.g., "router1.eth0")
+          const key = `${device.deviceId}.${ipVar.name}`;
+          // Strip subnet prefix (e.g., /64) from the IPv6 address
+          mappings[key] = ipv6Address.split('/')[0];
+        }
+      }
+    }
+
+    return mappings;
+  }
+
+  /**
    * Transform task parameters to replace IP variables with actual IPs
-   * Variable format: {{device.interface}} or {{variable}}
+   * Variable format: {{device.interface}}, {{device.interface:ipv6}}, or {{variable}}
    */
   static transformTaskParameters(
     parameters: Record<string, any>,
     ipMappings: Record<string, { ip: string; vlan: number | null }>,
-    vlanMappings?: Record<string, number>
+    vlanMappings?: Record<string, number>,
+    ipv6Mappings?: Record<string, string>
   ): Record<string, any> {
     const transformed = { ...parameters };
 
     for (const [key, value] of Object.entries(transformed)) {
       if (typeof value === 'string') {
-        // Replace IP variable references like {{device.interface}} or {{variable}}
+        // Replace IP variable references like {{device.interface}}, {{device.interface:ipv6}}, or {{variable}}
         let transformedValue = value.replace(/\{\{([^}]+)\}\}/g, (match, varName) => {
+          // Check for IPv6 suffix (e.g., {{device.interface:ipv6}})
+          if (varName.endsWith(':ipv6')) {
+            const baseVarName = varName.slice(0, -5); // Remove ':ipv6' suffix
+            if (ipv6Mappings && ipv6Mappings[baseVarName]) {
+              return ipv6Mappings[baseVarName];
+            }
+            // If not found, return original match
+            return match;
+          }
+
           // Check IP mappings first - extract IP from the object
           if (ipMappings[varName]) {
             return ipMappings[varName].ip;
@@ -685,10 +736,12 @@ export class IPGenerator {
       overrideMap.size > 0 ? overrideMap : undefined
     );
     const vlanMappings = this.generateVLANMappings(lab, studentId);
+    const ipv6Mappings = this.generateIPv6Mappings(lab, studentId, vlanMappings);
 
     console.log(`[VLAN Resolution] Student ${studentId} - VLAN IDs:`, vlanMappings);
+    console.log(`[IPv6 Resolution] Student ${studentId} - IPv6 Mappings:`, ipv6Mappings);
 
-    // Transform tasks to use generated IPs/VLANs and resolve template names
+    // Transform tasks to use generated IPs/VLANs/IPv6s and resolve template names
     const transformedTasks = await Promise.all(part.tasks.map(async (task) => {
       // Fetch the actual template to get its templateId
       const template = await TaskTemplateService.getTaskTemplateById(task.templateId.toString());
@@ -700,7 +753,7 @@ export class IPGenerator {
         template_name: templateName,
         execution_device: task.executionDevice,
         target_devices: task.targetDevices || [],
-        parameters: this.transformTaskParameters(task.parameters, ipMappings, vlanMappings),
+        parameters: this.transformTaskParameters(task.parameters, ipMappings, vlanMappings, ipv6Mappings),
         test_cases: task.testCases.map(tc => ({
           comparison_type: tc.comparison_type,
           expected_result: tc.expected_result
