@@ -170,7 +170,7 @@ const PartCreateSchema = t.Object({
     targetDevices: t.Array(t.String(), { default: [] }),
     parameters: t.Record(t.String(), t.Any()),
     testCases: t.Array(t.Object({
-      comparison_type: t.String({ description: "Type of comparison: equals, contains, regex, success, ssh_success, greater_than" }),
+      comparison_type: t.String({ description: "Type of comparison: equals, contains, regex, success, ssh_success, greater_than, not_equals" }),
       expected_result: t.Any({ description: "Expected value/result for comparison" })
     })),
     order: t.Number(),
@@ -212,7 +212,7 @@ const PartUpdateSchema = t.Object({
     targetDevices: t.Array(t.String(), { default: [] }),
     parameters: t.Record(t.String(), t.Any()),
     testCases: t.Array(t.Object({
-      comparison_type: t.String({ description: "Type of comparison: equals, contains, regex, success, ssh_success, greater_than" }),
+      comparison_type: t.String({ description: "Type of comparison: equals, contains, regex, success, ssh_success, greater_than, not_equals" }),
       expected_result: t.Any({ description: "Expected value/result for comparison" })
     })),
     order: t.Number(),

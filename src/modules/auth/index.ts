@@ -264,7 +264,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     "/surrogate",
     async ({ body, jwt, set, cookie: { auth_token } }) => {
       // Only allow in development environment
-      if (env.NODE_ENV === "production") {
+      if (env.SURROGATE_LOGIN_ENABLED === "false") {
         set.status = 403;
         return {
           success: false,
