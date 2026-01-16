@@ -291,7 +291,7 @@ export class IPGenerator {
 
     switch (connType) {
       case 'console':
-        return 'generic_termserver_telnet';
+        return isCiscoIOS ? 'cisco_ios_telnet' : 'generic_telnet';
       case 'ssh':
         return isCiscoIOS ? 'cisco_ios' : templatePlatform;
       case 'telnet':
@@ -354,10 +354,9 @@ export class IPGenerator {
       // Look up GNS3 node by deviceId to get console/aux port
       const gns3Node = nodeMap.get(labDevice.deviceId);
 
-      // Prioritize aux port over console port
       let port = 0;
       if (gns3Node) {
-        port = gns3Node.aux ?? gns3Node.console ?? 0;
+        port = gns3Node.console ?? 0;
         console.log(`[Device Mapping] ${labDevice.deviceId} -> GNS3 node "${gns3Node.name}" (port: ${port}, aux: ${gns3Node.aux}, console: ${gns3Node.console})`);
       } else if (gns3Nodes && gns3Nodes.length > 0) {
         console.warn(`[Device Mapping] No GNS3 node found for device "${labDevice.deviceId}"`);
