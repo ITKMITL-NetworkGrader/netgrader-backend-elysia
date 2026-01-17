@@ -304,13 +304,15 @@ export class IPGenerator {
   /**
    * Generate devices array for grading job
    * Now accepts GNS3 nodes to map console/aux ports
+   * @param gns3ServerIp - The user's assigned GNS3 server IP for console connections
    */
   static async generateDevices(
     lab: ILab,
     studentId: string,
     managementIp: string,
     gns3Nodes?: GNS3Node[],
-    overrideMap?: Map<string, string>
+    overrideMap?: Map<string, string>,
+    gns3ServerIp?: string
   ): Promise<GeneratedDevice[]> {
     const devices: GeneratedDevice[] = [];
 
@@ -368,7 +370,7 @@ export class IPGenerator {
       // For console connections, use GNS3 server IP instead of device management IP
       const connectionType = labDevice.connectionType || 'console';
       const ipAddress = connectionType === 'console'
-        ? (env.GNS3_SERVER || 'localhost')
+        ? (gns3ServerIp || env.GNS3_SERVER || 'localhost')
         : resolvedManagementIP;
 
       const device: GeneratedDevice = {
@@ -691,6 +693,7 @@ export class IPGenerator {
     options?: {
       lecturerRangeOverrides?: LecturerRangeOverridePayload[];
       gns3Nodes?: GNS3Node[];
+      gns3ServerIp?: string;
     }
   ): Promise<any> {
     // Get or create student lab session to get permanent Management IP
@@ -726,7 +729,8 @@ export class IPGenerator {
       studentId,
       managementIp,
       options?.gns3Nodes,
-      overrideMap.size > 0 ? overrideMap : undefined
+      overrideMap.size > 0 ? overrideMap : undefined,
+      options?.gns3ServerIp
     );
 
     const ipMappings = this.generateIPMappings(

@@ -6,6 +6,7 @@ import { IPGenerator, type LecturerRangeOverridePayload } from "./ip-generator";
 import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
 import { GNS3v3Service, type GNS3Node } from "../gns3-student-lab/service";
+import { User } from "../auth/model";
 import { env } from "process";
 import { authPlugin } from "../../plugins/plugins";
 import { sseService } from "../../services/sse-emitter";
@@ -296,18 +297,27 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
 
         // Fetch GNS3 nodes to map console/aux ports
         let gns3Nodes: GNS3Node[] | undefined;
+        let gns3ServerIp: string | undefined;
         if (body.project_id) {
-          const loginResult = await GNS3v3Service.login();
+          // Get user's assigned GNS3 server
+          const user = await User.findOne({ u_id: u_id.toLowerCase() });
+          const serverIndex = user?.gns3ServerIndex ?? GNS3v3Service.calculateInitialServerIndex(u_id);
+          const serverConfig = GNS3v3Service.getServerConfig(serverIndex);
+          gns3ServerIp = serverConfig.serverIp;
+
+          console.log(`[GNS3] User ${u_id} assigned to server ${serverIndex} (${gns3ServerIp})`);
+
+          const loginResult = await GNS3v3Service.login(serverConfig, serverConfig.adminUsername, serverConfig.adminPassword);
           if (loginResult.success && loginResult.accessToken) {
-            const nodesResult = await GNS3v3Service.getProjectNodes(loginResult.accessToken, body.project_id);
+            const nodesResult = await GNS3v3Service.getProjectNodes(loginResult.accessToken, body.project_id, serverConfig);
             if (nodesResult.success && nodesResult.nodes) {
               gns3Nodes = nodesResult.nodes;
-              console.log(`[GNS3] Fetched ${gns3Nodes.length} nodes from project ${body.project_id}`);
+              console.log(`[GNS3] Fetched ${gns3Nodes.length} nodes from project ${body.project_id} on server ${serverIndex}`);
             } else {
               console.warn(`[GNS3] Failed to fetch nodes: ${nodesResult.error}`);
             }
           } else {
-            console.warn(`[GNS3] Failed to login: ${loginResult.error}`);
+            console.warn(`[GNS3] Failed to login to server ${serverIndex}: ${loginResult.error}`);
           }
         }
 
@@ -319,7 +329,8 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           jobId,
           {
             ...(lecturerRangeOverrides.length > 0 ? { lecturerRangeOverrides } : {}),
-            ...(gns3Nodes ? { gns3Nodes } : {})
+            ...(gns3Nodes ? { gns3Nodes } : {}),
+            ...(gns3ServerIp ? { gns3ServerIp } : {})
           }
         );
         // Create submission record
