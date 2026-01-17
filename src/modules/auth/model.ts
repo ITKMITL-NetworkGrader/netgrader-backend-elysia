@@ -9,6 +9,7 @@ export interface IUser extends Document {
   ldapAuthenticated: boolean;
   profilePicture?: string; // MinIO object URL for profile picture
   bio?: string; // User bio (max 500 chars)
+  gns3ServerIndex?: number; // Assigned GNS3 server index (0 or 1), set once on first lab start
   createdAt: Date;
   updatedAt: Date;
   lastLogin: Date;
@@ -50,6 +51,11 @@ const UserSchema = new Schema<IUser>({
     required: false,
     maxlength: 500,
     default: ''
+  },
+  gns3ServerIndex: {
+    type: Number,
+    required: false,
+    min: 0
   },
   lastLogin: {
     type: Date,

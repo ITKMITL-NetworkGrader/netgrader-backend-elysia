@@ -1,13 +1,20 @@
 /**
  * GNS3 v3 Service - Handles communication with GNS3 API v3
  * Used for student lab environment setup with Resource Pool-based permissions
+ * Supports multiple GNS3 servers with hash-based user sharding
  */
 import { env } from "process";
+import crypto from "crypto";
 
 interface GNS3v3Config {
     serverIp: string;
     serverPort: number;
     serverVersion: string;
+}
+
+interface GNS3ServerConfig extends GNS3v3Config {
+    adminUsername: string;
+    adminPassword: string;
 }
 
 interface LoginResponse {
@@ -69,21 +76,93 @@ export interface SetupResult {
     projectName?: string;
     userId?: string;
     poolId?: string;
+    serverIndex?: number;
 }
 
-// Default GNS3 Server Configuration
+/**
+ * Parse GNS3 servers from environment variables
+ * Format: GNS3_SERVERS=host1,host2  GNS3_PORTS=3080,3080
+ */
+function parseServersFromEnv(): GNS3ServerConfig[] {
+    const serversEnv = env.GNS3_SERVERS || env.GNS3_SERVER || 'localhost';
+    const portsEnv = env.GNS3_PORTS || env.GNS3_PORT || '3080';
+    const version = env.GNS3_VERSION || 'v3';
+    const adminUsername = env.GNS3_USERNAME || 'admin';
+    const adminPassword = env.GNS3_PASSWORD || 'admin';
+
+    const servers = serversEnv.split(',').map(s => s.trim());
+    const ports = portsEnv.split(',').map(p => parseInt(p.trim()) || 3080);
+
+    return servers.map((serverIp, index) => ({
+        serverIp,
+        serverPort: ports[index] || ports[0] || 3080,
+        serverVersion: version,
+        adminUsername,
+        adminPassword,
+    }));
+}
+
+// Multi-server configuration
+const GNS3_SERVERS: GNS3ServerConfig[] = parseServersFromEnv();
+
+// Default config (first server) for backward compatibility
 const DEFAULT_CONFIG: GNS3v3Config = {
-    serverIp: env.GNS3_SERVER || 'localhost',
-    serverPort: parseInt(env.GNS3_PORT || '3080'),
-    serverVersion: env.GNS3_VERSION || 'v3',
+    serverIp: GNS3_SERVERS[0]?.serverIp || 'localhost',
+    serverPort: GNS3_SERVERS[0]?.serverPort || 3080,
+    serverVersion: GNS3_SERVERS[0]?.serverVersion || 'v3',
 };
 
 const ADMIN_CREDENTIALS = {
-    username: env.GNS3_USERNAME || 'admin',
-    password: env.GNS3_PASSWORD || 'admin',
+    username: GNS3_SERVERS[0]?.adminUsername || 'admin',
+    password: GNS3_SERVERS[0]?.adminPassword || 'admin',
 };
 
 export class GNS3v3Service {
+    /**
+     * Calculate initial server index for a NEW user using hash-based sharding
+     * Only called once when user first needs GNS3 access, result is stored in MongoDB
+     * Uses modulo 2 to ensure consistency even if server count changes later
+     * XORs all bytes of hash for better distribution across servers
+     */
+    static calculateInitialServerIndex(userId: string): number {
+        const hash = crypto.createHash("sha256").update(userId).digest();
+        // XOR all bytes together for better distribution
+        let xorResult = 0;
+        for (let i = 0; i < hash.length; i++) {
+            xorResult ^= hash[i];
+        }
+        return xorResult % 2; // Always mod 2 for consistency
+    }
+
+    /**
+     * Get server configuration by index
+     */
+    static getServerConfig(serverIndex: number): GNS3ServerConfig {
+        if (serverIndex >= GNS3_SERVERS.length) {
+            console.warn(`Server index ${serverIndex} out of range, using server 0`);
+            return GNS3_SERVERS[0];
+        }
+        return GNS3_SERVERS[serverIndex];
+    }
+
+    /**
+     * Generate deterministic password for GNS3 user
+     * Same password is generated for the same username every time
+     */
+    static generateDeterministicPassword(username: string): string {
+        return crypto.createHash("sha256")
+            .update(username + "netg")
+            .digest("hex")
+            .substring(0, 16);
+    }
+
+    /**
+     * Get the number of available GNS3 servers
+     */
+    static getAvailableServersCount(): number {
+        return GNS3_SERVERS.length;
+    }
+
     /**
      * Build base URL for GNS3 API v3
      */
@@ -560,99 +639,123 @@ export class GNS3v3Service {
     }
 
     /**
-     * Complete Setup Workflow (Simplified)
+     * Complete Setup Workflow with Lazy Initialization and Server Sharding
      * 
-     * Assumptions:
-     * - User already exists: username = "it<student_id>"
-     * - Pool already exists: poolName = "it<student_id>-pool"
-     * 
-     * This workflow:
-     * 1. Login as admin
-     * 2. Find existing user
-     * 3. Create project (name: "it<student_id>-<course_name>-<lab_name>")
-     * 4. Find existing pool
-     * 5. Add project to pool
-     * 6. Create ACE for user to access pool
+     * @param studentId - Student ID (without "it" prefix)
+     * @param courseName - Course name for project naming
+     * @param labName - Lab name for project naming
+     * @param fullName - Student's full name (for GNS3 user creation)
+     * @param serverIndex - Stored server index from MongoDB (undefined if new assignment needed)
+     * @param onProgress - Optional progress callback
+     * @returns SetupResult with serverIndex for storing in MongoDB
      */
     static async setupStudentLab(
         studentId: string,
         courseName: string,
         labName: string,
-        config: GNS3v3Config = DEFAULT_CONFIG,
+        fullName: string = studentId,
+        serverIndex?: number,
         onProgress?: (step: string) => void
     ): Promise<SetupResult> {
         try {
-            // Naming conventions
-            const username = `it${studentId}`;
-            const poolName = `it${studentId}-pool`;
-            const projectName = `it${studentId}-${courseName}-${labName}`;
+            const isNumericId = /^\d+$/.test(studentId);
+            const username = isNumericId ? `it${studentId}` : studentId;
+            const poolName = `${username}-pool`;
+            const projectName = `${username}-${courseName}-${labName}`;
 
-            // Step 0: Login
+            // Step 0: Determine server assignment
+            onProgress?.('determining_server');
+            const isNewAssignment = serverIndex === undefined;
+            const assignedServerIndex = serverIndex ?? this.calculateInitialServerIndex(studentId);
+            const serverConfig = this.getServerConfig(assignedServerIndex);
+
+            console.log(`[GNS3] User ${username} assigned to server ${assignedServerIndex} (${serverConfig.serverIp})`);
+
+            // Step 1: Login to assigned server
             onProgress?.('connecting');
-            const loginResult = await this.login(config);
+            const loginResult = await this.login(serverConfig, serverConfig.adminUsername, serverConfig.adminPassword);
             if (!loginResult.success || !loginResult.accessToken) {
                 return { success: false, error: loginResult.error || 'Failed to authenticate with GNS3 server' };
             }
             const token = loginResult.accessToken;
 
-            // Step 1: Find existing user
-            onProgress?.('finding_user');
-            const userResult = await this.findUserByUsername(token, username, config);
+            // Step 2: Ensure user exists (lazy create if not)
+            onProgress?.('ensuring_user');
+            let userResult = await this.findUserByUsername(token, username, serverConfig);
             if (!userResult.success || !userResult.userId) {
-                return { success: false, error: `User "${username}" not found. Please contact your instructor.` };
+                // User doesn't exist - create with deterministic password
+                const password = this.generateDeterministicPassword(username);
+                console.log(`[GNS3] Creating user ${username} on server ${assignedServerIndex}`);
+                userResult = await this.createUser(token, {
+                    username,
+                    password,
+                    fullName: fullName || studentId,
+                }, serverConfig);
+
+                if (!userResult.success || !userResult.userId) {
+                    return { success: false, error: userResult.error || 'Failed to create GNS3 user' };
+                }
             }
 
-            // Step 2: Create Project
+            // Step 3: Ensure pool exists (lazy create if not)
+            onProgress?.('ensuring_pool');
+            let poolResult = await this.findPoolByName(token, poolName, serverConfig);
+            if (!poolResult.success || !poolResult.poolId) {
+                // Pool doesn't exist - create it
+                console.log(`[GNS3] Creating pool ${poolName} on server ${assignedServerIndex}`);
+                poolResult = await this.createPool(token, poolName, serverConfig);
+
+                if (!poolResult.success || !poolResult.poolId) {
+                    return { success: false, error: poolResult.error || 'Failed to create GNS3 resource pool' };
+                }
+            }
+
+            // Step 4: Ensure ACE exists (idempotent - handles 409 conflict)
+            onProgress?.('ensuring_access');
+            const roleResult = await this.getStudentRoleId(token, serverConfig);
+            if (roleResult.success && roleResult.roleId) {
+                const aceResult = await this.createACE(token, {
+                    userId: userResult.userId,
+                    roleId: roleResult.roleId,
+                    poolId: poolResult.poolId,
+                }, serverConfig);
+                if (!aceResult.success) {
+                    console.warn(`[GNS3] Failed to create ACE (may already exist): ${aceResult.error}`);
+                    // Continue anyway - ACE might already exist
+                }
+            } else {
+                console.warn(`[GNS3] Could not get Student role for ACE: ${roleResult.error}`);
+            }
+
+            // Step 5: Create Project
             onProgress?.('creating_project');
-            const projectResult = await this.createProject(token, projectName, config);
+            const projectResult = await this.createProject(token, projectName, serverConfig);
             if (!projectResult.success || !projectResult.projectId) {
                 return { success: false, error: projectResult.error || 'Failed to create project' };
             }
 
-            // Step 3: Find existing pool
-            onProgress?.('finding_pool');
-            const poolResult = await this.findPoolByName(token, poolName, config);
-            if (!poolResult.success || !poolResult.poolId) {
-                return { success: false, error: `Resource pool "${poolName}" not found. Please contact your instructor.` };
-            }
-
-            // Step 4: Add Project to Pool
+            // Step 6: Add Project to Pool
             onProgress?.('adding_to_pool');
-            const addResult = await this.addProjectToPool(token, poolResult.poolId, projectResult.projectId, config);
+            const addResult = await this.addProjectToPool(token, poolResult.poolId, projectResult.projectId, serverConfig);
             if (!addResult.success) {
                 return { success: false, error: addResult.error || 'Failed to add project to pool' };
             }
 
-            // Step 5: Get Student Role
-            // onProgress?.('creating_ace');
-            // const roleResult = await this.getStudentRoleId(token, config);
-            // if (!roleResult.success || !roleResult.roleId) {
-            //     return { success: false, error: roleResult.error || 'Failed to get Student role' };
-            // }
-
-            // // Step 6: Create ACE
-            // const aceResult = await this.createACE(token, {
-            //     userId: userResult.userId,
-            //     roleId: roleResult.roleId,
-            //     poolId: poolResult.poolId,
-            // }, config);
-            // if (!aceResult.success) {
-            //     return { success: false, error: aceResult.error || 'Failed to create access permissions' };
-            // }
-
             // Build URLs
-            const projectUrl = this.buildProjectUrl(projectResult.projectId, config);
-            const loginUrl = this.buildLoginUrl(config);
+            const projectUrl = this.buildProjectUrl(projectResult.projectId, serverConfig);
+            const loginUrl = this.buildLoginUrl(serverConfig);
+            const password = this.generateDeterministicPassword(username);
 
             return {
                 success: true,
-                credentials: { username, password: '(Use your IT password)' },
+                credentials: { username, password },
                 loginUrl,
                 projectUrl,
                 projectId: projectResult.projectId,
                 projectName: projectResult.projectName,
                 userId: userResult.userId,
                 poolId: poolResult.poolId,
+                serverIndex: assignedServerIndex,
             };
         } catch (error) {
             const err = error as Error;
