@@ -295,6 +295,114 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           lecturerRangeOverrides = Array.from(overrideMap.values());
         }
 
+        // Process IPv6 SLAAC answers separately (from slaac_answers payload)
+        const rawSlaacAnswers = Array.isArray(body.slaac_answers)
+          ? body.slaac_answers
+          : [];
+
+        if (rawSlaacAnswers.length > 0) {
+          const slaacOverrideMap = new Map<string, LecturerRangeOverridePayload>();
+
+          // Simple IPv6 validation - checks for valid format
+          const isValidIpv6 = (ip: string): boolean => {
+            // Allow compressed IPv6 addresses (e.g., 2001:db8::1)
+            const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$|^([0-9a-fA-F]{0,4}:){1,7}:$|^:(:([0-9a-fA-F]{0,4})){1,7}$|^::$/;
+            return ipv6Pattern.test(ip);
+          };
+
+          rawSlaacAnswers.forEach((override) => {
+            const {
+              source_part_id,
+              question_id,
+              row_index,
+              col_index,
+              answer,
+              device_id,
+              interface_name,
+              vlan_index
+            } = override;
+
+            if (!source_part_id || !question_id) {
+              return;
+            }
+
+            const sourcePart = partsMap.get(source_part_id);
+            if (!sourcePart || sourcePart.partType !== 'fill_in_blank') {
+              return;
+            }
+
+            const question = sourcePart.questions?.find((q: any) => q.questionId === question_id);
+            if (!question?.ipTableQuestionnaire?.cells) {
+              return;
+            }
+
+            const row = question.ipTableQuestionnaire.cells[row_index];
+            const cell = row?.[col_index];
+
+            if (!cell || (cell.cellType ?? 'input') !== 'input') {
+              return;
+            }
+
+            if (cell.answerType !== 'calculated' || !cell.calculatedAnswer) {
+              return;
+            }
+
+            // Only process ipv6_slaac cells
+            if (cell.calculatedAnswer.calculationType !== 'ipv6_slaac') {
+              return;
+            }
+
+            const trimmedAnswer = typeof answer === 'string' ? answer.trim() : '';
+            const effectiveVlanIndex = cell.calculatedAnswer.vlanIndex ?? vlan_index ?? null;
+
+            if (!trimmedAnswer || !isValidIpv6(trimmedAnswer)) {
+              console.warn('[Submission] Skipping SLAAC override due to invalid IPv6 value', {
+                source_part_id,
+                question_id,
+                row_index,
+                col_index,
+                answer: trimmedAnswer
+              });
+              return;
+            }
+
+            const resolvedDeviceId = cell.calculatedAnswer.deviceId || device_id;
+            const resolvedInterfaceName = cell.calculatedAnswer.interfaceName || interface_name;
+
+            if (!resolvedDeviceId || !resolvedInterfaceName) {
+              console.warn('[Submission] Missing device/interface mapping for SLAAC override', {
+                source_part_id,
+                question_id,
+                row_index,
+                col_index
+              });
+              return;
+            }
+
+            const key = `${resolvedDeviceId}.${resolvedInterfaceName}`;
+
+            slaacOverrideMap.set(key, {
+              key,
+              ip: trimmedAnswer,
+              metadata: {
+                sourcePartId: source_part_id,
+                questionId: question_id,
+                rowIndex: row_index,
+                colIndex: col_index,
+                lecturerRangeStart: 0,
+                lecturerRangeEnd: 0,
+                deviceId: resolvedDeviceId,
+                interfaceName: resolvedInterfaceName,
+                vlanIndex: effectiveVlanIndex
+              }
+            });
+          });
+
+          // Merge SLAAC overrides into lecturerRangeOverrides
+          const slaacOverrides = Array.from(slaacOverrideMap.values());
+          lecturerRangeOverrides = [...lecturerRangeOverrides, ...slaacOverrides];
+        }
+
         // Fetch GNS3 nodes to map console/aux ports
         let gns3Nodes: GNS3Node[] | undefined;
         let gns3ServerIp: string | undefined;
@@ -376,6 +484,16 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         project_id: t.String(),
         job_id: t.Optional(t.String()),
         lecturer_range_answers: t.Optional(t.Array(t.Object({
+          source_part_id: t.String(),
+          question_id: t.String(),
+          row_index: t.Number(),
+          col_index: t.Number(),
+          answer: t.String(),
+          device_id: t.Optional(t.String()),
+          interface_name: t.Optional(t.String()),
+          vlan_index: t.Optional(t.Number())
+        }))),
+        slaac_answers: t.Optional(t.Array(t.Object({
           source_part_id: t.String(),
           question_id: t.String(),
           row_index: t.Number(),
