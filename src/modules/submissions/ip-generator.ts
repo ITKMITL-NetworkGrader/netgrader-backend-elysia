@@ -291,7 +291,7 @@ export class IPGenerator {
 
     switch (connType) {
       case 'console':
-        return isCiscoIOS ? 'cisco_ios_telnet' : 'generic_telnet';
+        return isCiscoIOS ? 'generic_termserver_telnet' : 'generic_telnet';
       case 'ssh':
         return isCiscoIOS ? 'cisco_ios' : templatePlatform;
       case 'telnet':
