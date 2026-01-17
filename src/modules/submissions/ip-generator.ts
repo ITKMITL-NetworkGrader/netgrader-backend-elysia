@@ -629,26 +629,46 @@ export class IPGenerator {
         const subnetMask = typeof vlan.subnetMask === 'number' ? vlan.subnetMask : topologyMask;
         if (typeof subnetMask !== 'number') return;
 
-        let baseNetwork = vlan.baseNetwork || topologyBase;
+        let baseNetwork: string | undefined;
 
-        if (baseNetwork) {
-          const baseNum = ipToNumber(baseNetwork);
-          if (!Number.isNaN(baseNum)) {
-            const blockSize = Math.pow(2, 32 - subnetMask);
-            if (typeof vlan.subnetIndex === 'number') {
-              const subnetIndex = vlan.subnetIndex >= 1 ? vlan.subnetIndex : 1;
-              baseNetwork = numberToIp(baseNum + (subnetIndex - 1) * blockSize);
-            }
-          }
-        }
+        // For calculated VLANs (with multiplier), derive the base network from generated IPs
+        // This ensures the second and third octets reflect the student-specific calculation
+        const isCalculatedVlan = vlan.calculationMultiplier !== undefined;
 
-        if (!baseNetwork) {
+        if (isCalculatedVlan) {
+          // Always derive from generated IP addresses for calculated VLANs
           const sampleIp = vlanInterfaceIps[vlanIndex]?.[0];
           if (sampleIp) {
             const ipNum = ipToNumber(sampleIp);
             if (!Number.isNaN(ipNum)) {
               const mask = ~((1 << (32 - subnetMask)) - 1) >>> 0;
               baseNetwork = numberToIp((ipNum & mask) >>> 0);
+            }
+          }
+        } else {
+          // For fixed VLANs, use the configured base network
+          baseNetwork = vlan.baseNetwork || topologyBase;
+
+          if (baseNetwork) {
+            const baseNum = ipToNumber(baseNetwork);
+            if (!Number.isNaN(baseNum)) {
+              const blockSize = Math.pow(2, 32 - subnetMask);
+              if (typeof vlan.subnetIndex === 'number') {
+                const subnetIndex = vlan.subnetIndex >= 1 ? vlan.subnetIndex : 1;
+                baseNetwork = numberToIp(baseNum + (subnetIndex - 1) * blockSize);
+              }
+            }
+          }
+
+          // Fallback: derive from generated IPs if no base network configured
+          if (!baseNetwork) {
+            const sampleIp = vlanInterfaceIps[vlanIndex]?.[0];
+            if (sampleIp) {
+              const ipNum = ipToNumber(sampleIp);
+              if (!Number.isNaN(ipNum)) {
+                const mask = ~((1 << (32 - subnetMask)) - 1) >>> 0;
+                baseNetwork = numberToIp((ipNum & mask) >>> 0);
+              }
             }
           }
         }
