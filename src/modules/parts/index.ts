@@ -16,6 +16,10 @@ import {
 import {
   generateLinkLocalAddress
 } from "../submissions/ipv6-calculator";
+import {
+  LargeSubnetAllocator,
+  AllocationResult
+} from "../submissions/large-subnet-allocator";
 
 // Rich content schema
 const RichContentSchema = t.Object({
@@ -319,7 +323,7 @@ function subnetMaskToDottedDecimal(subnetMask: number): string {
  * @param studentId - The student's ID
  * @returns The expected IP address or value as a string
  */
-function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string): string {
+function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string, largeSubnetAllocation?: AllocationResult): string {
   const { calculationType, vlanIndex, lecturerOffset, deviceId, interfaceName } = calculatedAnswer;
 
   // Get the lab's network topology
@@ -399,6 +403,47 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string)
           );
         }
       }
+    }
+
+    // Handle Sub-VLAN interfaces (Large Subnet Mode)
+    if (ipVariable.inputType?.startsWith('subVlan') && !ipVariable.inputType?.includes('6_')) {
+      const vlanIndex = ipVariable.vlanIndex;
+      if (vlanIndex === undefined) {
+        throw new Error(`Invalid sub-VLAN configuration: vlanIndex missing for ${deviceId}.${interfaceName}`);
+      }
+
+      const vlanConfig = lab.network?.vlanConfiguration;
+      if (vlanConfig?.mode !== 'large_subnet' || !vlanConfig.largeSubnetConfig) {
+        throw new Error('Lab is not configured for large_subnet mode');
+      }
+
+      // For grading, we need the student's large subnet allocation
+      if (!largeSubnetAllocation) {
+        throw new Error('Large subnet allocation required for sub-VLAN IP grading - pass studentSession.largeSubnetAllocation');
+      }
+
+      const subVlan = vlanConfig.largeSubnetConfig.subVlans?.[vlanIndex];
+      if (!subVlan) {
+        throw new Error(`Sub-VLAN at index ${vlanIndex} not found`);
+      }
+
+      const interfaceOffset = ipVariable.interfaceOffset || 1;
+
+      // Use LargeSubnetAllocator to calculate the IP within the student's sub-VLAN block
+      const result = LargeSubnetAllocator.calculateSubVlanIP(
+        largeSubnetAllocation,
+        subVlan,
+        interfaceOffset
+      );
+
+      console.log(`[Device Interface IP - Sub-VLAN] ${deviceId}.${interfaceName}:`, {
+        subVlanIndex: vlanIndex,
+        subVlanName: subVlan.name,
+        interfaceOffset,
+        result
+      });
+
+      return result;
     }
 
     // Regular (non-VLAN) interface - use basic calculation with hostOffset
@@ -1310,7 +1355,14 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
                     expectedAnswer = cell.staticAnswer.trim();
                   } else if (cell.answerType === 'calculated' && cell.calculatedAnswer) {
                     try {
-                      expectedAnswer = calculateCellAnswer(cell.calculatedAnswer, lab, u_id);
+                      // Map session largeSubnetAllocation to AllocationResult interface
+                      const alloc = activeSession.largeSubnetAllocation ? {
+                        subnetIndex: activeSession.largeSubnetAllocation.allocatedSubnetIndex,
+                        subnetCIDR: activeSession.largeSubnetAllocation.allocatedSubnetCIDR,
+                        networkAddress: activeSession.largeSubnetAllocation.networkAddress,
+                        randomizedVlanIds: activeSession.largeSubnetAllocation.randomizedVlanIds
+                      } : undefined;
+                      expectedAnswer = calculateCellAnswer(cell.calculatedAnswer, lab, u_id, alloc);
                       console.log(`[Cell Validation] Row ${rowIndex}, Col ${colIndex}:`, {
                         calculationType: cell.calculatedAnswer.calculationType,
                         expectedAnswer,
@@ -1421,7 +1473,14 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
                       displayValue = cell.staticAnswer || '';
                     } else if (cell.answerType === 'calculated') {
                       try {
-                        displayValue = calculateCellAnswer(cell.calculatedAnswer, lab, u_id);
+                        // Map session largeSubnetAllocation to AllocationResult interface
+                        const allocDisplay = activeSession.largeSubnetAllocation ? {
+                          subnetIndex: activeSession.largeSubnetAllocation.allocatedSubnetIndex,
+                          subnetCIDR: activeSession.largeSubnetAllocation.allocatedSubnetCIDR,
+                          networkAddress: activeSession.largeSubnetAllocation.networkAddress,
+                          randomizedVlanIds: activeSession.largeSubnetAllocation.randomizedVlanIds
+                        } : undefined;
+                        displayValue = calculateCellAnswer(cell.calculatedAnswer, lab, u_id, allocDisplay);
                       } catch (err) {
                         displayValue = `[ERROR: ${(err as Error).message}]`;
                       }
