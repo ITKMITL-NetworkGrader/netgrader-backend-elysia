@@ -22,7 +22,7 @@ export interface ILab extends Document {
     };
     // VLAN Configuration for multi-phase VLAN system
     vlanConfiguration?: {
-      mode: 'fixed_vlan' | 'lecturer_group' | 'calculated_vlan';
+      mode: 'fixed_vlan' | 'lecturer_group' | 'calculated_vlan' | 'large_subnet';
       vlanCount: number;       // 1-10
       vlans: Array<{
         id: string;            // UUID from frontend
@@ -38,6 +38,19 @@ export interface ILab extends Document {
         ipv6VlanAlphabet?: string;     // A, B, C, etc. (auto-assigned based on VLAN index)
         ipv6SubnetId?: string;         // Custom subnet ID for template (e.g., "141")
       }>;
+      // Large Subnet Mode Configuration (for subnet calculation exercises)
+      largeSubnetConfig?: {
+        privateNetworkPool: '10.0.0.0/8' | '172.16.0.0/12' | '192.168.0.0/16';
+        studentSubnetSize: number;   // e.g., 23 for /23
+        subVlans: Array<{
+          id: string;                  // UUID
+          name: string;                // e.g., "Sales VLAN"
+          subnetSize: number;          // e.g., 26 for /26
+          subnetIndex: number;         // Which subnet block within the large subnet (1-based)
+          vlanIdRandomized: boolean;   // true = random 2-4096, false = fixed
+          fixedVlanId?: number;        // Only if vlanIdRandomized = false
+        }>;
+      };
     };
     // IPv6 Template Configuration
     ipv6Config?: {
@@ -204,7 +217,7 @@ const labSchema = new Schema<ILab>({
       type: {
         mode: {
           type: String,
-          enum: ['fixed_vlan', 'lecturer_group', 'calculated_vlan'],
+          enum: ['fixed_vlan', 'lecturer_group', 'calculated_vlan', 'large_subnet'],
           required: true
         },
         vlanCount: {
@@ -268,7 +281,55 @@ const labSchema = new Schema<ILab>({
             type: String,
             required: false
           }
-        }]
+        }],
+        // Large Subnet Mode Configuration
+        largeSubnetConfig: {
+          _id: false,
+          privateNetworkPool: {
+            type: String,
+            enum: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'],
+            required: false
+          },
+          studentSubnetSize: {
+            type: Number,
+            required: false,
+            min: 9,
+            max: 30
+          },
+          subVlans: [{
+            _id: false,
+            id: {
+              type: String,
+              required: true
+            },
+            name: {
+              type: String,
+              required: true
+            },
+            subnetSize: {
+              type: Number,
+              required: true,
+              min: 8,
+              max: 30
+            },
+            subnetIndex: {
+              type: Number,
+              required: true,
+              min: 1
+            },
+            vlanIdRandomized: {
+              type: Boolean,
+              required: true,
+              default: true
+            },
+            fixedVlanId: {
+              type: Number,
+              required: false,
+              min: 2,
+              max: 4094
+            }
+          }]
+        }
       },
       required: false
     },

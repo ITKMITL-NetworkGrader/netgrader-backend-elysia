@@ -20,6 +20,7 @@ import {
   generateIPv6FromTemplate,
   calculateStudentVariables
 } from './ipv6-config';
+import { LargeSubnetAllocator, LargeSubnetConfig, AllocationResult } from './large-subnet-allocator';
 
 interface GeneratedDevice {
   id: string;
@@ -110,10 +111,12 @@ export class IPGenerator {
       isVlanInterface?: boolean;
       vlanIndex?: number;
       interfaceOffset?: number;
+      isSubVlan?: boolean;  // Flag for Large Subnet Mode sub-VLAN
     },
     lab: ILab,
     studentId: string,
-    managementIp?: string
+    managementIp?: string,
+    largeSubnetAllocation?: AllocationResult  // Optional allocation for large_subnet mode
   ): string {
     // For fullIP type, use it directly
     if (ipVariable.inputType === 'fullIP' && ipVariable.fullIp) {
@@ -168,6 +171,36 @@ export class IPGenerator {
           interfaceOffset
         );
       }
+    }
+
+    // For Sub-VLAN IPs in Large Subnet Mode
+    if (ipVariable.inputType.startsWith('subVlan') && !ipVariable.inputType.includes('6_')) {
+      if (ipVariable.vlanIndex === undefined) {
+        throw new Error(`Invalid sub-VLAN configuration: vlanIndex missing for ${ipVariable.inputType}`);
+      }
+
+      if (!largeSubnetAllocation) {
+        throw new Error('Large subnet allocation required for sub-VLAN IP generation');
+      }
+
+      const vlanConfig = lab.network.vlanConfiguration;
+      if (vlanConfig?.mode !== 'large_subnet' || !vlanConfig.largeSubnetConfig) {
+        throw new Error('Lab is not configured for large_subnet mode');
+      }
+
+      const subVlan = vlanConfig.largeSubnetConfig.subVlans?.[ipVariable.vlanIndex];
+      if (!subVlan) {
+        throw new Error(`Sub-VLAN at index ${ipVariable.vlanIndex} not found`);
+      }
+
+      const interfaceOffset = ipVariable.interfaceOffset || 1;
+
+      // Use LargeSubnetAllocator to calculate the IP within the student's sub-VLAN block
+      return LargeSubnetAllocator.calculateSubVlanIP(
+        largeSubnetAllocation,
+        subVlan,
+        interfaceOffset
+      );
     }
 
     throw new Error(`Unable to generate IP for inputType: ${ipVariable.inputType}`);
@@ -403,7 +436,8 @@ export class IPGenerator {
     lab: ILab,
     studentId: string,
     managementIp: string,
-    overrideMap?: Map<string, string>
+    overrideMap?: Map<string, string>,
+    largeSubnetAllocation?: AllocationResult  // Optional allocation for large_subnet mode
   ): Record<string, { ip: string; vlan: number | null }> {
     const mappings: Record<string, { ip: string; vlan: number | null }> = {};
 
@@ -412,13 +446,17 @@ export class IPGenerator {
 
     for (const device of lab.network.devices) {
       for (const ipVar of device.ipVariables) {
-        let ip = this.generateIP(ipVar, lab, studentId, managementIp);
+        let ip = this.generateIP(ipVar, lab, studentId, managementIp, largeSubnetAllocation);
 
         // Determine VLAN ID if this is a VLAN interface
         let vlanId: number | null = null;
         if (ipVar.isVlanInterface && ipVar.vlanIndex !== undefined) {
           const vlanKey = `vlan${ipVar.vlanIndex}`;
           vlanId = vlanMappings[vlanKey] ?? null;
+        }
+        // For sub-VLANs in large_subnet mode, get VLAN ID from allocation
+        else if (ipVar.inputType?.startsWith('subVlan') && !ipVar.inputType?.includes('6_') && largeSubnetAllocation && ipVar.vlanIndex !== undefined) {
+          vlanId = largeSubnetAllocation.randomizedVlanIds[ipVar.vlanIndex] ?? null;
         }
 
         // Create mapping with device.variableName format (e.g., "router1.loopback0")
@@ -571,6 +609,7 @@ export class IPGenerator {
   /**
    * Generate complete network configuration for student when they START a lab
    * Returns all IPs (Management + VLAN) with embedded VLAN IDs and separate VLAN mappings
+   * For large_subnet mode, also returns the allocated large subnet info
    */
   static async generateStudentNetworkConfiguration(
     lab: ILab,
@@ -580,6 +619,18 @@ export class IPGenerator {
     ipMappings: Record<string, { ip: string; vlan: number | null }>;
     vlanMappings: Record<string, number>;
     vlanSubnets: Record<number, { baseNetwork: string; subnetMask: number; subnetIndex?: number }>;
+    largeSubnetInfo?: {
+      allocatedSubnet: string;      // e.g., "10.0.2.0/23"
+      networkAddress: string;       // e.g., "10.0.2.0"
+      subnetMask: number;           // e.g., 23
+      randomizedVlanIds: number[];  // e.g., [247, 1892]
+      subVlans: Array<{             // Sub-VLAN configuration for student reference
+        name: string;
+        subnetSize: number;
+        subnetIndex: number;
+        vlanId: number;
+      }>;
+    };
     sessionInfo: {
       sessionId: string;
       status: string;
@@ -596,14 +647,51 @@ export class IPGenerator {
 
     console.log(`[Lab Start] Student ${studentId} - Lab ${labId} - Management IP: ${managementIp}`);
 
-    // Generate all IP mappings and VLAN mappings
-    const ipMappings = IPGenerator.generateIPMappings(lab, studentId, managementIp);
+    // Get vlanConfig early to check for large_subnet mode
+    const vlanConfig = lab.network?.vlanConfiguration;
+
+    // Handle large_subnet allocation before IP mapping generation
+    let largeSubnetAllocation: AllocationResult | undefined;
+
+    if (vlanConfig?.mode === 'large_subnet' && vlanConfig.largeSubnetConfig) {
+      if (session.largeSubnetAllocation?.allocatedSubnetIndex !== undefined) {
+        // Reuse existing allocation
+        console.log(`[Large Subnet] Reusing allocation for student ${studentId} (early)`);
+        largeSubnetAllocation = {
+          subnetIndex: session.largeSubnetAllocation.allocatedSubnetIndex,
+          subnetCIDR: session.largeSubnetAllocation.allocatedSubnetCIDR,
+          networkAddress: session.largeSubnetAllocation.networkAddress,
+          randomizedVlanIds: session.largeSubnetAllocation.randomizedVlanIds
+        };
+      } else {
+        // Allocate new subnet
+        console.log(`[Large Subnet] Allocating new subnet for student ${studentId} (early)`);
+        largeSubnetAllocation = await LargeSubnetAllocator.allocateSubnet(
+          studentId,
+          labId,
+          vlanConfig.largeSubnetConfig as LargeSubnetConfig
+        );
+
+        // Save allocation to session
+        session.largeSubnetAllocation = {
+          allocatedSubnetIndex: largeSubnetAllocation.subnetIndex,
+          allocatedSubnetCIDR: largeSubnetAllocation.subnetCIDR,
+          networkAddress: largeSubnetAllocation.networkAddress,
+          randomizedVlanIds: largeSubnetAllocation.randomizedVlanIds,
+          allocatedAt: new Date()
+        };
+        await session.save();
+      }
+    }
+
+    // Generate all IP mappings and VLAN mappings (now with allocation for large_subnet mode)
+    const ipMappings = IPGenerator.generateIPMappings(lab, studentId, managementIp, undefined, largeSubnetAllocation);
     const vlanMappings = IPGenerator.generateVLANMappings(lab, studentId);
 
     console.log(`[Lab Start] Student ${studentId} - Generated ${Object.keys(ipMappings).length} IP mappings, ${Object.keys(vlanMappings).length} VLAN mappings`);
 
     const vlanSubnets: Record<number, { baseNetwork: string; subnetMask: number; subnetIndex?: number }> = {};
-    const vlanConfig = lab.network?.vlanConfiguration;
+    // vlanConfig already declared above for large_subnet mode handling
     const topologyBase = lab.network?.topology?.baseNetwork;
     const topologyMask = lab.network?.topology?.subnetMask;
 
@@ -663,7 +751,8 @@ export class IPGenerator {
       });
     }
 
-    return {
+    // Build base response
+    const response: Awaited<ReturnType<typeof IPGenerator.generateStudentNetworkConfiguration>> = {
       managementIp,
       ipMappings,
       vlanMappings,
@@ -677,6 +766,29 @@ export class IPGenerator {
         instructionsAcknowledgedAt: session.instructionsAcknowledgedAt
       }
     };
+
+    // Handle large_subnet mode - build response info (allocation already done earlier)
+    if (vlanConfig?.mode === 'large_subnet' && vlanConfig.largeSubnetConfig && largeSubnetAllocation) {
+      // Build sub-VLAN info for student display
+      const subVlanInfo = vlanConfig.largeSubnetConfig.subVlans.map((sv, idx) => ({
+        name: sv.name,
+        subnetSize: sv.subnetSize,
+        subnetIndex: sv.subnetIndex,
+        vlanId: largeSubnetAllocation.randomizedVlanIds[idx] || 0
+      }));
+
+      response.largeSubnetInfo = {
+        allocatedSubnet: largeSubnetAllocation.subnetCIDR,
+        networkAddress: largeSubnetAllocation.networkAddress,
+        subnetMask: vlanConfig.largeSubnetConfig.studentSubnetSize,
+        randomizedVlanIds: largeSubnetAllocation.randomizedVlanIds,
+        subVlans: subVlanInfo
+      };
+
+      console.log(`[Large Subnet] Student ${studentId} allocated: ${largeSubnetAllocation.subnetCIDR}`);
+    }
+
+    return response;
   }
 
   /**

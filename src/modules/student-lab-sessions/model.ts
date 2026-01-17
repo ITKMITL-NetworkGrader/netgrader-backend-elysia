@@ -39,6 +39,15 @@ export interface IStudentLabSession extends Document {
   completedAt?: Date;          // When student completed this lab
   lastAccessedAt: Date;        // Last submission or access time
 
+  // Large Subnet Mode Allocation
+  largeSubnetAllocation?: {
+    allocatedSubnetIndex: number;    // Index within the private pool
+    allocatedSubnetCIDR: string;     // e.g., "10.1.5.0/23"
+    networkAddress: string;          // e.g., "10.1.5.0"
+    randomizedVlanIds: number[];     // e.g., [247, 1892, 3401]
+    allocatedAt: Date;
+  };
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -120,6 +129,30 @@ const studentLabSessionSchema = new Schema<IStudentLabSession>({
     type: Date,
     required: true,
     default: Date.now
+  },
+
+  // Large Subnet Mode Allocation
+  largeSubnetAllocation: {
+    _id: false,
+    allocatedSubnetIndex: {
+      type: Number,
+      required: false
+    },
+    allocatedSubnetCIDR: {
+      type: String,
+      required: false
+    },
+    networkAddress: {
+      type: String,
+      required: false
+    },
+    randomizedVlanIds: [{
+      type: Number
+    }],
+    allocatedAt: {
+      type: Date,
+      required: false
+    }
   }
 }, {
   timestamps: true
@@ -147,6 +180,19 @@ studentLabSessionSchema.index(
   {
     unique: true,
     partialFilterExpression: { status: 'active' }
+  }
+);
+
+// Unique index for large subnet collision prevention
+// No two active sessions can have the same subnet allocation in the same lab
+studentLabSessionSchema.index(
+  { labId: 1, 'largeSubnetAllocation.allocatedSubnetIndex': 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: 'active',
+      'largeSubnetAllocation.allocatedSubnetIndex': { $exists: true }
+    }
   }
 );
 
