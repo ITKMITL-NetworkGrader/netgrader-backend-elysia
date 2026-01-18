@@ -141,18 +141,8 @@ export class AuthService {
             };
           }
 
-          // Create GNS3 user and resource pool in background (non-blocking)
-          this.createGNS3UserAndPool(u_id, createdUser.fullName || username, password)
-            .then((result) => {
-              if (result.success) {
-                console.log(`GNS3 user and pool created for ${u_id}`);
-              } else {
-                console.warn(`Failed to create GNS3 user/pool for ${u_id}:`, result.error);
-              }
-            })
-            .catch((err) => {
-              console.error(`Error creating GNS3 user/pool for ${u_id}:`, err);
-            });
+          // Note: GNS3 user and resource pool are now created lazily on first lab start
+          // via setupStudentLab() - no longer created on login
 
           return {
             success: true,

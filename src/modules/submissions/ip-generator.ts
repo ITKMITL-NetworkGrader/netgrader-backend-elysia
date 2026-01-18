@@ -324,7 +324,7 @@ export class IPGenerator {
 
     switch (connType) {
       case 'console':
-        return isCiscoIOS ? 'cisco_ios_telnet' : 'generic_telnet';
+        return isCiscoIOS ? 'generic_termserver_telnet' : 'generic_telnet';
       case 'ssh':
         return isCiscoIOS ? 'cisco_ios' : templatePlatform;
       case 'telnet':
@@ -337,13 +337,15 @@ export class IPGenerator {
   /**
    * Generate devices array for grading job
    * Now accepts GNS3 nodes to map console/aux ports
+   * @param gns3ServerIp - The user's assigned GNS3 server IP for console connections
    */
   static async generateDevices(
     lab: ILab,
     studentId: string,
     managementIp: string,
     gns3Nodes?: GNS3Node[],
-    overrideMap?: Map<string, string>
+    overrideMap?: Map<string, string>,
+    gns3ServerIp?: string
   ): Promise<GeneratedDevice[]> {
     const devices: GeneratedDevice[] = [];
 
@@ -401,7 +403,7 @@ export class IPGenerator {
       // For console connections, use GNS3 server IP instead of device management IP
       const connectionType = labDevice.connectionType || 'console';
       const ipAddress = connectionType === 'console'
-        ? (env.GNS3_SERVER || 'localhost')
+        ? (gns3ServerIp || env.GNS3_SERVER || 'localhost')
         : resolvedManagementIP;
 
       const device: GeneratedDevice = {
@@ -527,12 +529,26 @@ export class IPGenerator {
   static generateIPv6Mappings(
     lab: ILab,
     studentId: string,
-    vlanMappings: Record<string, number>
+    vlanMappings: Record<string, number>,
+    overrideMap?: Map<string, string>
   ): Record<string, string> {
     const mappings: Record<string, string> = {};
 
     for (const device of lab.network.devices) {
       for (const ipVar of device.ipVariables) {
+        // Create key with device.variableName format (e.g., "router1.eth0")
+        const key = `${device.deviceId}.${ipVar.name}`;
+        const normalizedKey = normalizeOverrideKey(key);
+
+        // Check if there's an override for this IPv6 address (e.g., SLAAC answer)
+        if (overrideMap?.has(key)) {
+          mappings[key] = overrideMap.get(key) as string;
+          continue;
+        } else if (overrideMap?.has(normalizedKey)) {
+          mappings[key] = overrideMap.get(normalizedKey) as string;
+          continue;
+        }
+
         // Generate IPv6 address if the interface has IPv6 configuration
         const ipv6Address = this.generateIPv6(
           {
@@ -548,8 +564,6 @@ export class IPGenerator {
         );
 
         if (ipv6Address) {
-          // Create mapping with device.variableName format (e.g., "router1.eth0")
-          const key = `${device.deviceId}.${ipVar.name}`;
           // Strip subnet prefix (e.g., /64) from the IPv6 address
           mappings[key] = ipv6Address.split('/')[0];
         }
@@ -717,26 +731,46 @@ export class IPGenerator {
         const subnetMask = typeof vlan.subnetMask === 'number' ? vlan.subnetMask : topologyMask;
         if (typeof subnetMask !== 'number') return;
 
-        let baseNetwork = vlan.baseNetwork || topologyBase;
+        let baseNetwork: string | undefined;
 
-        if (baseNetwork) {
-          const baseNum = ipToNumber(baseNetwork);
-          if (!Number.isNaN(baseNum)) {
-            const blockSize = Math.pow(2, 32 - subnetMask);
-            if (typeof vlan.subnetIndex === 'number') {
-              const subnetIndex = vlan.subnetIndex >= 1 ? vlan.subnetIndex : 1;
-              baseNetwork = numberToIp(baseNum + (subnetIndex - 1) * blockSize);
-            }
-          }
-        }
+        // For calculated VLANs (with multiplier), derive the base network from generated IPs
+        // This ensures the second and third octets reflect the student-specific calculation
+        const isCalculatedVlan = vlan.calculationMultiplier !== undefined;
 
-        if (!baseNetwork) {
+        if (isCalculatedVlan) {
+          // Always derive from generated IP addresses for calculated VLANs
           const sampleIp = vlanInterfaceIps[vlanIndex]?.[0];
           if (sampleIp) {
             const ipNum = ipToNumber(sampleIp);
             if (!Number.isNaN(ipNum)) {
               const mask = ~((1 << (32 - subnetMask)) - 1) >>> 0;
               baseNetwork = numberToIp((ipNum & mask) >>> 0);
+            }
+          }
+        } else {
+          // For fixed VLANs, use the configured base network
+          baseNetwork = vlan.baseNetwork || topologyBase;
+
+          if (baseNetwork) {
+            const baseNum = ipToNumber(baseNetwork);
+            if (!Number.isNaN(baseNum)) {
+              const blockSize = Math.pow(2, 32 - subnetMask);
+              if (typeof vlan.subnetIndex === 'number') {
+                const subnetIndex = vlan.subnetIndex >= 1 ? vlan.subnetIndex : 1;
+                baseNetwork = numberToIp(baseNum + (subnetIndex - 1) * blockSize);
+              }
+            }
+          }
+
+          // Fallback: derive from generated IPs if no base network configured
+          if (!baseNetwork) {
+            const sampleIp = vlanInterfaceIps[vlanIndex]?.[0];
+            if (sampleIp) {
+              const ipNum = ipToNumber(sampleIp);
+              if (!Number.isNaN(ipNum)) {
+                const mask = ~((1 << (32 - subnetMask)) - 1) >>> 0;
+                baseNetwork = numberToIp((ipNum & mask) >>> 0);
+              }
             }
           }
         }
@@ -803,6 +837,7 @@ export class IPGenerator {
     options?: {
       lecturerRangeOverrides?: LecturerRangeOverridePayload[];
       gns3Nodes?: GNS3Node[];
+      gns3ServerIp?: string;
     }
   ): Promise<any> {
     // Get or create student lab session to get permanent Management IP
@@ -812,14 +847,37 @@ export class IPGenerator {
 
     console.log(`[IP Resolution] Student ${studentId} - Lab ${labId} - Management IP: ${managementIp}`);
 
-    const overrideMap = new Map<string, string>();
+    // Separate override maps for IPv4 and IPv6 to prevent conflicts
+    // (same device.interface can have both IPv4 and IPv6 addresses)
+    const ipv4OverrideMap = new Map<string, string>();
+    const ipv6OverrideMap = new Map<string, string>();
+
+    // Simple IPv4 check - if it looks like an IPv4, it's IPv4; otherwise IPv6
+    const isIpv4Address = (ip: string): boolean => {
+      const segments = ip.split('.');
+      if (segments.length !== 4) return false;
+      return segments.every(segment => {
+        if (!/^\d+$/.test(segment)) return false;
+        const value = Number(segment);
+        return value >= 0 && value <= 255;
+      });
+    };
 
     const registerOverride = (key: string, ip: string) => {
-      if (!key) return;
-      overrideMap.set(key, ip);
+      if (!key || !ip) return;
       const normalizedKey = normalizeOverrideKey(key);
-      if (normalizedKey !== key) {
-        overrideMap.set(normalizedKey, ip);
+
+      if (isIpv4Address(ip)) {
+        ipv4OverrideMap.set(key, ip);
+        if (normalizedKey !== key) {
+          ipv4OverrideMap.set(normalizedKey, ip);
+        }
+      } else {
+        // Treat as IPv6
+        ipv6OverrideMap.set(key, ip);
+        if (normalizedKey !== key) {
+          ipv6OverrideMap.set(normalizedKey, ip);
+        }
       }
     };
 
@@ -832,23 +890,26 @@ export class IPGenerator {
       }
     });
 
+    console.log(`[Override Maps] IPv4 overrides: ${ipv4OverrideMap.size}, IPv6 overrides: ${ipv6OverrideMap.size}`);
+
     // Generate devices, IP mappings, and VLAN mappings
     const devices = await this.generateDevices(
       lab,
       studentId,
       managementIp,
       options?.gns3Nodes,
-      overrideMap.size > 0 ? overrideMap : undefined
+      ipv4OverrideMap.size > 0 ? ipv4OverrideMap : undefined,
+      options?.gns3ServerIp
     );
 
     const ipMappings = this.generateIPMappings(
       lab,
       studentId,
       managementIp,
-      overrideMap.size > 0 ? overrideMap : undefined
+      ipv4OverrideMap.size > 0 ? ipv4OverrideMap : undefined
     );
     const vlanMappings = this.generateVLANMappings(lab, studentId);
-    const ipv6Mappings = this.generateIPv6Mappings(lab, studentId, vlanMappings);
+    const ipv6Mappings = this.generateIPv6Mappings(lab, studentId, vlanMappings, ipv6OverrideMap.size > 0 ? ipv6OverrideMap : undefined);
 
     console.log(`[VLAN Resolution] Student ${studentId} - VLAN IDs:`, vlanMappings);
     console.log(`[IPv6 Resolution] Student ${studentId} - IPv6 Mappings:`, ipv6Mappings);

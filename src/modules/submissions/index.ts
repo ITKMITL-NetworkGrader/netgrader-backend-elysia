@@ -6,6 +6,7 @@ import { IPGenerator, type LecturerRangeOverridePayload } from "./ip-generator";
 import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
 import { GNS3v3Service, type GNS3Node } from "../gns3-student-lab/service";
+import { User } from "../auth/model";
 import { env } from "process";
 import { authPlugin } from "../../plugins/plugins";
 import { sseService } from "../../services/sse-emitter";
@@ -294,20 +295,137 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           lecturerRangeOverrides = Array.from(overrideMap.values());
         }
 
+        // Process IPv6 SLAAC answers separately (from slaac_answers payload)
+        const rawSlaacAnswers = Array.isArray(body.slaac_answers)
+          ? body.slaac_answers
+          : [];
+
+        if (rawSlaacAnswers.length > 0) {
+          const slaacOverrideMap = new Map<string, LecturerRangeOverridePayload>();
+
+          // Simple IPv6 validation - checks for valid format
+          const isValidIpv6 = (ip: string): boolean => {
+            // Allow compressed IPv6 addresses (e.g., 2001:db8::1)
+            const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$|^([0-9a-fA-F]{0,4}:){1,7}:$|^:(:([0-9a-fA-F]{0,4})){1,7}$|^::$/;
+            return ipv6Pattern.test(ip);
+          };
+
+          rawSlaacAnswers.forEach((override) => {
+            const {
+              source_part_id,
+              question_id,
+              row_index,
+              col_index,
+              answer,
+              device_id,
+              interface_name,
+              vlan_index
+            } = override;
+
+            if (!source_part_id || !question_id) {
+              return;
+            }
+
+            const sourcePart = partsMap.get(source_part_id);
+            if (!sourcePart || sourcePart.partType !== 'fill_in_blank') {
+              return;
+            }
+
+            const question = sourcePart.questions?.find((q: any) => q.questionId === question_id);
+            if (!question?.ipTableQuestionnaire?.cells) {
+              return;
+            }
+
+            const row = question.ipTableQuestionnaire.cells[row_index];
+            const cell = row?.[col_index];
+
+            if (!cell || (cell.cellType ?? 'input') !== 'input') {
+              return;
+            }
+
+            if (cell.answerType !== 'calculated' || !cell.calculatedAnswer) {
+              return;
+            }
+
+            // Only process ipv6_slaac cells
+            if (cell.calculatedAnswer.calculationType !== 'ipv6_slaac') {
+              return;
+            }
+
+            const trimmedAnswer = typeof answer === 'string' ? answer.trim() : '';
+            const effectiveVlanIndex = cell.calculatedAnswer.vlanIndex ?? vlan_index ?? null;
+
+            if (!trimmedAnswer || !isValidIpv6(trimmedAnswer)) {
+              console.warn('[Submission] Skipping SLAAC override due to invalid IPv6 value', {
+                source_part_id,
+                question_id,
+                row_index,
+                col_index,
+                answer: trimmedAnswer
+              });
+              return;
+            }
+
+            const resolvedDeviceId = cell.calculatedAnswer.deviceId || device_id;
+            const resolvedInterfaceName = cell.calculatedAnswer.interfaceName || interface_name;
+
+            if (!resolvedDeviceId || !resolvedInterfaceName) {
+              console.warn('[Submission] Missing device/interface mapping for SLAAC override', {
+                source_part_id,
+                question_id,
+                row_index,
+                col_index
+              });
+              return;
+            }
+
+            const key = `${resolvedDeviceId}.${resolvedInterfaceName}`;
+
+            slaacOverrideMap.set(key, {
+              key,
+              ip: trimmedAnswer,
+              metadata: {
+                sourcePartId: source_part_id,
+                questionId: question_id,
+                rowIndex: row_index,
+                colIndex: col_index,
+                lecturerRangeStart: 0,
+                lecturerRangeEnd: 0,
+                deviceId: resolvedDeviceId,
+                interfaceName: resolvedInterfaceName,
+                vlanIndex: effectiveVlanIndex
+              }
+            });
+          });
+
+          // Merge SLAAC overrides into lecturerRangeOverrides
+          const slaacOverrides = Array.from(slaacOverrideMap.values());
+          lecturerRangeOverrides = [...lecturerRangeOverrides, ...slaacOverrides];
+        }
+
         // Fetch GNS3 nodes to map console/aux ports
         let gns3Nodes: GNS3Node[] | undefined;
+        let gns3ServerIp: string | undefined;
         if (body.project_id) {
-          const loginResult = await GNS3v3Service.login();
+          // Get user's assigned GNS3 server
+          const user = await User.findOne({ u_id: u_id.toLowerCase() });
+          const serverIndex = user?.gns3ServerIndex ?? GNS3v3Service.calculateInitialServerIndex(u_id);
+          const serverConfig = GNS3v3Service.getServerConfig(serverIndex);
+          gns3ServerIp = serverConfig.serverIp;
+
+          console.log(`[GNS3] User ${u_id} assigned to server ${serverIndex} (${gns3ServerIp})`);
+
+          const loginResult = await GNS3v3Service.login(serverConfig, serverConfig.adminUsername, serverConfig.adminPassword);
           if (loginResult.success && loginResult.accessToken) {
-            const nodesResult = await GNS3v3Service.getProjectNodes(loginResult.accessToken, body.project_id);
+            const nodesResult = await GNS3v3Service.getProjectNodes(loginResult.accessToken, body.project_id, serverConfig);
             if (nodesResult.success && nodesResult.nodes) {
               gns3Nodes = nodesResult.nodes;
-              console.log(`[GNS3] Fetched ${gns3Nodes.length} nodes from project ${body.project_id}`);
+              console.log(`[GNS3] Fetched ${gns3Nodes.length} nodes from project ${body.project_id} on server ${serverIndex}`);
             } else {
               console.warn(`[GNS3] Failed to fetch nodes: ${nodesResult.error}`);
             }
           } else {
-            console.warn(`[GNS3] Failed to login: ${loginResult.error}`);
+            console.warn(`[GNS3] Failed to login to server ${serverIndex}: ${loginResult.error}`);
           }
         }
 
@@ -319,7 +437,8 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           jobId,
           {
             ...(lecturerRangeOverrides.length > 0 ? { lecturerRangeOverrides } : {}),
-            ...(gns3Nodes ? { gns3Nodes } : {})
+            ...(gns3Nodes ? { gns3Nodes } : {}),
+            ...(gns3ServerIp ? { gns3ServerIp } : {})
           }
         );
         // Create submission record
@@ -365,6 +484,16 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         project_id: t.String(),
         job_id: t.Optional(t.String()),
         lecturer_range_answers: t.Optional(t.Array(t.Object({
+          source_part_id: t.String(),
+          question_id: t.String(),
+          row_index: t.Number(),
+          col_index: t.Number(),
+          answer: t.String(),
+          device_id: t.Optional(t.String()),
+          interface_name: t.Optional(t.String()),
+          vlan_index: t.Optional(t.Number())
+        }))),
+        slaac_answers: t.Optional(t.Array(t.Object({
           source_part_id: t.String(),
           question_id: t.String(),
           row_index: t.Number(),

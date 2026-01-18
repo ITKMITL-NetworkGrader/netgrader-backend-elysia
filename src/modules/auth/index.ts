@@ -5,7 +5,8 @@ import { AuthService } from "./service";
 import { JWTPayload } from "../../index";
 import { Types } from "mongoose";
 import { User } from "./model";
-import { authPlugin } from "../../plugins/plugins";
+import { authPlugin, requireRole } from "../../plugins/plugins";
+import { GNS3v3Service } from "../gns3-student-lab/service";
 
 const UserSchema = t.Object({
   u_id: t.String({ minLength: 1 }),
@@ -360,4 +361,30 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           "Login as any user by username without password. Only available in development environment. Returns 403 in production.",
       },
     }
-  );
+  )
+  .get("/user-gns3", async ({ set }) => {
+    // const GNS3_SERVERS: GNS3ServerConfig[] = parseServersFromEnv();
+    const users = await User.find({}, { u_id: 1, fullName: 1, password: 0 });
+    var server1_users: any[] = [];
+    var server2_users: any[] = [];
+    const gns3User_server = users.map(user => {
+      const gns3User = GNS3v3Service.calculateInitialServerIndex(user.u_id)
+      if (gns3User === 1) {
+        server1_users.push(user);
+      } else {
+        server2_users.push(user);
+      }
+    })
+    return {
+      // "Server1_url": GNS3_SERVERS[0], "Server2_url": GNS3_SERVERS[1], 
+      "server1_users": { "amounts": server1_users.length, "list": server1_users },
+      "server2_users": { "amounts": server2_users.length, "list": server2_users }
+    };
+  }, {
+    beforeHandle: requireRole(["ADMIN"]),
+    detail: {
+      tags: ["Authentication"],
+      summary: "Get User GNS3",
+      description: "Retrieve the authenticated user's GNS3 information.",
+    },
+  })
