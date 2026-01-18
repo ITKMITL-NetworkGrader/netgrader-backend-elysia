@@ -735,14 +735,37 @@ export class IPGenerator {
 
     console.log(`[IP Resolution] Student ${studentId} - Lab ${labId} - Management IP: ${managementIp}`);
 
-    const overrideMap = new Map<string, string>();
+    // Separate override maps for IPv4 and IPv6 to prevent conflicts
+    // (same device.interface can have both IPv4 and IPv6 addresses)
+    const ipv4OverrideMap = new Map<string, string>();
+    const ipv6OverrideMap = new Map<string, string>();
+
+    // Simple IPv4 check - if it looks like an IPv4, it's IPv4; otherwise IPv6
+    const isIpv4Address = (ip: string): boolean => {
+      const segments = ip.split('.');
+      if (segments.length !== 4) return false;
+      return segments.every(segment => {
+        if (!/^\d+$/.test(segment)) return false;
+        const value = Number(segment);
+        return value >= 0 && value <= 255;
+      });
+    };
 
     const registerOverride = (key: string, ip: string) => {
-      if (!key) return;
-      overrideMap.set(key, ip);
+      if (!key || !ip) return;
       const normalizedKey = normalizeOverrideKey(key);
-      if (normalizedKey !== key) {
-        overrideMap.set(normalizedKey, ip);
+
+      if (isIpv4Address(ip)) {
+        ipv4OverrideMap.set(key, ip);
+        if (normalizedKey !== key) {
+          ipv4OverrideMap.set(normalizedKey, ip);
+        }
+      } else {
+        // Treat as IPv6
+        ipv6OverrideMap.set(key, ip);
+        if (normalizedKey !== key) {
+          ipv6OverrideMap.set(normalizedKey, ip);
+        }
       }
     };
 
@@ -755,13 +778,15 @@ export class IPGenerator {
       }
     });
 
+    console.log(`[Override Maps] IPv4 overrides: ${ipv4OverrideMap.size}, IPv6 overrides: ${ipv6OverrideMap.size}`);
+
     // Generate devices, IP mappings, and VLAN mappings
     const devices = await this.generateDevices(
       lab,
       studentId,
       managementIp,
       options?.gns3Nodes,
-      overrideMap.size > 0 ? overrideMap : undefined,
+      ipv4OverrideMap.size > 0 ? ipv4OverrideMap : undefined,
       options?.gns3ServerIp
     );
 
@@ -769,10 +794,10 @@ export class IPGenerator {
       lab,
       studentId,
       managementIp,
-      overrideMap.size > 0 ? overrideMap : undefined
+      ipv4OverrideMap.size > 0 ? ipv4OverrideMap : undefined
     );
     const vlanMappings = this.generateVLANMappings(lab, studentId);
-    const ipv6Mappings = this.generateIPv6Mappings(lab, studentId, vlanMappings, overrideMap.size > 0 ? overrideMap : undefined);
+    const ipv6Mappings = this.generateIPv6Mappings(lab, studentId, vlanMappings, ipv6OverrideMap.size > 0 ? ipv6OverrideMap : undefined);
 
     console.log(`[VLAN Resolution] Student ${studentId} - VLAN IDs:`, vlanMappings);
     console.log(`[IPv6 Resolution] Student ${studentId} - IPv6 Mappings:`, ipv6Mappings);
