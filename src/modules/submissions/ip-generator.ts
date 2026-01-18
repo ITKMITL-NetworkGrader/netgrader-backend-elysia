@@ -97,6 +97,58 @@ const normalizeOverrideKey = (key: string): string => {
   return `${deviceId}.${normalizeInterfaceName(interfaceName)}`;
 };
 
+/**
+ * Normalize largeSubnetConfig to handle both old and new field names
+ * Provides backwards compatibility for existing lab data
+ * 
+ * Old format: { baseNetwork, cidr, studentSubnetCidr, subVlans: [{ name, cidr, subnetIndex }] }
+ * New format: { privateNetworkPool, studentSubnetSize, subVlans: [{ id, name, subnetSize, subnetIndex, vlanIdRandomized }] }
+ */
+const normalizeLargeSubnetConfig = (config: any): LargeSubnetConfig | null => {
+  if (!config) return null;
+
+  // Determine privateNetworkPool from either new field or old baseNetwork
+  let privateNetworkPool = config.privateNetworkPool;
+  if (!privateNetworkPool && config.baseNetwork) {
+    // Try to infer pool from baseNetwork
+    const baseNetwork = config.baseNetwork.toLowerCase();
+    if (baseNetwork.startsWith('10.')) {
+      privateNetworkPool = '10.0.0.0/8';
+    } else if (baseNetwork.startsWith('172.16.') || baseNetwork.startsWith('172.17.') ||
+      baseNetwork.startsWith('172.18.') || baseNetwork.startsWith('172.19.') ||
+      baseNetwork.startsWith('172.2') || baseNetwork.startsWith('172.30.') ||
+      baseNetwork.startsWith('172.31.')) {
+      privateNetworkPool = '172.16.0.0/12';
+    } else if (baseNetwork.startsWith('192.168.')) {
+      privateNetworkPool = '192.168.0.0/16';
+    }
+  }
+
+  // Determine studentSubnetSize from either new field or old studentSubnetCidr/cidr
+  const studentSubnetSize = config.studentSubnetSize ?? config.studentSubnetCidr ?? config.cidr ?? 24;
+
+  // Normalize subVlans
+  const subVlans = (config.subVlans || []).map((sv: any, idx: number) => ({
+    id: sv.id || `subvlan-${idx}`,
+    name: sv.name || `Sub-VLAN ${idx + 1}`,
+    subnetSize: sv.subnetSize ?? sv.cidr ?? 26,
+    subnetIndex: sv.subnetIndex ?? idx,
+    vlanIdRandomized: sv.vlanIdRandomized ?? true,
+    fixedVlanId: sv.fixedVlanId
+  }));
+
+  if (!privateNetworkPool) {
+    console.warn('[normalizeLargeSubnetConfig] Could not determine privateNetworkPool from config:', config);
+    return null;
+  }
+
+  return {
+    privateNetworkPool: privateNetworkPool as LargeSubnetConfig['privateNetworkPool'],
+    studentSubnetSize,
+    subVlans
+  };
+};
+
 export class IPGenerator {
   /**
    * Generate IP address based on inputType
@@ -684,7 +736,20 @@ export class IPGenerator {
     // Handle large_subnet allocation before IP mapping generation
     let largeSubnetAllocation: AllocationResult | undefined;
 
-    if (vlanConfig?.mode === 'large_subnet' && vlanConfig.largeSubnetConfig) {
+    // Only process large_subnet mode if config has valid required fields
+    // Cast to any to check for both old (baseNetwork) and new (privateNetworkPool) field names
+    const lsConfig = vlanConfig?.largeSubnetConfig as any;
+    const hasValidLargeSubnetConfig = vlanConfig?.mode === 'large_subnet' &&
+      lsConfig &&
+      (lsConfig.privateNetworkPool ||
+        lsConfig.baseNetwork ||
+        (lsConfig.subVlans && lsConfig.subVlans.length > 0));
+
+    // Debug logging for large subnet allocation
+    console.log(`[Large Subnet Debug] mode: ${vlanConfig?.mode}, hasConfig: ${!!lsConfig}, hasPrivatePool: ${!!lsConfig?.privateNetworkPool}, hasBaseNetwork: ${!!lsConfig?.baseNetwork}, hasSubVlans: ${lsConfig?.subVlans?.length}, hasValidConfig: ${hasValidLargeSubnetConfig}`);
+    console.log(`[Large Subnet Debug] Full config:`, JSON.stringify(lsConfig, null, 2));
+
+    if (hasValidLargeSubnetConfig) {
       if (session.largeSubnetAllocation?.allocatedSubnetIndex !== undefined) {
         // Reuse existing allocation
         console.log(`[Large Subnet] Reusing allocation for student ${studentId} (early)`);
@@ -697,10 +762,17 @@ export class IPGenerator {
       } else {
         // Allocate new subnet
         console.log(`[Large Subnet] Allocating new subnet for student ${studentId} (early)`);
+
+        // Normalize config to handle both old and new field names
+        const normalizedConfig = normalizeLargeSubnetConfig(vlanConfig.largeSubnetConfig);
+        if (!normalizedConfig) {
+          throw new Error('Invalid largeSubnetConfig: could not determine privateNetworkPool');
+        }
+
         largeSubnetAllocation = await LargeSubnetAllocator.allocateSubnet(
           studentId,
           labId,
-          vlanConfig.largeSubnetConfig as LargeSubnetConfig
+          normalizedConfig
         );
 
         // Save allocation to session

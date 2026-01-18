@@ -416,7 +416,7 @@ const labSchema = new Schema<ILab>({
         },
         inputType: {
           type: String,
-          enum: ['none', 'fullIP', 'studentManagement', 'studentVlan0', 'studentVlan1', 'studentVlan2', 'studentVlan3', 'studentVlan4', 'studentVlan5', 'studentVlan6', 'studentVlan7', 'studentVlan8', 'studentVlan9'],
+          enum: ['none', 'fullIP', 'studentManagement', 'studentVlan0', 'studentVlan1', 'studentVlan2', 'studentVlan3', 'studentVlan4', 'studentVlan5', 'studentVlan6', 'studentVlan7', 'studentVlan8', 'studentVlan9', 'subVlan0', 'subVlan1', 'subVlan2', 'subVlan3', 'subVlan4', 'subVlan5', 'subVlan6', 'subVlan7', 'subVlan8', 'subVlan9'],
           required: true
         },
         fullIp: {
@@ -462,7 +462,7 @@ const labSchema = new Schema<ILab>({
         // IPv6 Configuration
         ipv6InputType: {
           type: String,
-          enum: ['none', 'fullIPv6', 'studentVlan6_0', 'studentVlan6_1', 'studentVlan6_2', 'studentVlan6_3', 'studentVlan6_4', 'studentVlan6_5', 'studentVlan6_6', 'studentVlan6_7', 'studentVlan6_8', 'studentVlan6_9', 'linkLocal'],
+          enum: ['none', 'fullIPv6', 'studentVlan6_0', 'studentVlan6_1', 'studentVlan6_2', 'studentVlan6_3', 'studentVlan6_4', 'studentVlan6_5', 'studentVlan6_6', 'studentVlan6_7', 'studentVlan6_8', 'studentVlan6_9', 'linkLocal', 'subVlan6_0', 'subVlan6_1', 'subVlan6_2', 'subVlan6_3', 'subVlan6_4', 'subVlan6_5', 'subVlan6_6', 'subVlan6_7', 'subVlan6_8', 'subVlan6_9'],
           required: false
         },
         fullIpv6: {

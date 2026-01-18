@@ -66,6 +66,12 @@ const IpTableQuestionnaireSchema = t.Object({
         t.Literal('vlan_lecturer_range'),
         t.Literal('device_interface_ip'),
         t.Literal('vlan_id'),
+        // Large Subnet Mode Calculation Types
+        t.Literal('subnet_calculation_network'),
+        t.Literal('dotted_subnet_mask'),
+        t.Literal('subnet_prefix_length'),
+        t.Literal('cidr_notation'),
+        t.Literal('wildcard_mask'),
         // IPv6 Calculation Types
         t.Literal('ipv6_network_prefix'),
         t.Literal('ipv6_address'),

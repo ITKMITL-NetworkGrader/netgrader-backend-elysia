@@ -66,6 +66,9 @@ export interface ILabPart extends Document {
           calculationType: 'vlan_network_address' | 'vlan_first_usable' | 'vlan_last_usable' |
           'vlan_broadcast' | 'vlan_subnet_mask' | 'vlan_lecturer_offset' |
           'vlan_lecturer_range' | 'device_interface_ip' | 'vlan_id' |
+          // Large Subnet Mode Calculation Types
+          'subnet_calculation_network' | 'dotted_subnet_mask' | 'subnet_prefix_length' |
+          'cidr_notation' | 'wildcard_mask' |
           // IPv6 Calculation Types
           'ipv6_network_prefix' | 'ipv6_address' | 'ipv6_interface_id' |
           'ipv6_link_local' | 'ipv6_slaac' | 'ipv6_prefix_length' | 'device_interface_ipv6';
@@ -298,6 +301,9 @@ const labPartSchema = new Schema<ILabPart>({
               enum: ['vlan_network_address', 'vlan_first_usable', 'vlan_last_usable',
                 'vlan_broadcast', 'vlan_subnet_mask', 'vlan_lecturer_offset',
                 'vlan_lecturer_range', 'device_interface_ip', 'vlan_id',
+                // Large Subnet Mode Calculation Types
+                'subnet_calculation_network', 'dotted_subnet_mask', 'subnet_prefix_length',
+                'cidr_notation', 'wildcard_mask',
                 // IPv6 Calculation Types
                 'ipv6_network_prefix', 'ipv6_address', 'ipv6_interface_id',
                 'ipv6_link_local', 'ipv6_slaac', 'ipv6_prefix_length', 'device_interface_ipv6']

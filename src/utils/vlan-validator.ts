@@ -17,13 +17,15 @@ interface VlanConfig {
     isStudentGenerated: boolean;
   }>;
   largeSubnetConfig?: {
-    baseNetwork: string;
-    cidr: number;
-    studentSubnetCidr: number;
+    privateNetworkPool: '10.0.0.0/8' | '172.16.0.0/12' | '192.168.0.0/16';
+    studentSubnetSize: number;
     subVlans: Array<{
+      id: string;
       name: string;
-      cidr: number;
+      subnetSize: number;
       subnetIndex: number;
+      vlanIdRandomized?: boolean;
+      fixedVlanId?: number;
       ipv6Enabled?: boolean;
     }>;
   };

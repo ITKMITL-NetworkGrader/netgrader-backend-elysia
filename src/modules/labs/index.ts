@@ -51,15 +51,21 @@ const LabBodySchema = t.Object({
         ipv6VlanAlphabet: t.Optional(t.String()),
         ipv6SubnetId: t.Optional(t.String())
       })),
-      // Large Subnet Mode Configuration
+      // Large Subnet Mode Configuration - Must match LargeSubnetConfig interface in large-subnet-allocator.ts
       largeSubnetConfig: t.Optional(t.Object({
-        baseNetwork: t.String(),
-        cidr: t.Number({ minimum: 8, maximum: 28 }),
-        studentSubnetCidr: t.Number({ minimum: 16, maximum: 30 }),
+        privateNetworkPool: t.Union([
+          t.Literal('10.0.0.0/8'),
+          t.Literal('172.16.0.0/12'),
+          t.Literal('192.168.0.0/16')
+        ]),
+        studentSubnetSize: t.Number({ minimum: 16, maximum: 30 }), // e.g., 23 for /23
         subVlans: t.Array(t.Object({
+          id: t.String(),
           name: t.String(),
-          cidr: t.Number({ minimum: 16, maximum: 30 }),
+          subnetSize: t.Number({ minimum: 16, maximum: 30 }),
           subnetIndex: t.Number({ minimum: 0 }),
+          vlanIdRandomized: t.Optional(t.Boolean()),
+          fixedVlanId: t.Optional(t.Number()),
           ipv6Enabled: t.Optional(t.Boolean())
         }))
       }))
@@ -166,10 +172,22 @@ const LabBodySchema = t.Object({
       })
     }))
   }),
-  publishedAt: t.Optional(t.Date()),
-  availableFrom: t.Optional(t.Date()),
-  availableUntil: t.Optional(t.Date()),
-  dueDate: t.Optional(t.Date())
+  publishedAt: t.Optional(t.Transform(t.String())
+    .Decode((value) => value ? new Date(value) : undefined)
+    .Encode((value) => value?.toISOString() ?? '')
+  ),
+  availableFrom: t.Optional(t.Transform(t.String())
+    .Decode((value) => value ? new Date(value) : undefined)
+    .Encode((value) => value?.toISOString() ?? '')
+  ),
+  availableUntil: t.Optional(t.Transform(t.String())
+    .Decode((value) => value ? new Date(value) : undefined)
+    .Encode((value) => value?.toISOString() ?? '')
+  ),
+  dueDate: t.Optional(t.Transform(t.String())
+    .Decode((value) => value ? new Date(value) : undefined)
+    .Encode((value) => value?.toISOString() ?? '')
+  )
 });
 
 export const labRoutes = new Elysia({ prefix: "/labs" })
@@ -248,6 +266,27 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
 
         // Validate VLAN configuration if present
         if (body.network.vlanConfiguration) {
+          const vlanConfig = body.network.vlanConfiguration;
+
+          // Validate largeSubnetConfig is required when mode is large_subnet
+          if (vlanConfig.mode === 'large_subnet') {
+            const hasSubVlanDevices = body.network.devices.some(device =>
+              device.ipVariables.some(ipVar =>
+                ipVar.inputType.startsWith('subVlan') ||
+                (ipVar.ipv6InputType && ipVar.ipv6InputType.startsWith('subVlan6_'))
+              )
+            );
+
+            if (hasSubVlanDevices && !vlanConfig.largeSubnetConfig) {
+              set.status = 400;
+              return {
+                success: false,
+                message: "largeSubnetConfig is required when using large_subnet mode with subVlan device inputs",
+                errors: ["Missing largeSubnetConfig configuration"]
+              };
+            }
+          }
+
           const vlanValidation = VlanValidator.validateVlanConfiguration(body.network.vlanConfiguration);
           if (!vlanValidation.valid) {
             set.status = 400;
@@ -577,7 +616,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
               managementIp: networkConfig.managementIp,
               ipMappings: networkConfig.ipMappings,
               vlanMappings: networkConfig.vlanMappings,
-              vlanSubnets: networkConfig.vlanSubnets
+              vlanSubnets: networkConfig.vlanSubnets,
+              largeSubnetInfo: networkConfig.largeSubnetInfo // Include Large Subnet Mode allocation info
             }
           }
         };
@@ -668,7 +708,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
               managementIp: networkConfig.managementIp,
               ipMappings: networkConfig.ipMappings,
               vlanMappings: networkConfig.vlanMappings,
-              vlanSubnets: networkConfig.vlanSubnets
+              vlanSubnets: networkConfig.vlanSubnets,
+              largeSubnetInfo: networkConfig.largeSubnetInfo // Include Large Subnet Mode allocation info
             }
           }
         };
