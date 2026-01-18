@@ -296,6 +296,9 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         }
 
         // Process IPv6 SLAAC answers separately (from slaac_answers payload)
+        // IMPORTANT: Keep SLAAC overrides separate from lecturer range overrides
+        // SLAAC = IPv6, Lecturer Range = IPv4 (DHCP)
+        let slaacOverrides: LecturerRangeOverridePayload[] = [];
         const rawSlaacAnswers = Array.isArray(body.slaac_answers)
           ? body.slaac_answers
           : [];
@@ -398,9 +401,9 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
             });
           });
 
-          // Merge SLAAC overrides into lecturerRangeOverrides
-          const slaacOverrides = Array.from(slaacOverrideMap.values());
-          lecturerRangeOverrides = [...lecturerRangeOverrides, ...slaacOverrides];
+          // Keep SLAAC overrides separate (passed to ip-generator as separate option)
+          slaacOverrides = Array.from(slaacOverrideMap.values());
+          console.log(`[Submission] Collected ${slaacOverrides.length} SLAAC (IPv6) overrides`);
         }
 
         // Fetch GNS3 nodes to map console/aux ports
@@ -437,6 +440,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           jobId,
           {
             ...(lecturerRangeOverrides.length > 0 ? { lecturerRangeOverrides } : {}),
+            ...(slaacOverrides.length > 0 ? { slaacOverrides } : {}),
             ...(gns3Nodes ? { gns3Nodes } : {}),
             ...(gns3ServerIp ? { gns3ServerIp } : {})
           }

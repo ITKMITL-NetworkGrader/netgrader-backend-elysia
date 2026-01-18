@@ -221,7 +221,8 @@ export class IPGenerator {
     },
     lab: ILab,
     studentId: string,
-    vlanMappings: Record<string, number>
+    vlanMappings: Record<string, number>,
+    largeSubnetAllocation?: AllocationResult  // Optional allocation for large_subnet mode
   ): string | null {
     // Skip if not an IPv6 variable
     if (!ipVariable.isIpv6Variable && !ipVariable.ipv6InputType) {
@@ -247,11 +248,25 @@ export class IPGenerator {
         throw new Error(`Invalid IPv6 VLAN input type: ${ipVariable.ipv6InputType}`);
       }
 
-      // Get VLAN ID from vlanMappings
-      const vlanKey = `vlan${vlanIndex}`;
-      const vlanId = vlanMappings[vlanKey];
-      if (vlanId === undefined) {
-        throw new Error(`VLAN ID not found for ${vlanKey}`);
+      // Get VLAN ID - check for Large Subnet Mode first
+      let vlanId: number;
+      const vlanConfig = lab.network?.vlanConfiguration;
+
+      if (vlanConfig?.mode === 'large_subnet' && largeSubnetAllocation) {
+        // In Large Subnet Mode, get VLAN ID from allocation's randomized list
+        vlanId = largeSubnetAllocation.randomizedVlanIds[vlanIndex];
+        if (vlanId === undefined) {
+          throw new Error(`Large Subnet Mode: VLAN ID not found for sub-VLAN index ${vlanIndex}`);
+        }
+        console.log(`[IPv6 Generation - Large Subnet Mode] VLAN Index ${vlanIndex} -> VLAN ID ${vlanId} (from randomizedVlanIds)`);
+      } else {
+        // Regular mode - get from vlanMappings
+        const vlanKey = `vlan${vlanIndex}`;
+        const mappedVlanId = vlanMappings[vlanKey];
+        if (mappedVlanId === undefined) {
+          throw new Error(`VLAN ID not found for ${vlanKey}`);
+        }
+        vlanId = mappedVlanId;
       }
 
       // Get interface identifier (offset) from lecturer config or default to 1
@@ -530,7 +545,8 @@ export class IPGenerator {
     lab: ILab,
     studentId: string,
     vlanMappings: Record<string, number>,
-    overrideMap?: Map<string, string>
+    overrideMap?: Map<string, string>,
+    largeSubnetAllocation?: AllocationResult  // Optional allocation for large_subnet mode
   ): Record<string, string> {
     const mappings: Record<string, string> = {};
 
@@ -560,7 +576,8 @@ export class IPGenerator {
           },
           lab,
           studentId,
-          vlanMappings
+          vlanMappings,
+          largeSubnetAllocation
         );
 
         if (ipv6Address) {
@@ -836,6 +853,7 @@ export class IPGenerator {
     jobId: string,
     options?: {
       lecturerRangeOverrides?: LecturerRangeOverridePayload[];
+      slaacOverrides?: LecturerRangeOverridePayload[];  // IPv6 SLAAC overrides (kept separate from lecturerRange)
       gns3Nodes?: GNS3Node[];
       gns3ServerIp?: string;
     }
@@ -890,7 +908,36 @@ export class IPGenerator {
       }
     });
 
+    // Register SLAAC overrides directly into IPv6 map (always IPv6, never mixed with IPv4)
+    options?.slaacOverrides?.forEach(override => {
+      if (!override.key || !override.ip) return;
+      const normalizedKey = normalizeOverrideKey(override.key);
+
+      ipv6OverrideMap.set(override.key, override.ip);
+      if (normalizedKey !== override.key) {
+        ipv6OverrideMap.set(normalizedKey, override.ip);
+      }
+
+      const { deviceId, interfaceName } = override.metadata;
+      if (deviceId && interfaceName) {
+        const metaKey = `${deviceId}.${normalizeInterfaceName(interfaceName)}`;
+        ipv6OverrideMap.set(metaKey, override.ip);
+      }
+    });
+
     console.log(`[Override Maps] IPv4 overrides: ${ipv4OverrideMap.size}, IPv6 overrides: ${ipv6OverrideMap.size}`);
+
+    // Extract Large Subnet Allocation from session for sub-VLAN IP generation
+    let largeSubnetAllocation: AllocationResult | undefined;
+    if (session.largeSubnetAllocation?.allocatedSubnetIndex !== undefined) {
+      largeSubnetAllocation = {
+        subnetIndex: session.largeSubnetAllocation.allocatedSubnetIndex,
+        subnetCIDR: session.largeSubnetAllocation.allocatedSubnetCIDR,
+        networkAddress: session.largeSubnetAllocation.networkAddress,
+        randomizedVlanIds: session.largeSubnetAllocation.randomizedVlanIds
+      };
+      console.log(`[Large Subnet Mode] Using allocation for grading: ${largeSubnetAllocation.subnetCIDR}`);
+    }
 
     // Generate devices, IP mappings, and VLAN mappings
     const devices = await this.generateDevices(
@@ -906,10 +953,11 @@ export class IPGenerator {
       lab,
       studentId,
       managementIp,
-      ipv4OverrideMap.size > 0 ? ipv4OverrideMap : undefined
+      ipv4OverrideMap.size > 0 ? ipv4OverrideMap : undefined,
+      largeSubnetAllocation
     );
     const vlanMappings = this.generateVLANMappings(lab, studentId);
-    const ipv6Mappings = this.generateIPv6Mappings(lab, studentId, vlanMappings, ipv6OverrideMap.size > 0 ? ipv6OverrideMap : undefined);
+    const ipv6Mappings = this.generateIPv6Mappings(lab, studentId, vlanMappings, ipv6OverrideMap.size > 0 ? ipv6OverrideMap : undefined, largeSubnetAllocation);
 
     console.log(`[VLAN Resolution] Student ${studentId} - VLAN IDs:`, vlanMappings);
     console.log(`[IPv6 Resolution] Student ${studentId} - IPv6 Mappings:`, ipv6Mappings);

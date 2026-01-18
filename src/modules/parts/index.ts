@@ -504,15 +504,32 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
       }
 
       const ipv6VlanIndex = ipVariable.ipv6VlanIndex ?? 0;
-      const vlans = lab.network?.vlanConfiguration?.vlans || [];
-      const vlan = vlans[ipv6VlanIndex];
+      const vlanConfig = lab.network?.vlanConfiguration;
 
-      // Calculate VLAN ID for template
+      // Calculate VLAN ID based on mode
       let vlanIdForIpv6: number;
-      if (lab.network?.vlanConfiguration?.mode === 'calculated_vlan' && vlan?.calculationMultiplier) {
-        const vlanIds = calculateStudentVLANs(studentId, [vlan.calculationMultiplier]);
-        vlanIdForIpv6 = vlanIds[0];
+
+      if (vlanConfig?.mode === 'large_subnet' && largeSubnetAllocation) {
+        // Large Subnet Mode: Get VLAN ID from allocation's randomized list
+        vlanIdForIpv6 = largeSubnetAllocation.randomizedVlanIds[ipv6VlanIndex];
+        if (vlanIdForIpv6 === undefined) {
+          throw new Error(`Large Subnet Mode: VLAN ID not found for sub-VLAN index ${ipv6VlanIndex}`);
+        }
+        console.log(`[Device Interface IPv6 - Large Subnet] VLAN Index ${ipv6VlanIndex} -> VLAN ID ${vlanIdForIpv6}`);
+      } else if (vlanConfig?.mode === 'calculated_vlan') {
+        // Calculated VLAN Mode: Calculate from multiplier
+        const vlans = vlanConfig.vlans || [];
+        const vlan = vlans[ipv6VlanIndex];
+        if (vlan?.calculationMultiplier) {
+          const vlanIds = calculateStudentVLANs(studentId, [vlan.calculationMultiplier]);
+          vlanIdForIpv6 = vlanIds[0];
+        } else {
+          vlanIdForIpv6 = vlan?.vlanId || ipv6VlanIndex;
+        }
       } else {
+        // Fixed VLAN Mode or fallback: Use configured vlanId
+        const vlans = vlanConfig?.vlans || [];
+        const vlan = vlans[ipv6VlanIndex];
         vlanIdForIpv6 = vlan?.vlanId || ipv6VlanIndex;
       }
 

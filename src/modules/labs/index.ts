@@ -35,7 +35,7 @@ const LabBodySchema = t.Object({
       ))
     }),
     vlanConfiguration: t.Optional(t.Object({
-      mode: t.Union([t.Literal("fixed_vlan"), t.Literal("lecturer_group"), t.Literal("calculated_vlan")]),
+      mode: t.Union([t.Literal("fixed_vlan"), t.Literal("lecturer_group"), t.Literal("calculated_vlan"), t.Literal("large_subnet")]),
       vlanCount: t.Number({ minimum: 1, maximum: 10 }),
       vlans: t.Array(t.Object({
         id: t.String(),
@@ -50,6 +50,18 @@ const LabBodySchema = t.Object({
         ipv6Enabled: t.Optional(t.Boolean()),
         ipv6VlanAlphabet: t.Optional(t.String()),
         ipv6SubnetId: t.Optional(t.String())
+      })),
+      // Large Subnet Mode Configuration
+      largeSubnetConfig: t.Optional(t.Object({
+        baseNetwork: t.String(),
+        cidr: t.Number({ minimum: 8, maximum: 28 }),
+        studentSubnetCidr: t.Number({ minimum: 16, maximum: 30 }),
+        subVlans: t.Array(t.Object({
+          name: t.String(),
+          cidr: t.Number({ minimum: 16, maximum: 30 }),
+          subnetIndex: t.Number({ minimum: 0 }),
+          ipv6Enabled: t.Optional(t.Boolean())
+        }))
       }))
     })),
     // IPv6 Global Configuration
@@ -83,6 +95,7 @@ const LabBodySchema = t.Object({
           t.Literal("none"),
           t.Literal("fullIP"),
           t.Literal("studentManagement"),
+          // Regular VLAN mode
           t.Literal("studentVlan0"),
           t.Literal("studentVlan1"),
           t.Literal("studentVlan2"),
@@ -92,7 +105,18 @@ const LabBodySchema = t.Object({
           t.Literal("studentVlan6"),
           t.Literal("studentVlan7"),
           t.Literal("studentVlan8"),
-          t.Literal("studentVlan9")
+          t.Literal("studentVlan9"),
+          // Large Subnet Mode (sub-VLAN)
+          t.Literal("subVlan0"),
+          t.Literal("subVlan1"),
+          t.Literal("subVlan2"),
+          t.Literal("subVlan3"),
+          t.Literal("subVlan4"),
+          t.Literal("subVlan5"),
+          t.Literal("subVlan6"),
+          t.Literal("subVlan7"),
+          t.Literal("subVlan8"),
+          t.Literal("subVlan9")
         ]),
         fullIp: t.Optional(t.String()),
         isManagementInterface: t.Optional(t.Boolean()),
@@ -107,6 +131,7 @@ const LabBodySchema = t.Object({
           t.Literal("none"),
           t.Literal("fullIPv6"),
           t.Literal("linkLocal"),
+          // Regular VLAN mode
           t.Literal("studentVlan6_0"),
           t.Literal("studentVlan6_1"),
           t.Literal("studentVlan6_2"),
@@ -116,7 +141,18 @@ const LabBodySchema = t.Object({
           t.Literal("studentVlan6_6"),
           t.Literal("studentVlan6_7"),
           t.Literal("studentVlan6_8"),
-          t.Literal("studentVlan6_9")
+          t.Literal("studentVlan6_9"),
+          // Large Subnet Mode (sub-VLAN IPv6)
+          t.Literal("subVlan6_0"),
+          t.Literal("subVlan6_1"),
+          t.Literal("subVlan6_2"),
+          t.Literal("subVlan6_3"),
+          t.Literal("subVlan6_4"),
+          t.Literal("subVlan6_5"),
+          t.Literal("subVlan6_6"),
+          t.Literal("subVlan6_7"),
+          t.Literal("subVlan6_8"),
+          t.Literal("subVlan6_9")
         ])),
         fullIpv6: t.Optional(t.String()),
         ipv6InterfaceId: t.Optional(t.String()),

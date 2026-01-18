@@ -4,7 +4,7 @@
  */
 
 interface VlanConfig {
-  mode: 'fixed_vlan' | 'lecturer_group' | 'calculated_vlan';
+  mode: 'fixed_vlan' | 'lecturer_group' | 'calculated_vlan' | 'large_subnet';
   vlanCount: number;
   vlans: Array<{
     id: string;
@@ -16,6 +16,17 @@ interface VlanConfig {
     groupModifier?: number;
     isStudentGenerated: boolean;
   }>;
+  largeSubnetConfig?: {
+    baseNetwork: string;
+    cidr: number;
+    studentSubnetCidr: number;
+    subVlans: Array<{
+      name: string;
+      cidr: number;
+      subnetIndex: number;
+      ipv6Enabled?: boolean;
+    }>;
+  };
 }
 
 export class VlanValidator {
@@ -107,6 +118,11 @@ export class VlanValidator {
           errors.push(`VLAN ${index}: calculationMultiplier must be positive, got ${vlan.calculationMultiplier}`);
         }
         break;
+
+      case 'large_subnet':
+        // In large_subnet mode, VLANs array may be minimal/empty
+        // Validation is done on largeSubnetConfig instead
+        break;
     }
 
     return errors;
@@ -141,8 +157,10 @@ export class VlanValidator {
 
     // Validate inputType
     const validInputTypes = [
+      'none',
       'fullIP',
       'studentManagement',
+      // Regular VLAN mode
       'studentVlan0',
       'studentVlan1',
       'studentVlan2',
@@ -152,7 +170,18 @@ export class VlanValidator {
       'studentVlan6',
       'studentVlan7',
       'studentVlan8',
-      'studentVlan9'
+      'studentVlan9',
+      // Large Subnet Mode (sub-VLANs)
+      'subVlan0',
+      'subVlan1',
+      'subVlan2',
+      'subVlan3',
+      'subVlan4',
+      'subVlan5',
+      'subVlan6',
+      'subVlan7',
+      'subVlan8',
+      'subVlan9'
     ];
 
     if (!validInputTypes.includes(ipVar.inputType)) {
@@ -208,6 +237,38 @@ export class VlanValidator {
         errors.push(`interfaceOffset must be between 1 and 254, got ${ipVar.interfaceOffset}`);
       }
     }
+
+    // Validate subVlan types (Large Subnet Mode)
+    if (ipVar.inputType.startsWith('subVlan') && !ipVar.inputType.startsWith('subVlan6')) {
+      if (ipVar.vlanIndex === undefined || ipVar.vlanIndex === null) {
+        errors.push(`vlanIndex is required for ${ipVar.inputType} inputType`);
+      } else if (ipVar.vlanIndex < 0 || ipVar.vlanIndex > 9) {
+        errors.push(`vlanIndex must be between 0 and 9, got ${ipVar.vlanIndex}`);
+      }
+
+      // Validate vlanIndex matches the inputType suffix
+      const expectedVlanIndex = parseInt(ipVar.inputType.replace('subVlan', ''), 10);
+      if (ipVar.vlanIndex !== expectedVlanIndex) {
+        errors.push(
+          `vlanIndex (${ipVar.vlanIndex}) does not match inputType (${ipVar.inputType})`
+        );
+      }
+
+      // Validate vlanIndex is within largeSubnetConfig.subVlans bounds
+      if (vlanConfig?.largeSubnetConfig?.subVlans &&
+        ipVar.vlanIndex >= vlanConfig.largeSubnetConfig.subVlans.length) {
+        errors.push(
+          `vlanIndex (${ipVar.vlanIndex}) exceeds available sub-VLANs (${vlanConfig.largeSubnetConfig.subVlans.length})`
+        );
+      }
+
+      if (ipVar.interfaceOffset === undefined || ipVar.interfaceOffset === null) {
+        errors.push(`interfaceOffset is required for ${ipVar.inputType} inputType`);
+      } else if (ipVar.interfaceOffset < 1 || ipVar.interfaceOffset > 254) {
+        errors.push(`interfaceOffset must be between 1 and 254, got ${ipVar.interfaceOffset}`);
+      }
+    }
+
 
     return {
       valid: errors.length === 0,
