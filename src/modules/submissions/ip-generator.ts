@@ -491,12 +491,26 @@ export class IPGenerator {
   static generateIPv6Mappings(
     lab: ILab,
     studentId: string,
-    vlanMappings: Record<string, number>
+    vlanMappings: Record<string, number>,
+    overrideMap?: Map<string, string>
   ): Record<string, string> {
     const mappings: Record<string, string> = {};
 
     for (const device of lab.network.devices) {
       for (const ipVar of device.ipVariables) {
+        // Create key with device.variableName format (e.g., "router1.eth0")
+        const key = `${device.deviceId}.${ipVar.name}`;
+        const normalizedKey = normalizeOverrideKey(key);
+
+        // Check if there's an override for this IPv6 address (e.g., SLAAC answer)
+        if (overrideMap?.has(key)) {
+          mappings[key] = overrideMap.get(key) as string;
+          continue;
+        } else if (overrideMap?.has(normalizedKey)) {
+          mappings[key] = overrideMap.get(normalizedKey) as string;
+          continue;
+        }
+
         // Generate IPv6 address if the interface has IPv6 configuration
         const ipv6Address = this.generateIPv6(
           {
@@ -512,8 +526,6 @@ export class IPGenerator {
         );
 
         if (ipv6Address) {
-          // Create mapping with device.variableName format (e.g., "router1.eth0")
-          const key = `${device.deviceId}.${ipVar.name}`;
           // Strip subnet prefix (e.g., /64) from the IPv6 address
           mappings[key] = ipv6Address.split('/')[0];
         }
@@ -760,7 +772,7 @@ export class IPGenerator {
       overrideMap.size > 0 ? overrideMap : undefined
     );
     const vlanMappings = this.generateVLANMappings(lab, studentId);
-    const ipv6Mappings = this.generateIPv6Mappings(lab, studentId, vlanMappings);
+    const ipv6Mappings = this.generateIPv6Mappings(lab, studentId, vlanMappings, overrideMap.size > 0 ? overrideMap : undefined);
 
     console.log(`[VLAN Resolution] Student ${studentId} - VLAN IDs:`, vlanMappings);
     console.log(`[IPv6 Resolution] Student ${studentId} - IPv6 Mappings:`, ipv6Mappings);
