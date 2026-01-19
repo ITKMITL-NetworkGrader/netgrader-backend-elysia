@@ -1044,6 +1044,7 @@ export class IPGenerator {
         task_id: task.taskId,
         name: task.name,
         template_name: templateName,
+        group_id: task.group_id || "",
         execution_device: task.executionDevice,
         target_devices: task.targetDevices || [],
         parameters: this.transformTaskParameters(task.parameters, ipMappings, vlanMappings, ipv6Mappings),
