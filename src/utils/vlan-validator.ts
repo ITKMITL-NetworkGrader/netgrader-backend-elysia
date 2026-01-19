@@ -38,7 +38,51 @@ export class VlanValidator {
   static validateVlanConfiguration(config: VlanConfig): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
 
-    // Validate vlanCount matches vlans array length
+    // For large_subnet mode, VLANs are stored in largeSubnetConfig.subVlans
+    if (config.mode === 'large_subnet') {
+      // Validate largeSubnetConfig for large_subnet mode
+      if (!config.largeSubnetConfig) {
+        errors.push('largeSubnetConfig is required for large_subnet mode');
+      } else {
+        // Validate privateNetworkPool
+        const validPools = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
+        if (!validPools.includes(config.largeSubnetConfig.privateNetworkPool)) {
+          errors.push(`Invalid privateNetworkPool: ${config.largeSubnetConfig.privateNetworkPool}`);
+        }
+
+        // Validate studentSubnetSize
+        if (config.largeSubnetConfig.studentSubnetSize < 16 || config.largeSubnetConfig.studentSubnetSize > 30) {
+          errors.push(`studentSubnetSize must be between 16 and 30, got ${config.largeSubnetConfig.studentSubnetSize}`);
+        }
+
+        // Validate subVlans array
+        if (!config.largeSubnetConfig.subVlans || config.largeSubnetConfig.subVlans.length === 0) {
+          errors.push('At least one sub-VLAN is required for large_subnet mode');
+        } else {
+          config.largeSubnetConfig.subVlans.forEach((subVlan, index) => {
+            if (!subVlan.id) {
+              errors.push(`Sub-VLAN ${index}: id is required`);
+            }
+            if (!subVlan.name) {
+              errors.push(`Sub-VLAN ${index}: name is required`);
+            }
+            if (subVlan.subnetSize < 16 || subVlan.subnetSize > 30) {
+              errors.push(`Sub-VLAN ${index}: subnetSize must be between 16 and 30, got ${subVlan.subnetSize}`);
+            }
+            if (subVlan.subnetIndex < 0) {
+              errors.push(`Sub-VLAN ${index}: subnetIndex must be >= 0, got ${subVlan.subnetIndex}`);
+            }
+          });
+        }
+      }
+
+      return {
+        valid: errors.length === 0,
+        errors
+      };
+    }
+
+    // For other modes, validate vlanCount matches vlans array length
     if (config.vlanCount !== config.vlans.length) {
       errors.push(`vlanCount (${config.vlanCount}) does not match number of VLANs (${config.vlans.length})`);
     }

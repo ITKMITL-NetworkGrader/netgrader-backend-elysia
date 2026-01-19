@@ -36,7 +36,7 @@ const LabBodySchema = t.Object({
     }),
     vlanConfiguration: t.Optional(t.Object({
       mode: t.Union([t.Literal("fixed_vlan"), t.Literal("lecturer_group"), t.Literal("calculated_vlan"), t.Literal("large_subnet")]),
-      vlanCount: t.Number({ minimum: 1, maximum: 10 }),
+      vlanCount: t.Number({ minimum: 0, maximum: 10 }), // 0 for large_subnet mode, 1-10 for other modes
       vlans: t.Array(t.Object({
         id: t.String(),
         vlanId: t.Optional(t.Number({ minimum: 1, maximum: 4094 })),

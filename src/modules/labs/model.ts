@@ -223,7 +223,7 @@ const labSchema = new Schema<ILab>({
         vlanCount: {
           type: Number,
           required: true,
-          min: 1,
+          min: 0, // 0 for large_subnet mode, 1-10 for other modes
           max: 10
         },
         vlans: [{
