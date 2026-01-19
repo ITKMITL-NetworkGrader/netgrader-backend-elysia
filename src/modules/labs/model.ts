@@ -325,7 +325,7 @@ const labSchema = new Schema<ILab>({
             fixedVlanId: {
               type: Number,
               required: false,
-              min: 2,
+              min: 1, // Allow VLAN 1 for fixed assignments (random VLANs still use 2-4094)
               max: 4094
             }
           }]

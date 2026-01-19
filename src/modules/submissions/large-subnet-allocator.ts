@@ -210,7 +210,8 @@ export class LargeSubnetAllocator {
             if (subVlan.vlanIdRandomized) {
                 finalVlanIds.push(randomVlanIds[randomIndex++]);
             } else {
-                finalVlanIds.push(subVlan.fixedVlanId || 2);
+                // Use nullish coalescing (??) instead of || to allow fixedVlanId: 1
+                finalVlanIds.push(subVlan.fixedVlanId ?? 2);
             }
         }
 

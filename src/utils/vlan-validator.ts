@@ -72,6 +72,14 @@ export class VlanValidator {
             if (subVlan.subnetIndex < 0) {
               errors.push(`Sub-VLAN ${index}: subnetIndex must be >= 0, got ${subVlan.subnetIndex}`);
             }
+            // Validate fixedVlanId when not using randomized VLAN IDs
+            if (subVlan.vlanIdRandomized === false) {
+              if (subVlan.fixedVlanId === undefined || subVlan.fixedVlanId === null) {
+                errors.push(`Sub-VLAN ${index}: fixedVlanId is required when vlanIdRandomized is false`);
+              } else if (subVlan.fixedVlanId < 1 || subVlan.fixedVlanId > 4094) {
+                errors.push(`Sub-VLAN ${index}: fixedVlanId must be between 1 and 4094, got ${subVlan.fixedVlanId}`);
+              }
+            }
           });
         }
       }
