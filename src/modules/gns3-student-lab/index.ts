@@ -34,7 +34,8 @@ export const gns3StudentLabRoutes = new Elysia({ prefix: "/student-lab/gns3" })
                 body.courseName,
                 body.labName,
                 user.fullName || body.studentId,
-                user.gns3ServerIndex  // undefined if not yet assigned
+                user.gns3ServerIndex,  // undefined if not yet assigned
+                user.gns3AceId         // undefined if ACE not yet created
             );
 
             if (!result.success) {
@@ -45,13 +46,18 @@ export const gns3StudentLabRoutes = new Elysia({ prefix: "/student-lab/gns3" })
                 };
             }
 
-            // Store server index if newly assigned
+            // Store server index and/or ACE ID if newly created
+            const updateFields: { gns3ServerIndex?: number; gns3AceId?: string } = {};
             if (user.gns3ServerIndex === undefined && result.serverIndex !== undefined) {
-                await User.updateOne(
-                    { _id: user._id },
-                    { gns3ServerIndex: result.serverIndex }
-                );
-                console.log(`[GNS3] Stored server index ${result.serverIndex} for user ${body.studentId}`);
+                updateFields.gns3ServerIndex = result.serverIndex;
+                console.log(`[GNS3] Storing server index ${result.serverIndex} for user ${body.studentId}`);
+            }
+            if (user.gns3AceId === undefined && result.aceId !== undefined || user.gns3AceId !== result.aceId) {
+                updateFields.gns3AceId = result.aceId;
+                console.log(`[GNS3] Storing ACE ID ${result.aceId} for user ${body.studentId}`);
+            }
+            if (Object.keys(updateFields).length > 0) {
+                await User.updateOne({ _id: user._id }, updateFields);
             }
 
             return {

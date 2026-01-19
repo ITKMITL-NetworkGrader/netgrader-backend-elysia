@@ -77,6 +77,7 @@ export interface SetupResult {
     userId?: string;
     poolId?: string;
     serverIndex?: number;
+    aceId?: string;  // ACE ID if newly created (for storing in MongoDB to prevent duplicates)
 }
 
 /**
@@ -612,6 +613,47 @@ export class GNS3v3Service {
     }
 
     /**
+     * Verify if an ACE still exists in GNS3
+     * Used to handle cases where ACE was manually deleted
+     */
+    static async verifyACEExists(
+        token: string,
+        aceId: string,
+        config: GNS3v3Config = DEFAULT_CONFIG
+    ): Promise<{ success: boolean; exists: boolean; error?: string }> {
+        try {
+            // If aceId is 'existing', we need to verify differently - assume it exists
+            if (aceId === 'existing') {
+                return { success: true, exists: true };
+            }
+
+            const url = `${this.buildBaseUrl(config)}/access/acl/${aceId}`;
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: this.buildHeaders(token),
+                signal: AbortSignal.timeout(10000),
+            });
+
+            if (response.status === 404) {
+                // ACE was deleted
+                return { success: true, exists: false };
+            }
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                return { success: false, exists: false, error: `Failed to verify ACE: ${errorText}` };
+            }
+
+            return { success: true, exists: true };
+        } catch (error) {
+            const err = error as Error;
+            // On error, assume ACE exists to avoid creating duplicates
+            console.warn(`[GNS3] Could not verify ACE ${aceId}: ${err.message}, assuming it exists`);
+            return { success: true, exists: true };
+        }
+    }
+
+    /**
      * Generate project URL for student access
      * Direct link to project - works if already logged in
      */
@@ -646,8 +688,9 @@ export class GNS3v3Service {
      * @param labName - Lab name for project naming
      * @param fullName - Student's full name (for GNS3 user creation)
      * @param serverIndex - Stored server index from MongoDB (undefined if new assignment needed)
+     * @param existingAceId - Stored ACE ID from MongoDB (undefined if ACE not yet created)
      * @param onProgress - Optional progress callback
-     * @returns SetupResult with serverIndex for storing in MongoDB
+     * @returns SetupResult with serverIndex and aceId for storing in MongoDB
      */
     static async setupStudentLab(
         studentId: string,
@@ -655,6 +698,7 @@ export class GNS3v3Service {
         labName: string,
         fullName: string = studentId,
         serverIndex?: number,
+        existingAceId?: string,
         onProgress?: (step: string) => void
     ): Promise<SetupResult> {
         try {
@@ -710,21 +754,43 @@ export class GNS3v3Service {
                 }
             }
 
-            // Step 4: Ensure ACE exists (idempotent - handles 409 conflict)
-            onProgress?.('ensuring_access');
-            const roleResult = await this.getStudentRoleId(token, serverConfig);
-            if (roleResult.success && roleResult.roleId) {
-                const aceResult = await this.createACE(token, {
-                    userId: userResult.userId,
-                    roleId: roleResult.roleId,
-                    poolId: poolResult.poolId,
-                }, serverConfig);
-                if (!aceResult.success) {
-                    console.warn(`[GNS3] Failed to create ACE (may already exist): ${aceResult.error}`);
-                    // Continue anyway - ACE might already exist
+            // Step 4: Handle ACE creation/verification
+            // - If no existingAceId: create new ACE
+            // - If existingAceId set: verify it still exists, recreate if deleted
+            let createdAceId: string | undefined = undefined;
+            let needsAceCreation = !existingAceId;
+
+            // Verify existing ACE still exists (handles manual deletion case)
+            if (existingAceId) {
+                onProgress?.('verifying_access');
+                const verifyResult = await this.verifyACEExists(token, existingAceId, serverConfig);
+                if (verifyResult.success && !verifyResult.exists) {
+                    console.log(`[GNS3] ACE ${existingAceId} was deleted, will recreate for user ${username}`);
+                    needsAceCreation = true;
+                } else if (verifyResult.exists) {
+                    console.log(`[GNS3] ACE ${existingAceId} verified for user ${username}`);
                 }
-            } else {
-                console.warn(`[GNS3] Could not get Student role for ACE: ${roleResult.error}`);
+            }
+
+            if (needsAceCreation) {
+                onProgress?.('ensuring_access');
+                const roleResult = await this.getStudentRoleId(token, serverConfig);
+                if (roleResult.success && roleResult.roleId) {
+                    const aceResult = await this.createACE(token, {
+                        userId: userResult.userId,
+                        roleId: roleResult.roleId,
+                        poolId: poolResult.poolId,
+                    }, serverConfig);
+                    if (!aceResult.success) {
+                        console.warn(`[GNS3] Failed to create ACE: ${aceResult.error}`);
+                        // Continue anyway - ACE might already exist
+                    } else {
+                        createdAceId = aceResult.aceId;
+                        console.log(`[GNS3] Created ACE (${createdAceId}) for user ${username} on server ${assignedServerIndex}`);
+                    }
+                } else {
+                    console.warn(`[GNS3] Could not get Student role for ACE: ${roleResult.error}`);
+                }
             }
 
             // Step 5: Create Project
@@ -756,6 +822,7 @@ export class GNS3v3Service {
                 userId: userResult.userId,
                 poolId: poolResult.poolId,
                 serverIndex: assignedServerIndex,
+                aceId: createdAceId,  // Return ACE ID if newly created
             };
         } catch (error) {
             const err = error as Error;
