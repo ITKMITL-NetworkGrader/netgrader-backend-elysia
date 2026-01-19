@@ -1537,11 +1537,28 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
                     const lecturerStart = calc.lecturerRangeStart ?? calc.lecturerOffset ?? null;
                     const lecturerEnd = calc.lecturerRangeEnd ?? calc.lecturerRangeStart ?? calc.lecturerOffset ?? null;
 
-                    const vlan = typeof calc.vlanIndex === 'number'
-                      ? lab.network?.vlanConfiguration?.vlans?.[calc.vlanIndex]
-                      : undefined;
+                    // Get subnet mask - handle Large Subnet Mode separately
+                    let subnetMask: number;
+                    const vlanConfig = lab.network?.vlanConfiguration;
 
-                    const subnetMask = vlan?.subnetMask ?? lab.network?.topology?.subnetMask ?? 24;
+                    if (vlanConfig?.mode === 'large_subnet' && vlanConfig.largeSubnetConfig) {
+                      // Large Subnet Mode: get mask from subVlan's subnetSize
+                      const subVlan = typeof calc.vlanIndex === 'number'
+                        ? vlanConfig.largeSubnetConfig.subVlans?.[calc.vlanIndex]
+                        : undefined;
+                      subnetMask = subVlan?.subnetSize ?? lab.network?.topology?.subnetMask ?? 24;
+                      console.log(`[Lecturer Range - Large Subnet] Using subVlan subnetSize:`, {
+                        vlanIndex: calc.vlanIndex,
+                        subVlanName: subVlan?.name,
+                        subnetSize: subnetMask
+                      });
+                    } else {
+                      // Regular VLAN mode
+                      const vlan = typeof calc.vlanIndex === 'number'
+                        ? vlanConfig?.vlans?.[calc.vlanIndex]
+                        : undefined;
+                      subnetMask = vlan?.subnetMask ?? lab.network?.topology?.subnetMask ?? 24;
+                    }
 
                     // Reject empty student answers for range validation
                     if (studentAnswer.length === 0) {
