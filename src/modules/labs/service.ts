@@ -76,7 +76,7 @@ export class LabService {
     limit?: number;
   }) {
     try {
-      const { courseId, createdBy, type, page = 1, limit = 10 } = filters;
+      const { courseId, createdBy, type, page = 1, limit = 20 } = filters;
       const skip = (page - 1) * limit;
 
       // Build query filter
@@ -260,7 +260,7 @@ export class LabService {
   /**
    * Get labs by course ID
    */
-  static async getLabsByCourse(courseId: string, page: number = 1, limit: number = 10) {
+  static async getLabsByCourse(courseId: string, page: number = 1, limit: number = 20) {
     try {
       const courseObjectId = new ObjectId(courseId);
       const skip = (page - 1) * limit;

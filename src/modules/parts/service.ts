@@ -206,7 +206,7 @@ export class PartService {
     limit?: number;
   } = {}) {
     try {
-      const { labId, createdBy, page = 1, limit = 10 } = filters;
+      const { labId, createdBy, page = 1, limit = 100 } = filters;
       const skip = (page - 1) * limit;
 
       // Build query filter
@@ -417,7 +417,7 @@ export class PartService {
   /**
    * Get parts by lab ID
    */
-  static async getPartsByLab(labId: string, page: number = 1, limit: number = 10) {
+  static async getPartsByLab(labId: string, page: number = 1, limit: number = 100) {
     try {
       const skip = (page - 1) * limit;
 
