@@ -565,7 +565,100 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
   // Handle VLAN-based calculations (for network addresses, broadcast, etc.)
   if (vlanIndex !== undefined && calculationType !== 'device_interface_ip') {
     // Get VLAN configuration from lab (VLANs are in vlanConfiguration.vlans)
-    const vlans = lab.network?.vlanConfiguration?.vlans || [];
+    const vlanConfig = lab.network?.vlanConfiguration;
+    const vlans = vlanConfig?.vlans || [];
+
+    // ▶️ LARGE SUBNET MODE: Handle calculations using subVlans instead of vlans
+    if (vlanConfig?.mode === 'large_subnet' && vlanConfig.largeSubnetConfig) {
+      const subVlans = vlanConfig.largeSubnetConfig.subVlans || [];
+      const subVlan = subVlans[vlanIndex];
+
+      if (!subVlan) {
+        throw new Error(`Sub-VLAN at index ${vlanIndex} not found in largeSubnetConfig`);
+      }
+
+      // For Large Subnet Mode, use the subVlan's subnetSize for mask calculations
+      const subVlanSubnetMask = subVlan.subnetSize;
+
+      switch (calculationType) {
+        case 'vlan_subnet_mask':
+        case 'dotted_subnet_mask': {
+          const result = subnetMaskToDottedDecimal(subVlanSubnetMask);
+          console.log(`[Large Subnet - Subnet Mask] Sub-VLAN ${vlanIndex}:`, {
+            subVlanName: subVlan.name,
+            cidr: subVlanSubnetMask,
+            dottedDecimal: result
+          });
+          return result;
+        }
+        case 'subnet_prefix_length': {
+          const result = `/${subVlanSubnetMask}`;
+          console.log(`[Large Subnet - Prefix Length] Sub-VLAN ${vlanIndex}:`, {
+            subVlanName: subVlan.name,
+            result
+          });
+          return result;
+        }
+        case 'subnet_calculation_network': {
+          // Return the network address for this sub-VLAN from the student's allocation
+          if (!largeSubnetAllocation) {
+            throw new Error('Large subnet allocation required for subnet_calculation_network');
+          }
+          const result = LargeSubnetAllocator.getSubVlanNetwork(largeSubnetAllocation, subVlan);
+          console.log(`[Large Subnet - Network Address] Sub-VLAN ${vlanIndex}:`, {
+            subVlanName: subVlan.name,
+            result
+          });
+          return result;
+        }
+        case 'cidr_notation': {
+          // Return network/prefix for this sub-VLAN
+          if (!largeSubnetAllocation) {
+            throw new Error('Large subnet allocation required for cidr_notation');
+          }
+          const networkAddr = LargeSubnetAllocator.getSubVlanNetwork(largeSubnetAllocation, subVlan);
+          const result = `${networkAddr}/${subVlanSubnetMask}`;
+          console.log(`[Large Subnet - CIDR Notation] Sub-VLAN ${vlanIndex}:`, {
+            subVlanName: subVlan.name,
+            result
+          });
+          return result;
+        }
+        case 'wildcard_mask': {
+          // Calculate wildcard mask (inverse of subnet mask)
+          const wildcardMask = ~((~0 << (32 - subVlanSubnetMask)) >>> 0) >>> 0;
+          const result = [
+            (wildcardMask >>> 24) & 0xFF,
+            (wildcardMask >>> 16) & 0xFF,
+            (wildcardMask >>> 8) & 0xFF,
+            wildcardMask & 0xFF
+          ].join('.');
+          console.log(`[Large Subnet - Wildcard Mask] Sub-VLAN ${vlanIndex}:`, {
+            subVlanName: subVlan.name,
+            subnetMask: subVlanSubnetMask,
+            result
+          });
+          return result;
+        }
+        case 'vlan_id': {
+          // Get VLAN ID from allocation (randomized or fixed)
+          if (!largeSubnetAllocation) {
+            throw new Error('Large subnet allocation required for vlan_id');
+          }
+          const vlanId = largeSubnetAllocation.randomizedVlanIds[vlanIndex];
+          if (vlanId === undefined) {
+            throw new Error(`VLAN ID not found for sub-VLAN index ${vlanIndex}`);
+          }
+          console.log(`[Large Subnet - VLAN ID] Sub-VLAN ${vlanIndex}:`, {
+            subVlanName: subVlan.name,
+            vlanId
+          });
+          return vlanId.toString();
+        }
+        default:
+          throw new Error(`Calculation type ${calculationType} not supported for Large Subnet Mode`);
+      }
+    }
 
     // If lab doesn't have VLANs configured, use base network topology for simple IP calculations
     if (vlans.length === 0) {
@@ -595,7 +688,8 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
           const broadcastAddr = calculateBroadcastAddress(studentIP, subnetMask);
           return calculateLastUsableIP(broadcastAddr);
         }
-        case 'vlan_subnet_mask': {
+        case 'vlan_subnet_mask':
+        case 'dotted_subnet_mask': {
           return subnetMaskToDottedDecimal(subnetMask);
         }
         case 'vlan_lecturer_offset': {
@@ -682,7 +776,8 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
         });
         return result;
       }
-      case 'vlan_subnet_mask': {
+      case 'vlan_subnet_mask':
+      case 'dotted_subnet_mask': {
         const result = subnetMaskToDottedDecimal(vlanSubnetMask);
         console.log(`[VLAN Subnet Mask] VLAN ${vlanIndex}:`, {
           cidr: vlanSubnetMask,
