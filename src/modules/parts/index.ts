@@ -559,6 +559,61 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
       return result;
     }
 
+    // Check if sub-VLAN based IPv6 is configured (subVlan6_X for Large Subnet Mode)
+    if (ipVariable.ipv6InputType?.startsWith('subVlan6_')) {
+      const ipv6Config = lab.network?.ipv6Config;
+      if (!ipv6Config?.enabled || !ipv6Config.template) {
+        throw new Error('IPv6 configuration is not enabled for this lab');
+      }
+
+      // Parse VLAN index from input type (e.g., 'subVlan6_3' -> 3)
+      // Falls back to ipv6VlanIndex or vlanIndex if parsing fails
+      const ipv6InputType = ipVariable.ipv6InputType;
+      const parsedIndex = parseInt(ipv6InputType.replace('subVlan6_', ''), 10);
+      const ipv6VlanIndex = !isNaN(parsedIndex) ? parsedIndex : (ipVariable.ipv6VlanIndex ?? ipVariable.vlanIndex ?? 0);
+      const vlanConfig = lab.network?.vlanConfiguration;
+
+      if (vlanConfig?.mode !== 'large_subnet' || !largeSubnetAllocation) {
+        throw new Error(`subVlan6_* input type requires Large Subnet Mode with allocation for ${deviceId}.${interfaceName}`);
+      }
+
+      // Large Subnet Mode: Get VLAN ID from allocation's randomized list
+      // Fallback: If index is out of bounds (session was created before more sub-VLANs were added),
+      // try to get fixedVlanId from config or generate a deterministic VLAN ID
+      let vlanIdForIpv6 = largeSubnetAllocation.randomizedVlanIds[ipv6VlanIndex];
+      if (vlanIdForIpv6 === undefined) {
+        const subVlanConfig = vlanConfig.largeSubnetConfig?.subVlans?.[ipv6VlanIndex];
+        if (subVlanConfig?.fixedVlanId !== undefined) {
+          vlanIdForIpv6 = subVlanConfig.fixedVlanId;
+          console.log(`[Large Subnet Mode] Using fixed VLAN ID ${vlanIdForIpv6} for sub-VLAN index ${ipv6VlanIndex}`);
+        } else {
+          // Generate deterministic VLAN ID based on student hash and index
+          const hash = parseInt(studentId.replace(/\D/g, '').slice(-4) || '1234', 10);
+          vlanIdForIpv6 = 2 + ((hash + ipv6VlanIndex * 1000) % 4094);
+          console.warn(`[Large Subnet Mode] VLAN ID not found for sub-VLAN index ${ipv6VlanIndex}, generated fallback: ${vlanIdForIpv6}`);
+        }
+      }
+
+      const interfaceOffset = parseInt(ipVariable.ipv6InterfaceId || '1', 10) || 1;
+      const fullResult = generateIPv6FromTemplate(
+        ipv6Config.template,
+        studentId,
+        vlanIdForIpv6.toString(),
+        interfaceOffset
+      );
+      // Strip prefix length
+      const result = fullResult.split('/')[0];
+      console.log(`[Device Interface IPv6 - Sub-VLAN] ${deviceId}.${interfaceName}:`, {
+        template: ipv6Config.template,
+        subVlanIndex: ipv6VlanIndex,
+        vlanId: vlanIdForIpv6,
+        interfaceOffset,
+        fullResult,
+        result
+      });
+      return result;
+    }
+
     throw new Error(`Unsupported IPv6 input type for ${deviceId}.${interfaceName}: ${ipVariable.ipv6InputType}`);
   }
 
@@ -645,9 +700,17 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
           if (!largeSubnetAllocation) {
             throw new Error('Large subnet allocation required for vlan_id');
           }
-          const vlanId = largeSubnetAllocation.randomizedVlanIds[vlanIndex];
+          let vlanId = largeSubnetAllocation.randomizedVlanIds[vlanIndex];
           if (vlanId === undefined) {
-            throw new Error(`VLAN ID not found for sub-VLAN index ${vlanIndex}`);
+            // Fallback for sessions created before more sub-VLANs were added
+            if (subVlan.fixedVlanId !== undefined) {
+              vlanId = subVlan.fixedVlanId;
+            } else {
+              // Generate deterministic VLAN ID
+              const hash = parseInt(studentId.replace(/\D/g, '').slice(-4) || '1234', 10);
+              vlanId = 2 + ((hash + vlanIndex * 1000) % 4094);
+              console.warn(`[Large Subnet - VLAN ID] Fallback for sub-VLAN index ${vlanIndex}: ${vlanId}`);
+            }
           }
           console.log(`[Large Subnet - VLAN ID] Sub-VLAN ${vlanIndex}:`, {
             subVlanName: subVlan.name,
@@ -670,6 +733,34 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
           console.log(`[Large Subnet - Lecturer Range/Offset] Sub-VLAN ${vlanIndex}:`, {
             subVlanName: subVlan.name,
             lecturerOffset: offsetToUse,
+            result
+          });
+          return result;
+        }
+        case 'ipv6_link_local': {
+          // Generate link-local address
+          const interfaceId = calculatedAnswer.ipv6InterfaceId || (lecturerOffset || 1).toString();
+          const result = generateLinkLocalAddress(interfaceId);
+          console.log(`[Large Subnet - IPv6 Link-Local] Sub-VLAN ${vlanIndex}:`, {
+            subVlanName: subVlan.name,
+            interfaceId,
+            result
+          });
+          return result;
+        }
+        case 'ipv6_slaac': {
+          // SLAAC cells use student-provided answer (like vlan_lecturer_range)
+          // The student enters their SLAAC-assigned IPv6 address
+          console.log(`[Large Subnet - IPv6 SLAAC] Sub-VLAN ${vlanIndex}: Student-updatable cell (uses override)`);
+          // Return empty string as placeholder - actual value comes from lecturerRangeOverrides
+          return '';
+        }
+        case 'ipv6_prefix_length': {
+          // Return just the prefix length (e.g., /64)
+          const prefixLength = 64; // Standard IPv6 prefix length for /64 subnets
+          const result = `/${prefixLength}`;
+          console.log(`[Large Subnet - IPv6 Prefix Length] Sub-VLAN ${vlanIndex}:`, {
+            subVlanName: subVlan.name,
             result
           });
           return result;
