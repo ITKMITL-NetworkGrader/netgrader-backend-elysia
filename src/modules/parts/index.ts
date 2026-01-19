@@ -1515,7 +1515,22 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
                     }
                   }
 
-                  let isCorrect = studentAnswer.toLowerCase() === expectedAnswer.toLowerCase();
+                  // Validate that both student answer and expected answer are non-empty
+                  // Empty student answers should never be correct (no free points)
+                  // Empty expected answers indicate a configuration error
+                  let isCorrect = false;
+                  if (studentAnswer.length === 0) {
+                    // Empty student answer is always incorrect
+                    isCorrect = false;
+                    console.log(`[Cell Validation] Row ${rowIndex}, Col ${colIndex}: Empty student answer - marked incorrect`);
+                  } else if (expectedAnswer.length === 0) {
+                    // Empty expected answer indicates an error - don't award points
+                    isCorrect = false;
+                    console.log(`[Cell Validation] Row ${rowIndex}, Col ${colIndex}: Empty expected answer - marked incorrect`);
+                  } else {
+                    // Both have values, compare them
+                    isCorrect = studentAnswer.toLowerCase() === expectedAnswer.toLowerCase();
+                  }
 
                   if (cell.answerType === 'calculated' && cell.calculatedAnswer?.calculationType === 'vlan_lecturer_range') {
                     const calc = cell.calculatedAnswer;
@@ -1528,7 +1543,10 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
 
                     const subnetMask = vlan?.subnetMask ?? lab.network?.topology?.subnetMask ?? 24;
 
-                    if (lecturerStart !== null && lecturerEnd !== null && expectedAnswer) {
+                    // Reject empty student answers for range validation
+                    if (studentAnswer.length === 0) {
+                      isCorrect = false;
+                    } else if (lecturerStart !== null && lecturerEnd !== null && expectedAnswer) {
                       const networkAddr = calculateNetworkAddress(expectedAnswer, subnetMask);
                       const networkNum = ipToNumber(networkAddr);
                       const studentNum = ipToNumber(studentAnswer);
