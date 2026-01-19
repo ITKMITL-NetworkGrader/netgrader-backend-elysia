@@ -655,6 +655,25 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
           });
           return vlanId.toString();
         }
+        case 'vlan_lecturer_offset':
+        case 'vlan_lecturer_range': {
+          // Calculate IP within the sub-VLAN block using lecturer offset
+          if (!largeSubnetAllocation) {
+            throw new Error('Large subnet allocation required for vlan_lecturer_range/offset');
+          }
+          const offsetToUse = lecturerOffset || 1;
+          const result = LargeSubnetAllocator.calculateSubVlanIP(
+            largeSubnetAllocation,
+            subVlan,
+            offsetToUse
+          );
+          console.log(`[Large Subnet - Lecturer Range/Offset] Sub-VLAN ${vlanIndex}:`, {
+            subVlanName: subVlan.name,
+            lecturerOffset: offsetToUse,
+            result
+          });
+          return result;
+        }
         default:
           throw new Error(`Calculation type ${calculationType} not supported for Large Subnet Mode`);
       }
