@@ -28,23 +28,24 @@ const RichContentSchema = t.Object({
 });
 
 // IP Table Questionnaire Schema
+// Made fields optional to handle partial/empty objects from non-ip_table_questionnaire question types
 const IpTableQuestionnaireSchema = t.Object({
-  tableId: t.String(),
-  rowCount: t.Number(),
-  columnCount: t.Number(),
-  columns: t.Array(t.Object({
+  tableId: t.Optional(t.String()),
+  rowCount: t.Optional(t.Number()),
+  columnCount: t.Optional(t.Number()),
+  columns: t.Optional(t.Array(t.Object({
     columnId: t.String(),
     label: t.String(),
     order: t.Number()
-  })),
-  rows: t.Array(t.Object({
+  }))),
+  rows: t.Optional(t.Array(t.Object({
     rowId: t.String(),
     deviceId: t.String(),
     interfaceName: t.String(),
     displayName: t.String(),
     order: t.Number()
-  })),
-  cells: t.Array(t.Array(t.Object({
+  }))),
+  cells: t.Optional(t.Array(t.Array(t.Object({
     cellId: t.String(),
     rowId: t.String(),
     columnId: t.String(),
@@ -97,9 +98,9 @@ const IpTableQuestionnaireSchema = t.Object({
     })),
     readonlyContent: t.Optional(t.String()),
     blankReason: t.Optional(t.String()),
-    points: t.Number(),
-    autoCalculated: t.Boolean()
-  })))
+    points: t.Optional(t.Number()),
+    autoCalculated: t.Optional(t.Boolean())
+  }))))
 });
 
 // Question Schema
