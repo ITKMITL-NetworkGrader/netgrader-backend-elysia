@@ -412,7 +412,8 @@ export class IPGenerator {
     managementIp: string,
     gns3Nodes?: GNS3Node[],
     overrideMap?: Map<string, string>,
-    gns3ServerIp?: string
+    gns3ServerIp?: string,
+    largeSubnetAllocation?: AllocationResult  // For sub-VLAN IP generation in large_subnet mode
   ): Promise<GeneratedDevice[]> {
     const devices: GeneratedDevice[] = [];
 
@@ -436,7 +437,8 @@ export class IPGenerator {
         managementInterface,
         lab,
         studentId,
-        managementIp
+        managementIp,
+        largeSubnetAllocation
       );
 
       if (managementInterface.name) {
@@ -1000,15 +1002,52 @@ export class IPGenerator {
     console.log(`[Override Maps] IPv4 overrides: ${ipv4OverrideMap.size}, IPv6 overrides: ${ipv6OverrideMap.size}`);
 
     // Extract Large Subnet Allocation from session for sub-VLAN IP generation
+    // OR allocate on-demand if session doesn't have one yet but lab uses large_subnet mode
     let largeSubnetAllocation: AllocationResult | undefined;
+
+    // Check if lab uses large_subnet mode
+    const vlanConfig = lab.network?.vlanConfiguration;
+    const lsConfig = vlanConfig?.largeSubnetConfig as any;
+    const hasValidLargeSubnetConfig = vlanConfig?.mode === 'large_subnet' &&
+      lsConfig &&
+      (lsConfig.privateNetworkPool ||
+        lsConfig.baseNetwork ||
+        (lsConfig.subVlans && lsConfig.subVlans.length > 0));
+
     if (session.largeSubnetAllocation?.allocatedSubnetIndex !== undefined) {
+      // Reuse existing allocation from session
       largeSubnetAllocation = {
         subnetIndex: session.largeSubnetAllocation.allocatedSubnetIndex,
         subnetCIDR: session.largeSubnetAllocation.allocatedSubnetCIDR,
         networkAddress: session.largeSubnetAllocation.networkAddress,
         randomizedVlanIds: session.largeSubnetAllocation.randomizedVlanIds
       };
-      console.log(`[Large Subnet Mode] Using allocation for grading: ${largeSubnetAllocation.subnetCIDR}`);
+      console.log(`[Large Subnet Mode] Using existing allocation for grading: ${largeSubnetAllocation.subnetCIDR}`);
+    } else if (hasValidLargeSubnetConfig) {
+      // On-demand allocation: session was created before large subnet mode was configured
+      console.log(`[Large Subnet Mode] On-demand allocation for student ${studentId} during grading`);
+
+      const normalizedConfig = normalizeLargeSubnetConfig(vlanConfig.largeSubnetConfig);
+      if (!normalizedConfig) {
+        throw new Error('Invalid largeSubnetConfig: could not determine privateNetworkPool');
+      }
+
+      largeSubnetAllocation = await LargeSubnetAllocator.allocateSubnet(
+        studentId,
+        labId,
+        normalizedConfig
+      );
+
+      // Save allocation to session for future use
+      session.largeSubnetAllocation = {
+        allocatedSubnetIndex: largeSubnetAllocation.subnetIndex,
+        allocatedSubnetCIDR: largeSubnetAllocation.subnetCIDR,
+        networkAddress: largeSubnetAllocation.networkAddress,
+        randomizedVlanIds: largeSubnetAllocation.randomizedVlanIds,
+        allocatedAt: new Date()
+      };
+      await session.save();
+      console.log(`[Large Subnet Mode] Allocated and saved: ${largeSubnetAllocation.subnetCIDR}`);
     }
 
     // Generate devices, IP mappings, and VLAN mappings
@@ -1018,7 +1057,8 @@ export class IPGenerator {
       managementIp,
       options?.gns3Nodes,
       ipv4OverrideMap.size > 0 ? ipv4OverrideMap : undefined,
-      options?.gns3ServerIp
+      options?.gns3ServerIp,
+      largeSubnetAllocation
     );
 
     const ipMappings = this.generateIPMappings(
