@@ -637,10 +637,14 @@ export class IPGenerator {
         if (ipv6Address) {
           // Strip subnet prefix (e.g., /64) from the IPv6 address
           mappings[key] = ipv6Address.split('/')[0];
+          console.log(`[IPv6 Mappings] Generated: ${key} -> ${mappings[key]}`);
+        } else {
+          console.log(`[IPv6 Mappings] Skipped ${key} - no IPv6 config (isIpv6Variable: ${ipVar.isIpv6Variable}, ipv6InputType: ${ipVar.ipv6InputType})`);
         }
       }
     }
 
+    console.log(`[IPv6 Mappings] Total mappings generated:`, Object.keys(mappings).length, mappings);
     return mappings;
   }
 
