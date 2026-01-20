@@ -341,6 +341,54 @@ export class IPGenerator {
       }
     }
 
+    // For sub-VLAN IPv6 addresses (subVlan6_0 through subVlan6_9) - for routers/switches
+    if (ipVariable.ipv6InputType?.startsWith('subVlan6_')) {
+      // Extract VLAN index from type (subVlan6_0 -> 0)
+      const vlanIndex = parseInt(ipVariable.ipv6InputType.replace('subVlan6_', ''), 10);
+      if (isNaN(vlanIndex)) {
+        throw new Error(`Invalid IPv6 sub-VLAN input type: ${ipVariable.ipv6InputType}`);
+      }
+
+      // Get VLAN ID - check for Large Subnet Mode first
+      let vlanId: number;
+      const vlanConfig = lab.network?.vlanConfiguration;
+
+      if (vlanConfig?.mode === 'large_subnet' && largeSubnetAllocation) {
+        // In Large Subnet Mode, get VLAN ID from allocation's randomized list
+        vlanId = largeSubnetAllocation.randomizedVlanIds[vlanIndex];
+        if (vlanId === undefined) {
+          throw new Error(`Large Subnet Mode: VLAN ID not found for sub-VLAN index ${vlanIndex}`);
+        }
+        console.log(`[IPv6 Generation - subVlan6 - Large Subnet Mode] VLAN Index ${vlanIndex} -> VLAN ID ${vlanId}`);
+      } else {
+        // Regular mode - get from vlanMappings
+        const vlanKey = `vlan${vlanIndex}`;
+        const mappedVlanId = vlanMappings[vlanKey];
+        if (mappedVlanId === undefined) {
+          throw new Error(`VLAN ID not found for ${vlanKey}`);
+        }
+        vlanId = mappedVlanId;
+      }
+
+      // Get interface identifier (offset) from lecturer config or default to 1
+      const interfaceOffset = parseInt(ipVariable.ipv6InterfaceId || '1', 10) || 1;
+
+      // Check if lab has IPv6 template configuration
+      const ipv6Config = lab.network.ipv6Config;
+      if (ipv6Config?.enabled && ipv6Config.template) {
+        // Use template-based generation
+        return generateIPv6FromTemplate(
+          ipv6Config.template,
+          studentId,
+          vlanId.toString(),
+          interfaceOffset
+        );
+      } else {
+        // Fallback: Use legacy format for backward compatibility
+        return generateStudentIPv6Address(studentId, vlanIndex, vlanId, interfaceOffset.toString());
+      }
+    }
+
     return null;
   }
 

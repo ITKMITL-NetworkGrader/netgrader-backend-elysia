@@ -1711,7 +1711,11 @@ export const partRoutes = new Elysia({ prefix: "/parts" })
                     });
                   }
 
-                  cellDetails[rowIndex][colIndex] = { isCorrect };
+                  cellDetails[rowIndex][colIndex] = {
+                    isCorrect,
+                    expectedAnswer: expectedAnswer || null,  // DEBUG: Include expected answer in response
+                    studentAnswer: studentAnswer || null     // DEBUG: Include student answer in response
+                  } as any;
 
                   if (isCorrect) {
                     correctCells++;
