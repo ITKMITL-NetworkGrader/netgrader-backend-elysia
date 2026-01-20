@@ -667,10 +667,33 @@ export class IPGenerator {
           // Check for IPv6 suffix (e.g., {{device.interface:ipv6}})
           if (varName.endsWith(':ipv6')) {
             const baseVarName = varName.slice(0, -5); // Remove ':ipv6' suffix
+
+            // Try exact match first
             if (ipv6Mappings && ipv6Mappings[baseVarName]) {
+              console.log(`[IPv6 Transform] Resolved ${baseVarName} -> ${ipv6Mappings[baseVarName]}`);
               return ipv6Mappings[baseVarName];
             }
-            // If not found, return original match
+
+            // Try normalized key match (handle underscores vs slashes/etc)
+            const normalizedBaseVar = normalizeOverrideKey(baseVarName);
+            if (ipv6Mappings && ipv6Mappings[normalizedBaseVar]) {
+              console.log(`[IPv6 Transform] Resolved via normalized key: ${baseVarName} -> ${normalizedBaseVar} -> ${ipv6Mappings[normalizedBaseVar]}`);
+              return ipv6Mappings[normalizedBaseVar];
+            }
+
+            // Try case-insensitive match
+            if (ipv6Mappings) {
+              const lowerBaseVar = baseVarName.toLowerCase();
+              const matchingKey = Object.keys(ipv6Mappings).find(k => k.toLowerCase() === lowerBaseVar);
+              if (matchingKey) {
+                console.log(`[IPv6 Transform] Resolved via case-insensitive: ${baseVarName} -> ${matchingKey} -> ${ipv6Mappings[matchingKey]}`);
+                return ipv6Mappings[matchingKey];
+              }
+            }
+
+            // If not found, log available keys for debugging
+            console.warn(`[IPv6 Transform] UNRESOLVED: ${baseVarName} (normalized: ${normalizedBaseVar}). Available keys:`,
+              ipv6Mappings ? Object.keys(ipv6Mappings) : 'none');
             return match;
           }
 
