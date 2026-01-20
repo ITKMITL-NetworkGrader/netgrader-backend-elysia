@@ -510,7 +510,11 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
         throw new Error('IPv6 configuration is not enabled for this lab');
       }
 
-      const ipv6VlanIndex = ipVariable.ipv6VlanIndex ?? 0;
+      // Parse VLAN index from input type (e.g., 'studentVlan6_1' -> 1)
+      // Falls back to ipv6VlanIndex or vlanIndex if parsing fails
+      const ipv6InputType = ipVariable.ipv6InputType;
+      const parsedIndex = parseInt(ipv6InputType.replace('studentVlan6_', ''), 10);
+      const ipv6VlanIndex = !isNaN(parsedIndex) ? parsedIndex : (ipVariable.ipv6VlanIndex ?? ipVariable.vlanIndex ?? 0);
       const vlanConfig = lab.network?.vlanConfiguration;
 
       // Calculate VLAN ID based on mode
@@ -520,7 +524,17 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
         // Large Subnet Mode: Get VLAN ID from allocation's randomized list
         vlanIdForIpv6 = largeSubnetAllocation.randomizedVlanIds[ipv6VlanIndex];
         if (vlanIdForIpv6 === undefined) {
-          throw new Error(`Large Subnet Mode: VLAN ID not found for sub-VLAN index ${ipv6VlanIndex}`);
+          // Fallback for sessions created before more sub-VLANs were added
+          const subVlanConfig = vlanConfig.largeSubnetConfig?.subVlans?.[ipv6VlanIndex];
+          if (subVlanConfig?.fixedVlanId !== undefined) {
+            vlanIdForIpv6 = subVlanConfig.fixedVlanId;
+            console.log(`[Device Interface IPv6 - Large Subnet] Using fixed VLAN ID ${vlanIdForIpv6} for sub-VLAN index ${ipv6VlanIndex}`);
+          } else {
+            // Generate deterministic VLAN ID based on student hash and index
+            const hash = parseInt(studentId.replace(/\D/g, '').slice(-4) || '1234', 10);
+            vlanIdForIpv6 = 2 + ((hash + ipv6VlanIndex * 1000) % 4094);
+            console.warn(`[Device Interface IPv6 - Large Subnet] VLAN ID fallback for index ${ipv6VlanIndex}: ${vlanIdForIpv6}`);
+          }
         }
         console.log(`[Device Interface IPv6 - Large Subnet] VLAN Index ${ipv6VlanIndex} -> VLAN ID ${vlanIdForIpv6}`);
       } else if (vlanConfig?.mode === 'calculated_vlan') {
