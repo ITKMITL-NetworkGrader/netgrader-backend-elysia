@@ -895,12 +895,27 @@ export class IPGenerator {
     // Handle large_subnet mode - build response info (allocation already done earlier)
     if (vlanConfig?.mode === 'large_subnet' && vlanConfig.largeSubnetConfig && largeSubnetAllocation) {
       // Build sub-VLAN info for student display
-      const subVlanInfo = vlanConfig.largeSubnetConfig.subVlans.map((sv, idx) => ({
-        name: sv.name,
-        subnetSize: sv.subnetSize,
-        subnetIndex: sv.subnetIndex,
-        vlanId: largeSubnetAllocation.randomizedVlanIds[idx] || 0
-      }));
+      const subVlanInfo = vlanConfig.largeSubnetConfig.subVlans.map((sv, idx) => {
+        // Get VLAN ID from allocation, fallback to fixedVlanId from config if missing or 0
+        let vlanId = largeSubnetAllocation.randomizedVlanIds[idx];
+        if (vlanId === undefined || vlanId === 0) {
+          // Use fixedVlanId from config for fixed VLANs
+          if (sv.fixedVlanId !== undefined && sv.fixedVlanId !== 0) {
+            vlanId = sv.fixedVlanId;
+          } else if (!sv.vlanIdRandomized && sv.fixedVlanId !== undefined) {
+            // If not randomized and fixedVlanId is set, use it even if 0
+            vlanId = sv.fixedVlanId;
+          } else {
+            vlanId = 0; // Fallback for truly missing values
+          }
+        }
+        return {
+          name: sv.name,
+          subnetSize: sv.subnetSize,
+          subnetIndex: sv.subnetIndex,
+          vlanId
+        };
+      });
 
       response.largeSubnetInfo = {
         allocatedSubnet: largeSubnetAllocation.subnetCIDR,

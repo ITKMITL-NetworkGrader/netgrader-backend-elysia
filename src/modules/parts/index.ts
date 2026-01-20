@@ -523,10 +523,11 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
       if (vlanConfig?.mode === 'large_subnet' && largeSubnetAllocation) {
         // Large Subnet Mode: Get VLAN ID from allocation's randomized list
         vlanIdForIpv6 = largeSubnetAllocation.randomizedVlanIds[ipv6VlanIndex];
-        if (vlanIdForIpv6 === undefined) {
+        // Check for undefined OR 0 (invalid VLAN ID - valid range is 1-4094)
+        if (vlanIdForIpv6 === undefined || vlanIdForIpv6 === 0) {
           // Fallback for sessions created before more sub-VLANs were added
           const subVlanConfig = vlanConfig.largeSubnetConfig?.subVlans?.[ipv6VlanIndex];
-          if (subVlanConfig?.fixedVlanId !== undefined) {
+          if (subVlanConfig?.fixedVlanId !== undefined && subVlanConfig.fixedVlanId !== 0) {
             vlanIdForIpv6 = subVlanConfig.fixedVlanId;
             console.log(`[Device Interface IPv6 - Large Subnet] Using fixed VLAN ID ${vlanIdForIpv6} for sub-VLAN index ${ipv6VlanIndex}`);
           } else {
@@ -592,12 +593,16 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
       }
 
       // Large Subnet Mode: Get VLAN ID from allocation's randomized list
-      // Fallback: If index is out of bounds (session was created before more sub-VLANs were added),
+      // Fallback: If index is out of bounds OR value is 0 (invalid/stale data),
       // try to get fixedVlanId from config or generate a deterministic VLAN ID
       let vlanIdForIpv6 = largeSubnetAllocation.randomizedVlanIds[ipv6VlanIndex];
-      if (vlanIdForIpv6 === undefined) {
+      console.log(`[subVlan6_ Debug] Index ${ipv6VlanIndex} -> Raw value from randomizedVlanIds: ${vlanIdForIpv6}, array: [${largeSubnetAllocation.randomizedVlanIds.join(', ')}]`);
+
+      // Check if undefined OR if it's 0 (which is invalid for VLAN IDs - valid range is 1-4094)
+      if (vlanIdForIpv6 === undefined || vlanIdForIpv6 === 0) {
         const subVlanConfig = vlanConfig.largeSubnetConfig?.subVlans?.[ipv6VlanIndex];
-        if (subVlanConfig?.fixedVlanId !== undefined) {
+        console.log(`[subVlan6_ Debug] Fallback triggered. subVlanConfig:`, JSON.stringify(subVlanConfig, null, 2));
+        if (subVlanConfig?.fixedVlanId !== undefined && subVlanConfig.fixedVlanId !== 0) {
           vlanIdForIpv6 = subVlanConfig.fixedVlanId;
           console.log(`[Large Subnet Mode] Using fixed VLAN ID ${vlanIdForIpv6} for sub-VLAN index ${ipv6VlanIndex}`);
         } else {
@@ -715,9 +720,10 @@ function calculateCellAnswer(calculatedAnswer: any, lab: any, studentId: string,
             throw new Error('Large subnet allocation required for vlan_id');
           }
           let vlanId = largeSubnetAllocation.randomizedVlanIds[vlanIndex];
-          if (vlanId === undefined) {
+          // Check for undefined OR 0 (invalid VLAN ID - valid range is 1-4094)
+          if (vlanId === undefined || vlanId === 0) {
             // Fallback for sessions created before more sub-VLANs were added
-            if (subVlan.fixedVlanId !== undefined) {
+            if (subVlan.fixedVlanId !== undefined && subVlan.fixedVlanId !== 0) {
               vlanId = subVlan.fixedVlanId;
             } else {
               // Generate deterministic VLAN ID
