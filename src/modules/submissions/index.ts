@@ -8,7 +8,7 @@ import { PartService } from "../parts/service";
 import { GNS3v3Service, type GNS3Node } from "../gns3-student-lab/service";
 import { User } from "../auth/model";
 import { env } from "process";
-import { authPlugin } from "../../plugins/plugins";
+import { authPlugin, requireRole } from "../../plugins/plugins";
 import { sseService } from "../../services/sse-emitter";
 
 export const submissionRoutes = new Elysia({ prefix: "/submissions" })
@@ -1117,6 +1117,69 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         tags: ["Submissions"],
         summary: "Get All User Submission History",
         description: "Get all submissions for the authenticated user across all courses and labs, sorted by date descending with pagination."
+      }
+    }
+  )
+
+  /**
+   * Force pass a student's lab part
+   * Creates a synthetic submission with a perfect score
+   * Only accessible by instructors and admins
+   */
+  .post(
+    "/force-pass",
+    async ({ body, set, authPlugin }) => {
+      try {
+        if (!authPlugin) {
+          set.status = 401;
+          return { status: "error", message: "Unauthorized" };
+        }
+
+        const { u_id: adminUserId } = authPlugin;
+
+        const submission = await SubmissionService.forcePassPart({
+          studentId: body.student_id,
+          labId: body.lab_id,
+          partId: body.part_id,
+          adminUserId,
+          reason: body.reason
+        });
+
+        set.status = 201;
+        return {
+          success: true,
+          message: `Student ${body.student_id} force-passed for part ${body.part_id}`,
+          submission: {
+            _id: submission._id,
+            jobId: submission.jobId,
+            status: submission.status,
+            attempt: submission.attempt,
+            score: submission.gradingResult?.total_points_earned,
+            totalPoints: submission.gradingResult?.total_points_possible,
+            submittedAt: submission.submittedAt
+          }
+        };
+      } catch (error) {
+        console.error("Error force-passing student:", error);
+        set.status = 500;
+        return {
+          status: "error",
+          message: `Failed to force pass: ${(error as Error).message}`
+        };
+      }
+    },
+    {
+      body: t.Object({
+        student_id: t.String(),
+        lab_id: t.String(),
+        part_id: t.String(),
+        reason: t.Optional(t.String())
+      }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Force Pass Lab Part",
+        description: "Admin/Instructor endpoint to manually mark a student's lab part as passed. Creates a synthetic submission with a perfect score."
       }
     }
   );
