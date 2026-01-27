@@ -6,6 +6,7 @@ import { IPGenerator, type LecturerRangeOverridePayload } from "./ip-generator";
 import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
 import { GNS3v3Service, type GNS3Node } from "../gns3-student-lab/service";
+import { ExportService } from "./export";
 import { User } from "../auth/model";
 import { env } from "process";
 import { authPlugin } from "../../plugins/plugins";
@@ -802,6 +803,47 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         tags: ["Submissions"],
         summary: "Get Lab Submission Overview",
         description: "Get student progression overview for a lab. Shows which part each student is on and their latest submission status. Lightweight for polling with pagination support."
+      }
+    }
+  )
+  .get(
+    "/lab/:labId/export",
+    async ({ params, query, set }) => {
+      try {
+        // Parse asOfDate from query, default to now
+        const asOfDate = query.asOfDate
+          ? new Date(query.asOfDate)
+          : new Date();
+
+        if (isNaN(asOfDate.getTime())) {
+          set.status = 400;
+          return { status: "error", message: "Invalid asOfDate format. Use ISO 8601 format." };
+        }
+
+        const data = await ExportService.exportLabScoresAtTime(params.labId, asOfDate);
+        return {
+          status: "success",
+          data,
+          asOfDate: asOfDate.toISOString(),
+          totalStudents: data.length
+        };
+      } catch (error) {
+        console.error("Error exporting lab scores:", error);
+        set.status = 500;
+        return { status: "error", message: `Failed to export lab scores: ${(error as Error).message}` };
+      }
+    },
+    {
+      params: t.Object({
+        labId: t.String()
+      }),
+      query: t.Object({
+        asOfDate: t.Optional(t.String())
+      }),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Export Lab Scores (Time Machine)",
+        description: "Export student scores for a lab as of a specific date/time. Returns best score per part with late penalties applied."
       }
     }
   )

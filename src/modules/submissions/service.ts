@@ -3,6 +3,7 @@ import { Submission, ISubmission, IGradingResult, IProgressUpdate, IFillInBlankR
 import { StudentLabSessionService } from '../student-lab-sessions/service';
 import { StudentLabSession } from '../student-lab-sessions/model';
 import { PartService } from '../parts/service';
+import { Lab } from '../labs/model';
 
 export class SubmissionService {
   private static async getNextAttempt(
@@ -18,6 +19,48 @@ export class SubmissionService {
     }).sort({ attempt: -1 });
 
     return latestSubmission ? latestSubmission.attempt + 1 : 1;
+  }
+
+  /**
+   * Calculate late penalty information for a submission
+   * @param submittedAt - When the submission was made
+   * @param dueDate - Soft deadline (after which penalty applies)
+   * @param availableUntil - Hard deadline (lab closes)
+   * @returns Object with isLate flag and penalty multiplier (1.0 = no penalty, 0.5 = 50% penalty)
+   */
+  static calculateLatePenalty(
+    submittedAt: Date | null,
+    dueDate: Date | null | undefined,
+    availableUntil: Date | null | undefined
+  ): { isLate: boolean; penaltyMultiplier: number; latePenaltyPercent: number } {
+    // No deadline set = no penalty possible
+    if (!dueDate || !submittedAt) {
+      return { isLate: false, penaltyMultiplier: 1.0, latePenaltyPercent: 0 };
+    }
+
+    const submitted = new Date(submittedAt);
+    const deadline = new Date(dueDate);
+
+    // Submitted before or on deadline = no penalty
+    if (submitted <= deadline) {
+      return { isLate: false, penaltyMultiplier: 1.0, latePenaltyPercent: 0 };
+    }
+
+    // Submitted after deadline = 50% penalty
+    // Note: If after availableUntil, the submission shouldn't exist (blocked by validation),
+    // but we still apply the penalty as a safe fallback
+    return { isLate: true, penaltyMultiplier: 0.5, latePenaltyPercent: 50 };
+  }
+
+  /**
+   * Apply late penalty to a score
+   * @param originalScore - The raw score before penalty
+   * @param penaltyMultiplier - The multiplier (e.g., 0.5 for 50% penalty)
+   * @returns The adjusted score after penalty (rounded to 2 decimal places)
+   */
+  static applyLatePenalty(originalScore: number, penaltyMultiplier: number): number {
+    // Round to 2 decimal places to preserve fractional scores
+    return Math.round(originalScore * penaltyMultiplier * 100) / 100;
   }
 
   /**
@@ -705,6 +748,11 @@ export class SubmissionService {
       partOrderMap.set(part.partId, { order: part.order, title: part.title });
     });
 
+    // Fetch lab deadline info for late penalty calculation
+    const labDoc = await Lab.findById(new Types.ObjectId(labId)).select('dueDate availableUntil').lean();
+    const labDueDate = labDoc?.dueDate ?? null;
+    const labAvailableUntil = labDoc?.availableUntil ?? null;
+
     if (options?.labSessionId) {
       if (options.labSessionId instanceof Types.ObjectId) {
         matchStage.labSessionId = options.labSessionId;
@@ -766,6 +814,10 @@ export class SubmissionService {
           submissionType: string;
           labSessionId?: string | null;
           jobId?: string;
+          isLate?: boolean;
+          originalScore?: number;
+          adjustedScore?: number;
+          latePenaltyPercent?: number;
         }>;
       }
 
@@ -821,6 +873,15 @@ export class SubmissionService {
 
         const { score, totalPoints } = serializeScore(submission);
 
+        // Calculate late penalty
+        const penalty = SubmissionService.calculateLatePenalty(
+          submission.submittedAt ?? null,
+          labDueDate,
+          labAvailableUntil
+        );
+        const originalScore = score ?? 0;
+        const adjustedScore = SubmissionService.applyLatePenalty(originalScore, penalty.penaltyMultiplier);
+
         sessionGroup.parts.get(partId)!.submissions.push({
           _id: submission._id,
           attempt: submission.attempt,
@@ -832,7 +893,11 @@ export class SubmissionService {
           completedAt: submission.completedAt ?? null,
           submissionType: submission.submissionType,
           labSessionId: submission.labSessionId ? submission.labSessionId.toString() : null,
-          jobId: submission.jobId
+          jobId: submission.jobId,
+          isLate: penalty.isLate,
+          originalScore: originalScore,
+          adjustedScore: adjustedScore,
+          latePenaltyPercent: penalty.latePenaltyPercent
         });
       }
 
@@ -934,13 +999,30 @@ export class SubmissionService {
       },
     ]);
 
-    // Add partOrder and partTitle, then sort by partOrder
+    // Add partOrder, partTitle, and late penalty info, then sort by partOrder
     const enrichedHistory = history.map(item => {
       const partInfo = partOrderMap.get(item.partId) || { order: 999, title: item.partId };
+
+      // Add late penalty info to each submission in the history
+      const enrichedSubmissionHistory = item.submissionHistory.map((sub: any) => {
+        const penalty = this.calculateLatePenalty(sub.submittedAt, labDueDate, labAvailableUntil);
+        const originalScore = sub.score ?? 0;
+        const adjustedScore = this.applyLatePenalty(originalScore, penalty.penaltyMultiplier);
+
+        return {
+          ...sub,
+          isLate: penalty.isLate,
+          originalScore: originalScore,
+          adjustedScore: adjustedScore,
+          latePenaltyPercent: penalty.latePenaltyPercent
+        };
+      });
+
       return {
         ...item,
         partOrder: partInfo.order,
-        partTitle: partInfo.title
+        partTitle: partInfo.title,
+        submissionHistory: enrichedSubmissionHistory
       };
     }).sort((a, b) => a.partOrder - b.partOrder);
 
