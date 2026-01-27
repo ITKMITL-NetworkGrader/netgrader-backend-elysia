@@ -8,6 +8,10 @@ import { connectDatabase } from "./config/database.js";
 import { connectRedis, gracefulShutdown } from "./config/redis.js";
 import { initializeMinioBucket } from "./config/minio.js";
 import { LabSessionCleanupService } from "./services/lab-session-cleanup.js";
+import { enableGlobalTimestamps } from "./utils/logger.js";
+
+// Enable timestamps on all console.log/warn/error calls
+enableGlobalTimestamps();
 
 export type JWTPayload = {
   u_id: string;
@@ -57,41 +61,41 @@ console.log(
  * Cleanup expired lab sessions (releases IPs when labs timeout)
  * Runs every hour
  */
-// const CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour
+const CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour
 
-// const cleanupInterval = setInterval(async () => {
-//   try {
-//     const result = await LabSessionCleanupService.cleanupExpiredLabSessions();
-//     if (result.released > 0) {
-//       console.log(`[Scheduler] Cleanup completed: ${result.released} IPs released from expired labs`);
-//       result.details.forEach(detail => {
-//         console.log(`  - Student ${detail.studentId}: IP ${detail.ip} released (${detail.reason})`);
-//       });
-//     }
-//   } catch (error) {
-//     console.error('[Scheduler] Lab session cleanup failed:', error);
-//   }
-// }, CLEANUP_INTERVAL);
+const cleanupInterval = setInterval(async () => {
+  try {
+    const result = await LabSessionCleanupService.cleanupExpiredLabSessions();
+    if (result.released > 0) {
+      console.log(`[Scheduler] Cleanup completed: ${result.released} IPs released from expired labs`);
+      result.details.forEach(detail => {
+        console.log(`  - Student ${detail.studentId}: IP ${detail.ip} released (${detail.reason})`);
+      });
+    }
+  } catch (error) {
+    console.error('[Scheduler] Lab session cleanup failed:', error);
+  }
+}, CLEANUP_INTERVAL);
 
-// /**
-//  * Housekeeping: Delete very old completed sessions (runs daily)
-//  */
-// const HOUSEKEEPING_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+/**
+ * Housekeeping: Delete very old completed sessions (runs daily)
+ */
+const HOUSEKEEPING_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 
-// const housekeepingInterval = setInterval(async () => {
-//   try {
-//     const result = await LabSessionCleanupService.cleanupOldCompletedSessions(90);
-//     if (result.deleted > 0) {
-//       console.log(`[Scheduler] ${result.message}`);
-//     }
-//   } catch (error) {
-//     console.error('[Scheduler] Housekeeping cleanup failed:', error);
-//   }
-// }, HOUSEKEEPING_INTERVAL);
+const housekeepingInterval = setInterval(async () => {
+  try {
+    const result = await LabSessionCleanupService.cleanupOldCompletedSessions(90);
+    if (result.deleted > 0) {
+      console.log(`[Scheduler] ${result.message}`);
+    }
+  } catch (error) {
+    console.error('[Scheduler] Housekeeping cleanup failed:', error);
+  }
+}, HOUSEKEEPING_INTERVAL);
 
-// console.log(`✅ Scheduled tasks initialized:`);
-// console.log(`   - Lab session cleanup: Every ${CLEANUP_INTERVAL / 60000} minutes`);
-// console.log(`   - Housekeeping: Every ${HOUSEKEEPING_INTERVAL / 3600000} hours`);
+console.log(`✅ Scheduled tasks initialized:`);
+console.log(`   - Lab session cleanup: Every ${CLEANUP_INTERVAL / 60000} minutes`);
+console.log(`   - Housekeeping: Every ${HOUSEKEEPING_INTERVAL / 3600000} hours`);
 
 // ============================================================================
 // Graceful Shutdown
