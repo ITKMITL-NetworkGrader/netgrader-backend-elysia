@@ -176,6 +176,100 @@ export class StudentLabSessionService {
   }
 
   /**
+   * Reactivate a completed session for a student
+   * Used by instructors to restore student access after timeout
+   * Only reactivates the most recent completed session
+   */
+  static async reactivateSession(
+    studentId: string,
+    labId: Types.ObjectId
+  ): Promise<IStudentLabSession | null> {
+    // Check if there's already an active session
+    const existingActive = await StudentLabSession.findOne({
+      studentId,
+      labId,
+      status: 'active'
+    });
+
+    if (existingActive) {
+      throw new Error('Student already has an active session for this lab');
+    }
+
+    // Find the most recent completed session
+    const completedSession = await StudentLabSession.findOne({
+      studentId,
+      labId,
+      status: 'completed'
+    }).sort({ completedAt: -1 });
+
+    if (!completedSession) {
+      return null;
+    }
+
+    // Reactivate the session
+    completedSession.status = 'active';
+    completedSession.releaseReason = undefined;
+    completedSession.releasedAt = undefined;
+    completedSession.completedAt = undefined;
+    completedSession.lastAccessedAt = new Date();
+
+    return await completedSession.save();
+  }
+
+  /**
+   * Reactivate all completed sessions for a lab (bulk operation)
+   * Used by instructors to restore access for all students after deadline
+   */
+  static async reactivateAllSessionsForLab(
+    labId: Types.ObjectId
+  ): Promise<{ reopened: number; skipped: number; details: Array<{ studentId: string; status: string }> }> {
+    // Get all students with active sessions (to skip)
+    const activeStudentIds = await StudentLabSession.distinct('studentId', {
+      labId,
+      status: 'active'
+    });
+
+    // Get all completed sessions, grouped by student (most recent first)
+    const completedSessions = await StudentLabSession.find({
+      labId,
+      status: 'completed',
+      studentId: { $nin: activeStudentIds }
+    }).sort({ studentId: 1, completedAt: -1 });
+
+    // Deduplicate: keep only most recent session per student
+    const studentSessionMap = new Map<string, IStudentLabSession>();
+    for (const session of completedSessions) {
+      if (!studentSessionMap.has(session.studentId)) {
+        studentSessionMap.set(session.studentId, session);
+      }
+    }
+
+    const details: Array<{ studentId: string; status: string }> = [];
+    let reopened = 0;
+
+    for (const [studentId, session] of studentSessionMap) {
+      try {
+        session.status = 'active';
+        session.releaseReason = undefined;
+        session.releasedAt = undefined;
+        session.completedAt = undefined;
+        session.lastAccessedAt = new Date();
+        await session.save();
+        reopened++;
+        details.push({ studentId, status: 'reopened' });
+      } catch (error) {
+        details.push({ studentId, status: `failed: ${(error as Error).message}` });
+      }
+    }
+
+    return {
+      reopened,
+      skipped: activeStudentIds.length,
+      details
+    };
+  }
+
+  /**
    * Mark lab instructions as acknowledged for a student.
    */
   static async acknowledgeInstructions(

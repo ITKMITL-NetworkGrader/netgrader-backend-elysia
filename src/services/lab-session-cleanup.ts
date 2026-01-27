@@ -38,14 +38,11 @@ export class LabSessionCleanupService {
       let reason = '';
 
       // Check if lab has reached availableUntil (hard deadline - lab becomes inaccessible)
+      // Note: dueDate (soft deadline) does NOT close sessions - students can still work
+      // after dueDate with a late penalty applied to their scores
       if (lab.availableUntil && new Date(lab.availableUntil) < now) {
         shouldRelease = true;
         reason = `Lab unavailable after ${lab.availableUntil}`;
-      }
-      // Check if lab has passed dueDate (soft deadline - late submissions)
-      else if (lab.dueDate && new Date(lab.dueDate) < now) {
-        shouldRelease = true;
-        reason = `Lab past due date ${lab.dueDate}`;
       }
 
       if (shouldRelease) {
