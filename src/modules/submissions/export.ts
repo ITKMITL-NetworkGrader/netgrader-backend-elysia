@@ -3,7 +3,6 @@ import { Submission } from './model';
 import { SubmissionService } from './service';
 import { PartService } from '../parts/service';
 import { Lab } from '../labs/model';
-import { Enrollment } from '../enrollments/model';
 import { User } from '../auth/model';
 
 export interface LabScoreExportRow {
@@ -19,6 +18,9 @@ export class ExportService {
      * Export lab scores for all students as of a specific date/time
      * This is the "time machine" feature - shows what scores would have been at that point
      * 
+     * Finds students based on who has submitted to this lab (matching Status tab behavior),
+     * NOT based on enrollment records.
+     * 
      * @param labId - The lab to export scores for
      * @param asOfDate - The point in time to calculate scores from
      * @returns Array of student scores with adjusted late penalties
@@ -27,9 +29,9 @@ export class ExportService {
         labId: string,
         asOfDate: Date
     ): Promise<LabScoreExportRow[]> {
-        // 1. Get the lab to find course ID and deadline info
+        // 1. Get the lab to find deadline info
         const lab = await Lab.findById(new Types.ObjectId(labId))
-            .select('courseId dueDate availableUntil')
+            .select('dueDate availableUntil')
             .lean();
 
         if (!lab) {
@@ -43,54 +45,50 @@ export class ExportService {
         const partsResponse = await PartService.getPartsByLab(labId);
         const parts = partsResponse.parts.filter(p => !p.isVirtual && !p.isPartZero);
 
-        // Map partId -> totalPoints
-        const partPointsMap = new Map<string, number>();
         let totalPossiblePoints = 0;
-
         for (const part of parts) {
-            const partPoints = part.totalPoints ?? 0;
-            partPointsMap.set(part.partId, partPoints);
-            totalPossiblePoints += partPoints;
+            totalPossiblePoints += part.totalPoints ?? 0;
         }
 
-        // 3. Get all students enrolled in the course (as students, not instructors/TAs)
-        const enrollments = await Enrollment.find({
-            c_id: lab.courseId,
-            u_role: 'STUDENT'
-        }).lean();
+        // 3. Get all submissions for this lab before asOfDate
+        // This finds students based on who has actually submitted (like Status tab does)
+        const submissions = await Submission.find({
+            labId: new Types.ObjectId(labId),
+            submissionType: { $ne: 'ip_answers' },
+            status: 'completed',
+            createdAt: { $lte: asOfDate }
+        }).select('studentId partId gradingResult fillInBlankResults createdAt').lean();
 
-        const studentIds = enrollments.map(e => e.u_id);
+        console.log(`[Export] Found ${submissions.length} submissions before ${asOfDate.toISOString()}`);
 
-        // 4. Get user details for all students
+        // 4. Get unique student IDs from submissions
+        const studentIdsSet = new Set<string>();
+        for (const sub of submissions) {
+            studentIdsSet.add(sub.studentId.toLowerCase());
+        }
+        const studentIds = Array.from(studentIdsSet);
+
+        console.log(`[Export] Found ${studentIds.length} unique students with submissions`);
+
+        // 5. Get user details for all students
         const users = await User.find({
             u_id: { $in: studentIds }
         }).select('u_id fullName').lean();
 
         const userMap = new Map<string, { fullName?: string }>();
         for (const user of users) {
-            userMap.set(user.u_id, { fullName: user.fullName });
+            userMap.set(user.u_id.toLowerCase(), { fullName: user.fullName });
         }
-
-        // 5. Get all submissions for this lab before asOfDate
-        const submissions = await Submission.find({
-            labId: new Types.ObjectId(labId),
-            studentId: { $in: studentIds },
-            submissionType: { $ne: 'ip_answers' },
-            status: 'completed',
-            createdAt: { $lte: asOfDate }
-        }).select('studentId partId score totalPoints submittedAt gradingResult fillInBlankResults').lean();
 
         // 6. Group submissions by student, then by part, and find best score per part
         const studentScores = new Map<string, {
-            totalScore: number;
             hasLateSubmission: boolean;
             partScores: Map<string, number>;
         }>();
 
-        // Initialize all students with zero scores
+        // Initialize all students with empty scores
         for (const studentId of studentIds) {
             studentScores.set(studentId, {
-                totalScore: 0,
                 hasLateSubmission: false,
                 partScores: new Map()
             });
@@ -98,7 +96,7 @@ export class ExportService {
 
         // Process each submission
         for (const sub of submissions) {
-            const studentId = sub.studentId;
+            const studentId = sub.studentId.toLowerCase();
             const partId = sub.partId;
 
             // Get raw score from submission
