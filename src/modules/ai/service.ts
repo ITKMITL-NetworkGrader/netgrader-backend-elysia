@@ -8,7 +8,7 @@ export interface AIConfig {
 }
 
 // Initialize the Google Gen AI client
-const ai = new GoogleGenAI({ apiKey: env.AI_API_KEY || "" });
+const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY || env.AI_API_KEY || "" });
 
 export class AIService {
 

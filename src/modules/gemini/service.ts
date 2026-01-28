@@ -5,7 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 // Initialize the Google Gen AI client
-const ai = new GoogleGenAI({ apiKey: env.AI_API_KEY || "" });
+const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY || env.AI_API_KEY || "" });
 
 export interface GeminiRequest {
     text: string;
@@ -31,7 +31,7 @@ export class GeminiService {
         try {
             console.log("Connecting to Gemini...");
             const response = await ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: "gemini-2.0-flash",
                 contents: text,
             });
 
