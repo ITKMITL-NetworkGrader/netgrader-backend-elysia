@@ -202,4 +202,93 @@ export const sessionCleanupRoutes = new Elysia({ prefix: "/admin/sessions" })
         description: "Shows session status, IP assignment, and part completion progress. Useful for debugging IP release logic."
       }
     }
+  )
+  .post(
+    "/reactivate/:studentId/lab/:labId",
+    async ({ params, set }) => {
+      try {
+        const { StudentLabSessionService } = await import("../student-lab-sessions/service");
+        const { Types } = await import("mongoose");
+
+        const labObjectId = new Types.ObjectId(params.labId);
+        const session = await StudentLabSessionService.reactivateSession(
+          params.studentId,
+          labObjectId
+        );
+
+        if (!session) {
+          set.status = 404;
+          return {
+            status: "error",
+            message: "No completed session found for this student-lab combination"
+          };
+        }
+
+        return {
+          status: "success",
+          message: "Session reactivated successfully",
+          data: {
+            sessionId: session._id,
+            studentId: session.studentId,
+            managementIp: session.managementIp,
+            status: session.status
+          }
+        };
+      } catch (error) {
+        console.error("Error reactivating session:", error);
+        set.status = 400;
+        return {
+          status: "error",
+          message: (error as Error).message
+        };
+      }
+    },
+    {
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      params: t.Object({
+        studentId: t.String(),
+        labId: t.String()
+      }),
+      detail: {
+        tags: ["Admin"],
+        summary: "Reactivate a completed lab session for a student",
+        description: "Allows instructors to reactivate a student's completed session so they can continue their progress."
+      }
+    }
+  )
+  .post(
+    "/reactivate/lab/:labId",
+    async ({ params, set }) => {
+      try {
+        const { StudentLabSessionService } = await import("../student-lab-sessions/service");
+        const { Types } = await import("mongoose");
+
+        const labObjectId = new Types.ObjectId(params.labId);
+        const result = await StudentLabSessionService.reactivateAllSessionsForLab(labObjectId);
+
+        return {
+          status: "success",
+          message: `Reactivated ${result.reopened} sessions (${result.skipped} already active)`,
+          data: result
+        };
+      } catch (error) {
+        console.error("Error reactivating lab sessions:", error);
+        set.status = 500;
+        return {
+          status: "error",
+          message: (error as Error).message
+        };
+      }
+    },
+    {
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      params: t.Object({
+        labId: t.String()
+      }),
+      detail: {
+        tags: ["Admin"],
+        summary: "Reactivate all completed sessions for a lab",
+        description: "Bulk reactivation of all completed student sessions in a lab. Students with active sessions are skipped."
+      }
+    }
   );
