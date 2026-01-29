@@ -328,7 +328,7 @@ export class SubmissionService {
     return await Submission.find(query)
       .populate('labId', 'title description')
       .sort({ submittedAt: -1 })
-      // .limit(options?.limit || 1000000)
+      .limit(options?.limit || 1000000)
       .skip(options?.offset || 0);
   }
 
