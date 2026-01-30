@@ -17,6 +17,7 @@ import { gns3StudentLabRoutes } from "./gns3-student-lab";
 import { playgroundRoutes } from "./playground";
 import { profileRoutes } from "./profile";
 import { geminiRoutes } from "./gemini";
+import { geminiChatRoutes } from "./gemini-chat";
 
 export const routes = new Elysia()
     .group("/v0", (app) => app
@@ -38,4 +39,5 @@ export const routes = new Elysia()
         .use(playgroundRoutes)
         .use(profileRoutes)
         .use(geminiRoutes)
+        .use(geminiChatRoutes)
     )
