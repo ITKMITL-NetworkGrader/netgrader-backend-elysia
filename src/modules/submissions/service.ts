@@ -1316,5 +1316,87 @@ export class SubmissionService {
       offset: options?.offset || 0
     };
   }
+
+  /**
+   * Force pass a student's lab part
+   * Creates a synthetic submission with a perfect score
+   * Used by instructors to fix rollback issues (e.g., partId renames, session expiry)
+   */
+  static async forcePassPart(params: {
+    studentId: string;
+    labId: string | Types.ObjectId;
+    partId: string;
+    adminUserId: string;
+    reason?: string;
+  }): Promise<ISubmission> {
+    const labObjectId = new Types.ObjectId(params.labId);
+
+    // Get the part to determine total points
+    const partsResponse = await PartService.getPartsByLab(params.labId.toString());
+    const part = partsResponse.parts.find(p => p.partId === params.partId);
+
+    if (!part) {
+      throw new Error(`Part not found: ${params.partId}`);
+    }
+
+    const totalPoints = part.totalPoints || 0;
+
+    // Get current active session if exists
+    const activeSession = await StudentLabSession.findOne({
+      studentId: params.studentId,
+      labId: labObjectId,
+      status: 'active'
+    });
+
+    const jobId = `force-pass-${params.studentId}-${params.partId}-${Date.now()}`;
+    const now = new Date();
+    const reasonText = params.reason || 'Admin force pass';
+
+    const gradingResult: IGradingResult = {
+      job_id: jobId,
+      status: 'completed',
+      total_points_earned: totalPoints,
+      total_points_possible: totalPoints,
+      test_results: [{
+        test_name: 'Force Pass',
+        status: 'passed',
+        message: `Force passed by ${params.adminUserId}: ${reasonText}`,
+        points_earned: totalPoints,
+        points_possible: totalPoints,
+        execution_time: 0,
+        test_case_results: []
+      }],
+      group_results: [],
+      total_execution_time: 0,
+      created_at: now.toISOString(),
+      completed_at: now.toISOString()
+    };
+
+    const nextAttempt = await this.getNextAttempt(params.studentId, labObjectId, params.partId);
+
+    const submission = new Submission({
+      jobId,
+      studentId: params.studentId,
+      labId: labObjectId,
+      partId: params.partId,
+      submissionType: 'auto_grading',
+      status: 'completed',
+      submittedAt: now,
+      startedAt: now,
+      completedAt: now,
+      gradingResult,
+      progressHistory: [],
+      attempt: nextAttempt,
+      ipMappings: {},
+      labSessionId: activeSession?._id,
+      labAttemptNumber: activeSession?.attemptNumber
+    });
+
+    const savedSubmission = await submission.save();
+
+    console.log(`[Force Pass] Admin ${params.adminUserId} force-passed student ${params.studentId} for part ${params.partId} (${totalPoints} pts)`);
+
+    return savedSubmission;
+  }
 }
 
