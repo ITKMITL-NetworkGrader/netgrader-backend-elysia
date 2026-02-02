@@ -194,6 +194,7 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                         sessionId: session.sessionId,
                         status: session.status,
                         currentContext: session.currentContext,
+                        wizardState: session.wizardState || { step: 'course_list' },
                         lastMessageAt: session.lastMessageAt
                     },
                     messages: history.map((msg: any) => ({
@@ -530,5 +531,250 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                 description: "ปิด session",
                 tags: ["Gemini Chat"]
             }
+        }
+    )
+
+    // ============================================================================
+    // WIZARD ENDPOINTS
+    // ============================================================================
+
+    // GET Wizard State
+    .get(
+        "/:sessionId/wizard/state",
+        async ({ params, authPlugin, set }) => {
+            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+            const { sessionId } = params;
+
+            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
+            if (!sessionValidation.valid) {
+                set.status = 404;
+                return { success: false, errors: sessionValidation.errors };
+            }
+
+            const wizardState = await GeminiChatService.getWizardState(sessionId);
+            return { success: true, data: wizardState };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: { summary: "Get Wizard State", tags: ["Gemini Chat Wizard"] }
+        }
+    )
+
+    // GET Courses for user
+    .get(
+        "/:sessionId/wizard/courses",
+        async ({ params, authPlugin, set }) => {
+            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+            const { sessionId } = params;
+
+            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
+            if (!sessionValidation.valid) {
+                set.status = 404;
+                return { success: false, errors: sessionValidation.errors };
+            }
+
+            const courses = await GeminiChatService.getCoursesForUser(u_id);
+            return { success: true, data: courses };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: { summary: "Get Courses for Wizard", tags: ["Gemini Chat Wizard"] }
+        }
+    )
+
+    // GET Labs for course
+    .get(
+        "/:sessionId/wizard/labs",
+        async ({ params, authPlugin, set }) => {
+            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+            const { sessionId } = params;
+
+            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
+            if (!sessionValidation.valid) {
+                set.status = 404;
+                return { success: false, errors: sessionValidation.errors };
+            }
+
+            const wizardState = await GeminiChatService.getWizardState(sessionId);
+            if (!wizardState?.courseId) {
+                set.status = 400;
+                return { success: false, message: "No course selected" };
+            }
+
+            const labs = await GeminiChatService.getLabsForCourse(wizardState.courseId);
+            return { success: true, data: labs };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: { summary: "Get Labs for Wizard", tags: ["Gemini Chat Wizard"] }
+        }
+    )
+
+    // GET Parts for lab
+    .get(
+        "/:sessionId/wizard/parts",
+        async ({ params, authPlugin, set }) => {
+            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+            const { sessionId } = params;
+
+            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
+            if (!sessionValidation.valid) {
+                set.status = 404;
+                return { success: false, errors: sessionValidation.errors };
+            }
+
+            const wizardState = await GeminiChatService.getWizardState(sessionId);
+            if (!wizardState?.labId) {
+                set.status = 400;
+                return { success: false, message: "No lab selected" };
+            }
+
+            const parts = await GeminiChatService.getPartsForLab(wizardState.labId);
+            return { success: true, data: parts };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: { summary: "Get Parts for Wizard", tags: ["Gemini Chat Wizard"] }
+        }
+    )
+
+    // POST Select item (course/lab/part)
+    .post(
+        "/:sessionId/wizard/select",
+        async ({ params, body, authPlugin, set }) => {
+            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+            const { sessionId } = params;
+            const { type, id } = body;
+
+            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
+            if (!sessionValidation.valid) {
+                set.status = 404;
+                return { success: false, errors: sessionValidation.errors };
+            }
+
+            let newStep: string;
+            let context: any = {};
+
+            switch (type) {
+                case 'course':
+                    newStep = 'lab_list';
+                    context.courseId = id;
+                    break;
+                case 'lab':
+                    newStep = 'lab_edit_menu';
+                    context.labId = id;
+                    break;
+                case 'part':
+                    newStep = 'part_edit';
+                    context.partId = id;
+                    break;
+                default:
+                    set.status = 400;
+                    return { success: false, message: "Invalid type" };
+            }
+
+            await GeminiChatService.setWizardStep(sessionId, newStep, context);
+            const wizardState = await GeminiChatService.getWizardState(sessionId);
+            return { success: true, data: wizardState };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            body: t.Object({
+                type: t.Union([t.Literal('course'), t.Literal('lab'), t.Literal('part')]),
+                id: t.String()
+            }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: { summary: "Select Item in Wizard", tags: ["Gemini Chat Wizard"] }
+        }
+    )
+
+    // POST Set wizard action (create/edit)
+    .post(
+        "/:sessionId/wizard/action",
+        async ({ params, body, authPlugin, set }) => {
+            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+            const { sessionId } = params;
+            const { target, action, editSection } = body;
+
+            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
+            if (!sessionValidation.valid) {
+                set.status = 404;
+                return { success: false, errors: sessionValidation.errors };
+            }
+
+            let newStep: string;
+            let context: any = {};
+
+            if (action === 'create') {
+                switch (target) {
+                    case 'course': newStep = 'course_create'; break;
+                    case 'lab': newStep = 'lab_create'; break;
+                    case 'part': newStep = 'part_create'; break;
+                    default:
+                        set.status = 400;
+                        return { success: false, message: "Invalid target" };
+                }
+            } else if (action === 'edit') {
+                switch (target) {
+                    case 'course': newStep = 'course_edit'; break;
+                    case 'lab':
+                        if (editSection) {
+                            newStep = 'lab_edit';
+                            context.editSection = editSection;
+                        } else {
+                            newStep = 'lab_edit_menu';
+                        }
+                        break;
+                    case 'part': newStep = 'part_edit'; break;
+                    default:
+                        set.status = 400;
+                        return { success: false, message: "Invalid target" };
+                }
+            } else {
+                set.status = 400;
+                return { success: false, message: "Invalid action" };
+            }
+
+            await GeminiChatService.setWizardStep(sessionId, newStep, context);
+            const wizardState = await GeminiChatService.getWizardState(sessionId);
+            return { success: true, data: wizardState };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            body: t.Object({
+                target: t.Union([t.Literal('course'), t.Literal('lab'), t.Literal('part')]),
+                action: t.Union([t.Literal('create'), t.Literal('edit')]),
+                editSection: t.Optional(t.Union([t.Literal('basic'), t.Literal('network'), t.Literal('parts')]))
+            }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: { summary: "Set Wizard Action", tags: ["Gemini Chat Wizard"] }
+        }
+    )
+
+    // POST Navigate back
+    .post(
+        "/:sessionId/wizard/back",
+        async ({ params, authPlugin, set }) => {
+            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+            const { sessionId } = params;
+
+            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
+            if (!sessionValidation.valid) {
+                set.status = 404;
+                return { success: false, errors: sessionValidation.errors };
+            }
+
+            const newStep = await GeminiChatService.navigateBack(sessionId);
+            const wizardState = await GeminiChatService.getWizardState(sessionId);
+            return { success: true, data: wizardState };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: { summary: "Navigate Back in Wizard", tags: ["Gemini Chat Wizard"] }
         }
     );

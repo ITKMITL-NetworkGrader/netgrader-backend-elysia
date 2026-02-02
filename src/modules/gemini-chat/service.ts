@@ -3,6 +3,7 @@ import { GoogleGenAI, FunctionDeclaration } from "@google/genai";
 import { ChatSession, ChatMessage, IChatSession, IChatMessage } from "./model";
 import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
+import { Course } from "../courses/model";
 import { v4 as uuidv4 } from "uuid";
 import "dotenv/config";
 
@@ -424,5 +425,159 @@ export class GeminiChatService {
             { sessionId },
             { $set: { status: "expired" } }
         );
+    }
+
+    // ============================================================================
+    // Wizard Methods
+    // ============================================================================
+
+    /**
+     * Get courses that user can manage (created by or enrolled as instructor/TA)
+     */
+    static async getCoursesForUser(userId: string): Promise<any[]> {
+        const { Enrollment } = await import("../enrollments/model");
+
+        // Find enrollments where user is instructor or TA
+        const enrollments = await Enrollment.find({
+            u_id: userId,
+            role: { $in: ['instructor', 'ta'] }
+        }).select('course_id');
+
+        const courseIds = enrollments.map((e: any) => e.course_id);
+
+        // Also get courses created by user
+        const courses = await Course.find({
+            $or: [
+                { created_by: userId },
+                { _id: { $in: courseIds } }
+            ]
+        }).select('_id title description visibility createdAt');
+
+        return courses.map(c => ({
+            id: c._id.toString(),
+            title: c.title,
+            description: c.description,
+            visibility: c.visibility,
+            createdAt: c.createdAt
+        }));
+    }
+
+    /**
+     * Get labs in a course
+     */
+    static async getLabsForCourse(courseId: string): Promise<any[]> {
+        const labs = await LabService.getLabsByCourse(courseId);
+        return labs.labs.map((lab: any) => ({
+            id: lab._id?.toString() || lab.id,
+            title: lab.title,
+            description: lab.description,
+            type: lab.type,
+            status: lab.status,
+            createdAt: lab.createdAt
+        }));
+    }
+
+    /**
+     * Get parts in a lab
+     */
+    static async getPartsForLab(labId: string): Promise<any[]> {
+        const result = await PartService.getPartsByLab(labId);
+        return result.parts.map((part: any) => ({
+            id: part._id?.toString() || part.id,
+            title: part.title,
+            description: part.description,
+            order: part.order,
+            createdAt: part.createdAt
+        }));
+    }
+
+    /**
+     * Get wizard state for a session
+     */
+    static async getWizardState(sessionId: string): Promise<any> {
+        const session = await ChatSession.findOne({ sessionId });
+        if (!session) return null;
+        return session.wizardState || { step: 'course_list' };
+    }
+
+    /**
+     * Update wizard step and context
+     */
+    static async setWizardStep(
+        sessionId: string,
+        step: string,
+        context?: { courseId?: string; labId?: string; partId?: string; editSection?: string }
+    ): Promise<void> {
+        const update: any = {
+            'wizardState.step': step
+        };
+
+        // Update wizardState context
+        if (context?.courseId !== undefined) {
+            update['wizardState.courseId'] = context.courseId;
+            update['currentContext.courseId'] = context.courseId; // Sync to currentContext
+        }
+        if (context?.labId !== undefined) {
+            update['wizardState.labId'] = context.labId;
+            update['currentContext.labId'] = context.labId; // Sync to currentContext
+        }
+        if (context?.partId !== undefined) {
+            update['wizardState.partId'] = context.partId;
+            update['currentContext.partId'] = context.partId; // Sync to currentContext
+        }
+        if (context?.editSection !== undefined) {
+            update['wizardState.editSection'] = context.editSection;
+        }
+
+        await ChatSession.updateOne(
+            { sessionId },
+            { $set: update }
+        );
+
+        // Update lastMessageAt
+        await ChatSession.updateOne(
+            { sessionId },
+            { $set: { lastMessageAt: new Date() } }
+        );
+    }
+
+    /**
+     * Navigate back in wizard
+     */
+    static async navigateBack(sessionId: string): Promise<string> {
+        const session = await ChatSession.findOne({ sessionId });
+        if (!session) return 'course_list';
+
+        const state = session.wizardState || { step: 'course_list' };
+        let newStep = 'course_list';
+
+        switch (state.step) {
+            case 'course_create':
+            case 'course_edit':
+                newStep = 'course_list';
+                break;
+            case 'lab_list':
+                newStep = 'course_list';
+                break;
+            case 'lab_create':
+            case 'lab_edit_menu':
+                newStep = 'lab_list';
+                break;
+            case 'lab_edit':
+                newStep = 'lab_edit_menu';
+                break;
+            case 'part_list':
+                newStep = 'lab_edit_menu';
+                break;
+            case 'part_create':
+            case 'part_edit':
+                newStep = 'part_list';
+                break;
+            default:
+                newStep = 'course_list';
+        }
+
+        await this.setWizardStep(sessionId, newStep);
+        return newStep;
     }
 }

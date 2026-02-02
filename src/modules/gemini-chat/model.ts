@@ -1,8 +1,34 @@
 import { Schema, model, Document } from 'mongoose';
 
 // ============================================================================
+// Wizard Step Types
+// ============================================================================
+
+export type WizardStep =
+    | 'course_list'      // List courses
+    | 'course_create'    // AI Q&A for creating course
+    | 'course_edit'      // AI Q&A for editing course
+    | 'lab_list'         // List labs in course
+    | 'lab_create'       // AI Q&A for creating lab
+    | 'lab_edit_menu'    // Select lab edit section
+    | 'lab_edit'         // AI Q&A for editing lab section
+    | 'part_list'        // List parts in lab
+    | 'part_create'      // AI Q&A for creating part
+    | 'part_edit';       // AI Q&A for editing part
+
+export type LabEditSection = 'basic' | 'network' | 'parts';
+
+// ============================================================================
 // Chat Session - เก็บ session และ context
 // ============================================================================
+
+export interface IWizardState {
+    step: WizardStep;
+    courseId?: string;
+    labId?: string;
+    partId?: string;
+    editSection?: LabEditSection;
+}
 
 export interface IChatSession extends Document {
     sessionId: string;              // UUID
@@ -15,6 +41,9 @@ export interface IChatSession extends Document {
         labId?: string;
         partId?: string;
     };
+
+    // Wizard State - track navigation
+    wizardState: IWizardState;
 
     status: 'active' | 'expired';
     createdAt: Date;
@@ -42,6 +71,22 @@ const chatSessionSchema = new Schema<IChatSession>({
         courseId: { type: String, required: false },
         labId: { type: String, required: false },
         partId: { type: String, required: false }
+    },
+    wizardState: {
+        step: {
+            type: String,
+            enum: ['course_list', 'course_create', 'course_edit', 'lab_list', 'lab_create', 'lab_edit_menu', 'lab_edit', 'part_list', 'part_create', 'part_edit'],
+            default: 'course_list',
+            required: true
+        },
+        courseId: { type: String, required: false },
+        labId: { type: String, required: false },
+        partId: { type: String, required: false },
+        editSection: {
+            type: String,
+            enum: ['basic', 'network', 'parts'],
+            required: false
+        }
     },
     status: {
         type: String,
