@@ -26,12 +26,14 @@ export class SubmissionService {
    * @param submittedAt - When the submission was made
    * @param dueDate - Soft deadline (after which penalty applies)
    * @param availableUntil - Hard deadline (lab closes)
+   * @param labLatePenaltyPercent - Configurable penalty percentage (0-100, default: 50)
    * @returns Object with isLate flag and penalty multiplier (1.0 = no penalty, 0.5 = 50% penalty)
    */
   static calculateLatePenalty(
     submittedAt: Date | null,
     dueDate: Date | null | undefined,
-    availableUntil: Date | null | undefined
+    availableUntil: Date | null | undefined,
+    labLatePenaltyPercent: number = 50
   ): { isLate: boolean; penaltyMultiplier: number; latePenaltyPercent: number } {
     // No deadline set = no penalty possible
     if (!dueDate || !submittedAt) {
@@ -46,10 +48,12 @@ export class SubmissionService {
       return { isLate: false, penaltyMultiplier: 1.0, latePenaltyPercent: 0 };
     }
 
-    // Submitted after deadline = 50% penalty
+    // Submitted after deadline = apply configured penalty
     // Note: If after availableUntil, the submission shouldn't exist (blocked by validation),
     // but we still apply the penalty as a safe fallback
-    return { isLate: true, penaltyMultiplier: 0.5, latePenaltyPercent: 50 };
+    const effectivePenalty = Math.max(0, Math.min(100, labLatePenaltyPercent));
+    const penaltyMultiplier = (100 - effectivePenalty) / 100;
+    return { isLate: true, penaltyMultiplier, latePenaltyPercent: effectivePenalty };
   }
 
   /**
@@ -749,9 +753,10 @@ export class SubmissionService {
     });
 
     // Fetch lab deadline info for late penalty calculation
-    const labDoc = await Lab.findById(new Types.ObjectId(labId)).select('dueDate availableUntil').lean();
+    const labDoc = await Lab.findById(new Types.ObjectId(labId)).select('dueDate availableUntil latePenaltyPercent').lean();
     const labDueDate = labDoc?.dueDate ?? null;
     const labAvailableUntil = labDoc?.availableUntil ?? null;
+    const labLatePenaltyPercent = labDoc?.latePenaltyPercent ?? 50;
 
     if (options?.labSessionId) {
       if (options.labSessionId instanceof Types.ObjectId) {
@@ -877,7 +882,8 @@ export class SubmissionService {
         const penalty = SubmissionService.calculateLatePenalty(
           submission.submittedAt ?? null,
           labDueDate,
-          labAvailableUntil
+          labAvailableUntil,
+          labLatePenaltyPercent
         );
         const originalScore = score ?? 0;
         const adjustedScore = SubmissionService.applyLatePenalty(originalScore, penalty.penaltyMultiplier);
@@ -1005,7 +1011,7 @@ export class SubmissionService {
 
       // Add late penalty info to each submission in the history
       const enrichedSubmissionHistory = item.submissionHistory.map((sub: any) => {
-        const penalty = this.calculateLatePenalty(sub.submittedAt, labDueDate, labAvailableUntil);
+        const penalty = this.calculateLatePenalty(sub.submittedAt, labDueDate, labAvailableUntil, labLatePenaltyPercent);
         const originalScore = sub.score ?? 0;
         const adjustedScore = this.applyLatePenalty(originalScore, penalty.penaltyMultiplier);
 

@@ -23,20 +23,16 @@ interface StudentScoreData {
     partScores: Map<string, PartScoreData>;
 }
 
-/** Late penalty multiplier for improvements after due date (50% = 0.5) */
-const LATE_PENALTY_MULTIPLIER = 0.5;
+/** Lab deadline and penalty configuration */
+interface LabConfig {
+    dueDate: Date | null;
+    availableUntil: Date | null | undefined;
+    latePenaltyPercent: number;
+}
 
 export class ExportService {
     /**
-     * Export lab scores for all students as of a specific date/time.
-     * Uses incremental penalty formula: only improvements made after due date
-     * are penalized, not the entire score.
-     * 
-     * Formula: finalScore = (bestOverall - bestBeforeDue) * 50% + bestBeforeDue
-     * 
-     * @param labId - The lab to export scores for
-     * @param asOfDate - The point in time to calculate scores from
-     * @returns Array of student scores with adjusted late penalties
+     * Export lab scores for all students.
      */
     static async exportLabScoresAtTime(
         labId: string,
@@ -44,9 +40,9 @@ export class ExportService {
     ): Promise<LabScoreExportRow[]> {
         const labObjectId = new Types.ObjectId(labId);
 
-        // Fetch lab, parts, and submissions in parallel where possible
+        // Fetch lab, parts, and submissions in parallel
         const [lab, partsResponse, submissions] = await Promise.all([
-            Lab.findById(labObjectId).select('dueDate availableUntil').lean(),
+            Lab.findById(labObjectId).select('dueDate availableUntil latePenaltyPercent').lean(),
             PartService.getPartsByLab(labId),
             Submission.find({
                 labId: labObjectId,
@@ -60,100 +56,78 @@ export class ExportService {
             throw new Error(`Lab not found: ${labId}`);
         }
 
-        // Early return if no submissions
         if (submissions.length === 0) {
             return [];
         }
 
-        const labDueDate = lab.dueDate ?? null;
-        const labAvailableUntil = lab.availableUntil ?? null;
+        const labConfig: LabConfig = {
+            dueDate: lab.dueDate ?? null,
+            availableUntil: lab.availableUntil ?? null,
+            latePenaltyPercent: lab.latePenaltyPercent ?? 50
+        };
 
-        // Calculate total possible points from non-virtual parts
         const totalPossiblePoints = partsResponse.parts
             .filter(p => !p.isVirtual && !p.isPartZero)
             .reduce((sum, part) => sum + (part.totalPoints ?? 0), 0);
 
-        // Build student scores map
-        const studentScores = this.buildStudentScoresMap(
-            submissions,
-            labDueDate,
-            labAvailableUntil
-        );
-
-        // Get unique student IDs and fetch user details
+        const studentScores = this.buildStudentScoresMap(submissions, labConfig);
         const studentIds = Array.from(studentScores.keys());
         const userMap = await this.fetchUserMap(studentIds);
 
-        // Calculate and build results
         const results = this.calculateFinalScores(
-            studentIds,
             studentScores,
             userMap,
-            totalPossiblePoints
+            totalPossiblePoints,
+            labConfig.latePenaltyPercent
         );
 
-        // Sort by student ID for consistent output
         results.sort((a, b) => a.studentId.localeCompare(b.studentId));
-
         return results;
     }
 
     /**
      * Process submissions and build a map of student scores.
-     * Tracks best scores before and after due date for each part.
      */
     private static buildStudentScoresMap(
         submissions: any[],
-        labDueDate: Date | null,
-        labAvailableUntil: Date | null | undefined
+        labConfig: LabConfig
     ): Map<string, StudentScoreData> {
         const studentScores = new Map<string, StudentScoreData>();
 
         for (const sub of submissions) {
             const studentId = sub.studentId.toLowerCase();
             const partId = sub.partId;
-
-            // Extract score from submission
             const rawScore = this.extractRawScore(sub);
 
-            // Check if this submission is late
             const { isLate } = SubmissionService.calculateLatePenalty(
                 sub.createdAt ?? null,
-                labDueDate,
-                labAvailableUntil
+                labConfig.dueDate,
+                labConfig.availableUntil,
+                labConfig.latePenaltyPercent
             );
 
-            // Initialize student data if not exists
-            if (!studentScores.has(studentId)) {
-                studentScores.set(studentId, {
-                    hasLateSubmission: false,
-                    partScores: new Map()
-                });
+            // Get or create student data
+            let studentData = studentScores.get(studentId);
+            if (!studentData) {
+                studentData = { hasLateSubmission: false, partScores: new Map() };
+                studentScores.set(studentId, studentData);
             }
 
-            const studentData = studentScores.get(studentId)!;
-
-            // Track late submission flag
             if (isLate) {
                 studentData.hasLateSubmission = true;
             }
 
-            // Initialize part data if not exists
-            if (!studentData.partScores.has(partId)) {
-                studentData.partScores.set(partId, {
-                    bestScoreBeforeDue: 0,
-                    bestOverallRawScore: 0
-                });
+            // Get or create part data
+            let partData = studentData.partScores.get(partId);
+            if (!partData) {
+                partData = { bestScoreBeforeDue: 0, bestOverallRawScore: 0 };
+                studentData.partScores.set(partId, partData);
             }
 
-            const partData = studentData.partScores.get(partId)!;
-
-            // Update best overall raw score
+            // Update best scores
             if (rawScore > partData.bestOverallRawScore) {
                 partData.bestOverallRawScore = rawScore;
             }
-
-            // Update best score before due date (only if on time)
             if (!isLate && rawScore > partData.bestScoreBeforeDue) {
                 partData.bestScoreBeforeDue = rawScore;
             }
@@ -162,83 +136,56 @@ export class ExportService {
         return studentScores;
     }
 
-    /**
-     * Extract raw score from a submission (grading result or fill-in-blank).
-     */
     private static extractRawScore(sub: any): number {
-        if (sub.gradingResult?.total_points_earned !== undefined) {
-            return sub.gradingResult.total_points_earned;
-        }
-        if (sub.fillInBlankResults?.totalPointsEarned !== undefined) {
-            return sub.fillInBlankResults.totalPointsEarned;
-        }
-        return 0;
+        return sub.gradingResult?.total_points_earned
+            ?? sub.fillInBlankResults?.totalPointsEarned
+            ?? 0;
     }
 
-    /**
-     * Fetch user details and build a lookup map.
-     */
-    private static async fetchUserMap(
-        studentIds: string[]
-    ): Promise<Map<string, string>> {
-        const users = await User.find({
-            u_id: { $in: studentIds }
-        }).select('u_id fullName').lean();
+    private static async fetchUserMap(studentIds: string[]): Promise<Map<string, string>> {
+        const users = await User.find({ u_id: { $in: studentIds } })
+            .select('u_id fullName')
+            .lean();
 
-        const userMap = new Map<string, string>();
-        for (const user of users) {
-            userMap.set(user.u_id.toLowerCase(), user.fullName ?? user.u_id);
-        }
-        return userMap;
+        return new Map(users.map(u => [u.u_id.toLowerCase(), u.fullName ?? u.u_id]));
     }
 
     /**
      * Calculate final adjusted scores using incremental penalty formula.
-     * Penalty only applies to score improvements made after due date.
      */
     private static calculateFinalScores(
-        studentIds: string[],
         studentScores: Map<string, StudentScoreData>,
         userMap: Map<string, string>,
-        totalPossiblePoints: number
+        totalPossiblePoints: number,
+        latePenaltyPercent: number
     ): LabScoreExportRow[] {
-        const results: LabScoreExportRow[] = [];
+        const penaltyMultiplier = (100 - latePenaltyPercent) / 100;
 
-        for (const studentId of studentIds) {
-            const studentData = studentScores.get(studentId)!;
-            let totalScore = 0;
+        return Array.from(studentScores.entries()).map(([studentId, data]) => {
+            const totalScore = Array.from(data.partScores.values())
+                .reduce((sum, part) => sum + this.calculateAdjustedPartScore(part, penaltyMultiplier), 0);
 
-            // Calculate adjusted score for each part and sum
-            for (const partData of studentData.partScores.values()) {
-                totalScore += this.calculateAdjustedPartScore(partData);
-            }
-
-            results.push({
+            return {
                 studentId,
                 studentName: userMap.get(studentId) ?? studentId,
                 currentScore: Math.round(totalScore * 100) / 100,
                 fullLabScore: totalPossiblePoints,
-                isLate: studentData.hasLateSubmission
-            });
-        }
-
-        return results;
+                isLate: data.hasLateSubmission
+            };
+        });
     }
 
     /**
-     * Calculate adjusted score for a single part.
-     * Formula: (bestOverall - bestBeforeDue) * penaltyMultiplier + bestBeforeDue
+     * Apply penalty only to the late improvement portion.
      */
-    private static calculateAdjustedPartScore(partData: PartScoreData): number {
+    private static calculateAdjustedPartScore(partData: PartScoreData, penaltyMultiplier: number): number {
         const { bestScoreBeforeDue, bestOverallRawScore } = partData;
 
-        // No late improvement - use pre-deadline score
         if (bestOverallRawScore <= bestScoreBeforeDue) {
             return bestScoreBeforeDue;
         }
 
-        // Apply penalty only to the late improvement portion
         const lateImprovement = bestOverallRawScore - bestScoreBeforeDue;
-        return lateImprovement * LATE_PENALTY_MULTIPLIER + bestScoreBeforeDue;
+        return lateImprovement * penaltyMultiplier + bestScoreBeforeDue;
     }
 }
