@@ -31,7 +31,7 @@ export class ExportService {
     ): Promise<LabScoreExportRow[]> {
         // 1. Get the lab to find deadline info
         const lab = await Lab.findById(new Types.ObjectId(labId))
-            .select('dueDate availableUntil')
+            .select('dueDate availableUntil latePenaltyPercent')
             .lean();
 
         if (!lab) {
@@ -40,6 +40,7 @@ export class ExportService {
 
         const labDueDate = lab.dueDate ?? null;
         const labAvailableUntil = lab.availableUntil ?? null;
+        const labLatePenaltyPercent = lab.latePenaltyPercent ?? 50;
 
         // 2. Get all parts for this lab to calculate total possible points
         const partsResponse = await PartService.getPartsByLab(labId);
@@ -111,7 +112,8 @@ export class ExportService {
             const penalty = SubmissionService.calculateLatePenalty(
                 sub.createdAt ?? null,
                 labDueDate,
-                labAvailableUntil
+                labAvailableUntil,
+                labLatePenaltyPercent
             );
 
             const adjustedScore = SubmissionService.applyLatePenalty(rawScore, penalty.penaltyMultiplier);

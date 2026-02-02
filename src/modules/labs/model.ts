@@ -118,6 +118,7 @@ export interface ILab extends Document {
   availableFrom?: Date;    // When lab becomes accessible
   availableUntil?: Date;   // When lab becomes inaccessible
   dueDate?: Date;
+  latePenaltyPercent?: number;  // Percentage of score reduction for late submissions (0-100, default: 50)
   createdAt: Date;
   updatedAt: Date;
 }
@@ -539,6 +540,13 @@ const labSchema = new Schema<ILab>({
   dueDate: {
     type: Date,
     required: false
+  },
+  latePenaltyPercent: {
+    type: Number,
+    required: false,
+    default: 50,
+    min: 0,
+    max: 100
   }
 }, {
   timestamps: true

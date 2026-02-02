@@ -187,7 +187,8 @@ const LabBodySchema = t.Object({
   dueDate: t.Optional(t.Transform(t.String())
     .Decode((value) => value ? new Date(value) : undefined)
     .Encode((value) => value?.toISOString() ?? '')
-  )
+  ),
+  latePenaltyPercent: t.Optional(t.Number({ minimum: 0, maximum: 100, default: 50 }))
 });
 
 export const labRoutes = new Elysia({ prefix: "/labs" })
