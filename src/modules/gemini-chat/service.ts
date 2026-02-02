@@ -136,7 +136,7 @@ export class GeminiChatService {
         // Add welcome message
         await this.saveMessage(sessionId, {
             role: "model",
-            textContent: "สวัสดีครับ! ผมคือ Netgrader Assistant 🤖\n\nคุณต้องการทำอะไรครับ?\n1. สร้าง Lab ใหม่\n2. เลือก Lab ที่มีอยู่แล้ว\n3. Duplicate Lab จากที่มี"
+            textContent: "สวัสดีครับ! ผมคือ Netgrader Assistant\n\nคุณต้องการทำอะไรครับ?\n1. จัดการ Course (สร้าง/แก้ไข/ดูรายการ)\n2. จัดการ Lab (สร้าง/แก้ไข/ดูรายการ)\n3. จัดการ Part (สร้าง/แก้ไข/ดูรายการ)\n\nกรุณาพิมพ์บอกผมได้เลยครับ"
         }).catch((err: Error) => {
             console.error("Failed to save welcome message:", err.message);
             // Non-critical error for session creation
@@ -316,7 +316,7 @@ export class GeminiChatService {
                         }
                     }
                 },
-                previewText: `📦 ต้องการสร้าง Lab: **${args.title}**\nประเภท: ${args.type}\nรายละเอียด: ${args.description || "-"}`
+                previewText: `[Lab] ต้องการสร้าง Lab: **${args.title}**\nประเภท: ${args.type}\nรายละเอียด: ${args.description || "-"}`
             };
         }
 
@@ -324,7 +324,7 @@ export class GeminiChatService {
             return {
                 type: "part",
                 data: args,
-                previewText: `🧩 ต้องการสร้าง Part: **${args.title}**\nรายละเอียด: ${args.description || "-"}`
+                previewText: `[Part] ต้องการสร้าง Part: **${args.title}**\nรายละเอียด: ${args.description || "-"}`
             };
         }
 
@@ -332,7 +332,7 @@ export class GeminiChatService {
             return {
                 type: "task",
                 data: args,
-                previewText: `📝 ต้องการเพิ่ม Task: **${args.title}**\nคะแนนเต็ม: ${args.maxScore}`
+                previewText: `[Task] ต้องการเพิ่ม Task: **${args.title}**\nคะแนนเต็ม: ${args.maxScore}`
             };
         }
 
@@ -391,7 +391,7 @@ export class GeminiChatService {
             // Add system message
             await this.saveMessage(sessionId, {
                 role: "system",
-                textContent: `✅ สร้าง ${type} เรียบร้อยแล้ว`
+                textContent: `[สำเร็จ] สร้าง ${type} เรียบร้อยแล้ว`
             });
 
             return { success: true, result };
@@ -412,7 +412,7 @@ export class GeminiChatService {
 
         await this.saveMessage(sessionId, {
             role: "system",
-            textContent: "❌ ยกเลิกการสร้างแล้ว"
+            textContent: "[ยกเลิก] ยกเลิกการสร้างแล้ว"
         });
     }
 

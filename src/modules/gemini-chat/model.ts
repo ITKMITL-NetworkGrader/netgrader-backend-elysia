@@ -87,7 +87,7 @@ export interface IChatMessage extends Document {
 
     // Draft data
     draftData?: {
-        type: 'lab' | 'part' | 'task';
+        type: 'lab' | 'part' | 'task' | 'unknown';
         data: Record<string, any>;     // Full object ที่พร้อมสร้าง
         previewText: string;           // Human-readable summary
     };
@@ -136,7 +136,7 @@ const chatMessageSchema = new Schema<IChatMessage>({
     draftData: {
         type: {
             type: String,
-            enum: ['lab', 'part', 'task'],
+            enum: ['lab', 'part', 'task', 'unknown'],
             required: false
         },
         data: { type: Schema.Types.Mixed, required: false },

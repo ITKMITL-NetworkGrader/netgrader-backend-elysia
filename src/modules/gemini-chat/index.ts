@@ -97,12 +97,10 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
         "/:sessionId/message",
         async function* ({ params, body, authPlugin, set }) {
             // Set SSE headers immediately at the start
-            set.headers = {
-                "Content-Type": "text/event-stream",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no" // Disable buffering for Nginx
-            };
+            set.headers["Content-Type"] = "text/event-stream";
+            set.headers["Cache-Control"] = "no-cache";
+            set.headers["Connection"] = "keep-alive";
+            set.headers["X-Accel-Buffering"] = "no"; // Disable buffering for Nginx
 
             const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
             const { sessionId } = params;
