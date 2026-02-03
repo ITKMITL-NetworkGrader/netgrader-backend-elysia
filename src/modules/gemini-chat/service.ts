@@ -580,4 +580,112 @@ export class GeminiChatService {
         await this.setWizardStep(sessionId, newStep);
         return newStep;
     }
+
+    /**
+     * Get topology context for Part creation/editing AI prompting
+     * Returns structured data about the lab's network configuration
+     */
+    static async getTopologyContext(labId: string): Promise<{
+        success: boolean;
+        context?: {
+            labTitle: string;
+            networkName: string;
+            topology: {
+                baseNetwork: string;
+                subnetMask: number;
+                allocationStrategy: string;
+            };
+            vlans: Array<{
+                id: string;
+                vlanId?: number;
+                baseNetwork: string;
+                subnetMask: number;
+                description: string;
+            }>;
+            devices: Array<{
+                deviceId: string;
+                displayName: string;
+                interfaces: Array<{
+                    name: string;
+                    interfaceName?: string;
+                    type: string;
+                    vlanIndex?: number;
+                }>;
+            }>;
+            ipv6Enabled: boolean;
+            naturalLanguageSummary: string;
+        };
+        message?: string;
+    }> {
+        try {
+            const lab = await LabService.getLabById(labId);
+            if (!lab) {
+                return { success: false, message: 'Lab not found' };
+            }
+
+            const network = lab.network;
+            if (!network) {
+                return { success: false, message: 'Network not configured' };
+            }
+
+            // Build VLAN info
+            const vlans = (network.vlanConfiguration?.vlans || []).map((v: any, idx: number) => ({
+                id: v.id,
+                vlanId: v.vlanId,
+                baseNetwork: v.baseNetwork,
+                subnetMask: v.subnetMask,
+                description: `VLAN ${idx + 1}: ${v.baseNetwork}/${v.subnetMask}`
+            }));
+
+            // Build device info with interfaces
+            const devices = (network.devices || []).map((d: any) => ({
+                deviceId: d.deviceId,
+                displayName: d.displayName,
+                interfaces: (d.ipVariables || []).map((v: any) => ({
+                    name: v.name,
+                    interfaceName: v.interface,
+                    type: v.inputType,
+                    vlanIndex: v.vlanIndex
+                }))
+            }));
+
+            // Build natural language summary
+            let summary = `Lab "${lab.title}" has a network named "${network.name}" with base network ${network.topology.baseNetwork}/${network.topology.subnetMask}.`;
+
+            if (vlans.length > 0) {
+                summary += ` It has ${vlans.length} VLAN(s): `;
+                summary += vlans.map((v: any) => `${v.baseNetwork}/${v.subnetMask}`).join(', ') + '.';
+            }
+
+            if (devices.length > 0) {
+                summary += ` The topology includes ${devices.length} device(s): `;
+                summary += devices.map((d: any) => d.displayName).join(', ') + '.';
+            }
+
+            const ipv6Enabled = network.ipv6Config?.enabled || false;
+            if (ipv6Enabled) {
+                summary += ' IPv6 is enabled.';
+            }
+
+            return {
+                success: true,
+                context: {
+                    labTitle: lab.title,
+                    networkName: network.name,
+                    topology: {
+                        baseNetwork: network.topology.baseNetwork,
+                        subnetMask: network.topology.subnetMask,
+                        allocationStrategy: network.topology.allocationStrategy
+                    },
+                    vlans,
+                    devices,
+                    ipv6Enabled,
+                    naturalLanguageSummary: summary
+                }
+            };
+        } catch (error: any) {
+            return { success: false, message: error.message || 'Failed to get topology context' };
+        }
+    }
 }
+

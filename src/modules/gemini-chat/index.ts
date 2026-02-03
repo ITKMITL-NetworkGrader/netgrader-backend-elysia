@@ -777,4 +777,42 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
             beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
             detail: { summary: "Navigate Back in Wizard", tags: ["Gemini Chat Wizard"] }
         }
+    )
+
+    // GET Topology Context for Part editing
+    .get(
+        "/:sessionId/wizard/topology-context",
+        async ({ params, authPlugin, set }) => {
+            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+            const { sessionId } = params;
+
+            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
+            if (!sessionValidation.valid) {
+                set.status = 404;
+                return { success: false, errors: sessionValidation.errors };
+            }
+
+            const session = sessionValidation.session;
+            const labId = session?.wizardState?.labId;
+            if (!labId) {
+                set.status = 400;
+                return { success: false, message: "No lab selected in wizard context" };
+            }
+
+            const result = await GeminiChatService.getTopologyContext(labId);
+            if (!result.success) {
+                set.status = 404;
+                return { success: false, message: result.message };
+            }
+
+            return {
+                success: true,
+                data: result.context
+            };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: { summary: "Get Topology Context", description: "Get lab topology context for Part AI prompting", tags: ["Gemini Chat Wizard"] }
+        }
     );
