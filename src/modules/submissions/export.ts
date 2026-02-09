@@ -11,152 +11,230 @@ export interface LabScoreExportRow {
     currentScore: number;
     fullLabScore: number;
     isLate: boolean;
+    isCompleted: boolean;
+    partsCompleted: number;
+    totalParts: number;
+}
+
+interface PartScoreData {
+    bestScoreBeforeDue: number;
+    bestOverallRawScore: number;
+    maxPossiblePoints: number;
+}
+
+interface StudentScoreData {
+    hasLateSubmission: boolean;
+    partScores: Map<string, PartScoreData>;
+}
+
+/** Lab deadline and penalty configuration */
+interface LabConfig {
+    dueDate: Date | null;
+    availableUntil: Date | null | undefined;
+    latePenaltyPercent: number;
 }
 
 export class ExportService {
     /**
-     * Export lab scores for all students as of a specific date/time
-     * This is the "time machine" feature - shows what scores would have been at that point
-     * 
-     * Finds students based on who has submitted to this lab (matching Status tab behavior),
-     * NOT based on enrollment records.
-     * 
-     * @param labId - The lab to export scores for
-     * @param asOfDate - The point in time to calculate scores from
-     * @returns Array of student scores with adjusted late penalties
+     * Export lab scores for all students.
      */
     static async exportLabScoresAtTime(
         labId: string,
         asOfDate: Date
     ): Promise<LabScoreExportRow[]> {
-        // 1. Get the lab to find deadline info
-        const lab = await Lab.findById(new Types.ObjectId(labId))
-            .select('dueDate availableUntil')
-            .lean();
+        const labObjectId = new Types.ObjectId(labId);
+
+        // Fetch lab, parts, and submissions in parallel
+        const [lab, partsResponse, submissions] = await Promise.all([
+            Lab.findById(labObjectId).select('dueDate availableUntil latePenaltyPercent').lean(),
+            PartService.getPartsByLab(labId),
+            Submission.find({
+                labId: labObjectId,
+                submissionType: { $ne: 'ip_answers' },
+                status: 'completed',
+                createdAt: { $lte: asOfDate }
+            }).select('studentId partId gradingResult fillInBlankResults createdAt').lean()
+        ]);
 
         if (!lab) {
             throw new Error(`Lab not found: ${labId}`);
         }
 
-        const labDueDate = lab.dueDate ?? null;
-        const labAvailableUntil = lab.availableUntil ?? null;
-
-        // 2. Get all parts for this lab to calculate total possible points
-        const partsResponse = await PartService.getPartsByLab(labId);
-        const parts = partsResponse.parts.filter(p => !p.isVirtual && !p.isPartZero);
-
-        let totalPossiblePoints = 0;
-        for (const part of parts) {
-            totalPossiblePoints += part.totalPoints ?? 0;
+        if (submissions.length === 0) {
+            return [];
         }
 
-        // 3. Get all submissions for this lab before asOfDate
-        // This finds students based on who has actually submitted (like Status tab does)
-        const submissions = await Submission.find({
-            labId: new Types.ObjectId(labId),
-            submissionType: { $ne: 'ip_answers' },
-            status: 'completed',
-            createdAt: { $lte: asOfDate }
-        }).select('studentId partId gradingResult fillInBlankResults createdAt').lean();
+        const labConfig: LabConfig = {
+            dueDate: lab.dueDate ?? null,
+            availableUntil: lab.availableUntil ?? null,
+            latePenaltyPercent: lab.latePenaltyPercent ?? 50
+        };
 
-        console.log(`[Export] Found ${submissions.length} submissions before ${asOfDate.toISOString()}`);
+        // Get total parts count (non-virtual, non-part-zero)
+        const validParts = partsResponse.parts.filter(p => !p.isVirtual && !p.isPartZero);
+        const totalParts = validParts.length;
+        const totalPossiblePoints = validParts.reduce((sum, part) => sum + (part.totalPoints ?? 0), 0);
 
-        // 4. Get unique student IDs from submissions
-        const studentIdsSet = new Set<string>();
-        for (const sub of submissions) {
-            studentIdsSet.add(sub.studentId.toLowerCase());
-        }
-        const studentIds = Array.from(studentIdsSet);
-
-        console.log(`[Export] Found ${studentIds.length} unique students with submissions`);
-
-        // 5. Get user details for all students
-        const users = await User.find({
-            u_id: { $in: studentIds }
-        }).select('u_id fullName').lean();
-
-        const userMap = new Map<string, { fullName?: string }>();
-        for (const user of users) {
-            userMap.set(user.u_id.toLowerCase(), { fullName: user.fullName });
+        // Create a map from part slug to current totalPoints
+        const partMaxPoints = new Map<string, number>();
+        for (const part of validParts) {
+            // Slugify title to match submission partId format (lowercase, hyphenated)
+            const slug = part.title?.toLowerCase().replace(/\s+/g, '-') ?? '';
+            partMaxPoints.set(slug, part.totalPoints ?? 0);
         }
 
-        // 6. Group submissions by student, then by part, and find best score per part
-        const studentScores = new Map<string, {
-            hasLateSubmission: boolean;
-            partScores: Map<string, number>;
-        }>();
+        const studentScores = this.buildStudentScoresMap(submissions, labConfig);
+        const studentIds = Array.from(studentScores.keys());
+        const userMap = await this.fetchUserMap(studentIds);
 
-        // Initialize all students with empty scores
-        for (const studentId of studentIds) {
-            studentScores.set(studentId, {
-                hasLateSubmission: false,
-                partScores: new Map()
-            });
-        }
+        const results = this.calculateFinalScores(
+            studentScores,
+            userMap,
+            totalPossiblePoints,
+            totalParts,
+            labConfig.latePenaltyPercent,
+            partMaxPoints
+        );
 
-        // Process each submission
+        results.sort((a, b) => a.studentId.localeCompare(b.studentId));
+        return results;
+    }
+
+    /**
+     * Process submissions and build a map of student scores.
+     */
+    private static buildStudentScoresMap(
+        submissions: any[],
+        labConfig: LabConfig
+    ): Map<string, StudentScoreData> {
+        const studentScores = new Map<string, StudentScoreData>();
+
         for (const sub of submissions) {
             const studentId = sub.studentId.toLowerCase();
             const partId = sub.partId;
+            const rawScore = this.extractRawScore(sub);
 
-            // Get raw score from submission
-            let rawScore = 0;
-            if (sub.gradingResult?.total_points_earned !== undefined) {
-                rawScore = sub.gradingResult.total_points_earned;
-            } else if (sub.fillInBlankResults?.totalPointsEarned !== undefined) {
-                rawScore = sub.fillInBlankResults.totalPointsEarned;
-            }
-
-            // Calculate late penalty
-            const penalty = SubmissionService.calculateLatePenalty(
+            const { isLate } = SubmissionService.calculateLatePenalty(
                 sub.createdAt ?? null,
-                labDueDate,
-                labAvailableUntil
+                labConfig.dueDate,
+                labConfig.availableUntil,
+                labConfig.latePenaltyPercent
             );
 
-            const adjustedScore = SubmissionService.applyLatePenalty(rawScore, penalty.penaltyMultiplier);
+            // Get or create student data
+            let studentData = studentScores.get(studentId);
+            if (!studentData) {
+                studentData = { hasLateSubmission: false, partScores: new Map() };
+                studentScores.set(studentId, studentData);
+            }
 
-            // Get student's current scores
-            const studentData = studentScores.get(studentId);
-            if (!studentData) continue;
-
-            // Track if student has any late submissions
-            if (penalty.isLate) {
+            if (isLate) {
                 studentData.hasLateSubmission = true;
             }
 
-            // Keep best score per part
-            const currentPartScore = studentData.partScores.get(partId) ?? 0;
-            if (adjustedScore > currentPartScore) {
-                studentData.partScores.set(partId, adjustedScore);
+            // Get or create part data
+            let partData = studentData.partScores.get(partId);
+            if (!partData) {
+                partData = { bestScoreBeforeDue: 0, bestOverallRawScore: 0, maxPossiblePoints: 0 };
+                studentData.partScores.set(partId, partData);
+            }
+
+            // Update max possible points
+            const maxPoints = this.extractMaxPoints(sub);
+            if (maxPoints > partData.maxPossiblePoints) {
+                partData.maxPossiblePoints = maxPoints;
+            }
+
+            // Update best scores
+            if (rawScore > partData.bestOverallRawScore) {
+                partData.bestOverallRawScore = rawScore;
+            }
+            if (!isLate && rawScore > partData.bestScoreBeforeDue) {
+                partData.bestScoreBeforeDue = rawScore;
             }
         }
 
-        // 7. Calculate total score for each student
-        const results: LabScoreExportRow[] = [];
+        return studentScores;
+    }
 
-        for (const studentId of studentIds) {
-            const studentData = studentScores.get(studentId)!;
-            const user = userMap.get(studentId);
+    private static extractRawScore(sub: any): number {
+        return sub.gradingResult?.total_points_earned
+            ?? sub.fillInBlankResults?.totalPointsEarned
+            ?? 0;
+    }
 
-            // Sum up best scores from all parts
+    private static extractMaxPoints(sub: any): number {
+        return sub.gradingResult?.total_points_possible
+            ?? sub.fillInBlankResults?.totalPoints
+            ?? 0;
+    }
+
+    private static async fetchUserMap(studentIds: string[]): Promise<Map<string, string>> {
+        const users = await User.find({ u_id: { $in: studentIds } })
+            .select('u_id fullName')
+            .lean();
+
+        return new Map(users.map(u => [u.u_id.toLowerCase(), u.fullName ?? u.u_id]));
+    }
+
+    /**
+     * Calculate final adjusted scores using incremental penalty formula.
+     */
+    private static calculateFinalScores(
+        studentScores: Map<string, StudentScoreData>,
+        userMap: Map<string, string>,
+        totalPossiblePoints: number,
+        totalParts: number,
+        latePenaltyPercent: number,
+        partMaxPoints: Map<string, number>
+    ): LabScoreExportRow[] {
+        const penaltyMultiplier = (100 - latePenaltyPercent) / 100;
+
+        return Array.from(studentScores.entries()).map(([studentId, data]) => {
             let totalScore = 0;
-            for (const partScore of studentData.partScores.values()) {
-                totalScore += partScore;
+            let partsCompleted = 0;
+
+            for (const [partId, partData] of data.partScores.entries()) {
+                const adjustedScore = this.calculateAdjustedPartScore(partData, penaltyMultiplier);
+                totalScore += adjustedScore;
+
+                // Use current part definition's totalPoints, not stale submission data
+                const currentMaxPoints = partMaxPoints.get(partId) ?? partData.maxPossiblePoints;
+
+                // A part is completed if student got full raw marks (with floating point tolerance)
+                const EPSILON = 0.001;
+                if (currentMaxPoints > 0 && partData.bestOverallRawScore >= currentMaxPoints - EPSILON) {
+                    partsCompleted++;
+                }
             }
 
-            results.push({
+            const roundedScore = Math.round(totalScore * 100) / 100;
+            const isCompleted = partsCompleted === totalParts && totalParts > 0;
+
+            return {
                 studentId,
-                studentName: user?.fullName || studentId,
-                currentScore: totalScore,
+                studentName: userMap.get(studentId) ?? studentId,
+                currentScore: roundedScore,
                 fullLabScore: totalPossiblePoints,
-                isLate: studentData.hasLateSubmission
-            });
+                isLate: data.hasLateSubmission,
+                isCompleted,
+                partsCompleted,
+                totalParts
+            };
+        });
+    }
+
+    /**
+     * Apply penalty only to the late improvement portion.
+     */
+    private static calculateAdjustedPartScore(partData: PartScoreData, penaltyMultiplier: number): number {
+        const { bestScoreBeforeDue, bestOverallRawScore } = partData;
+
+        if (bestOverallRawScore <= bestScoreBeforeDue) {
+            return bestScoreBeforeDue;
         }
 
-        // Sort by student ID for consistent output
-        results.sort((a, b) => a.studentId.localeCompare(b.studentId));
-
-        return results;
+        const lateImprovement = bestOverallRawScore - bestScoreBeforeDue;
+        return lateImprovement * penaltyMultiplier + bestScoreBeforeDue;
     }
 }

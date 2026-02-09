@@ -49,6 +49,7 @@ export class LabService {
         availableFrom: labData.availableFrom,
         availableUntil: labData.availableUntil,
         dueDate: labData.dueDate,
+        latePenaltyPercent: labData.latePenaltyPercent,
         instructions: processedInstructions
       });
 
@@ -148,7 +149,7 @@ export class LabService {
       );
 
       // Only allow updating specific fields
-      const allowedFields = ['title', 'description', 'type', 'courseId', 'network', 'publishedAt', 'availableFrom', 'availableUntil', 'dueDate', 'instructions'];
+      const allowedFields = ['title', 'description', 'type', 'courseId', 'network', 'publishedAt', 'availableFrom', 'availableUntil', 'dueDate', 'latePenaltyPercent', 'instructions'];
       const updateFields: any = {};
 
       allowedFields.forEach(field => {
