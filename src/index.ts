@@ -47,6 +47,10 @@ const app = new Elysia()
   .use(authPlugin)
   .use(routes)
   .get("/", () => "Hello Elysia")
+  .get('/health', () => ({
+    status: 'ok',
+    timestamp: Date.now()
+  }))
   .listen({ port: env.PORT || 3000, idleTimeout: 60 });
 
 console.log(
