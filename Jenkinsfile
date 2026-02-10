@@ -71,9 +71,9 @@ pipeline {
                                 sudo -u netgrader bash -c 'cd ${COMPOSE_DIR} && docker compose ps ${SERVICE_NAME} | grep -i "up"'
                             """
                             
-                            // Check health endpoint responds
+                            // Check health endpoint responds (via docker exec since port is only exposed, not published)
                             sh """
-                                curl -f http://localhost:4000/health || exit 1
+                                docker exec netgrader-backend-elysia bun --eval "fetch('http://localhost:4000/health').then(r => { if (!r.ok) process.exit(1); console.log('Health OK') }).catch(() => process.exit(1))" || exit 1
                             """
                             
                             echo "✅ Health check passed"
