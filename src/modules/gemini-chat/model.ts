@@ -32,7 +32,8 @@ export interface IWizardState {
 
 export interface IChatSession extends Document {
     sessionId: string;              // UUID
-    userId: string;                 // อาจารย์ (จาก JWT u_id)
+    userId: string;                 // (from JWT u_id)
+    title: string;                  // Chat session name
     cacheId?: string;               // Gemini Context Cache name
 
     // Context - สามารถเปลี่ยนผ่านแชทได้
@@ -62,6 +63,11 @@ const chatSessionSchema = new Schema<IChatSession>({
         type: String,
         required: true,
         index: true
+    },
+    title: {
+        type: String,
+        required: true,
+        default: 'Untitled Chat'
     },
     cacheId: {
         type: String,

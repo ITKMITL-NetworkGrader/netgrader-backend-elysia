@@ -4,10 +4,15 @@ import { GeminiChatValidator } from "./validator";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 
 // Request schemas
-const createSessionSchema = t.Object({});
+const createSessionSchema = t.Object({
+    title: t.Optional(t.String({ description: "Chat session name" }))
+});
 
 const sendMessageSchema = t.Object({
-    message: t.String({ minLength: 1, description: "ข้อความที่ต้องการส่ง" })
+    message: t.String({ minLength: 1, description: "ข้อความที่ต้องการส่ง" }),
+    courseId: t.Optional(t.String({ description: "Course ID (required for lab/part operations)" })),
+    labId: t.Optional(t.String({ description: "Lab ID (required for part operations)" })),
+    partId: t.Optional(t.String({ description: "Part ID (required for edit part)" }))
 });
 
 // Response schemas
@@ -15,6 +20,7 @@ const sessionResponseSchema = t.Object({
     success: t.Boolean(),
     data: t.Optional(t.Object({
         sessionId: t.String(),
+        title: t.String(),
         status: t.String(),
         currentContext: t.Object({
             courseId: t.Optional(t.String()),
@@ -39,7 +45,7 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
     // ============================================================================
     .post(
         "/",
-        async ({ authPlugin, set }) => {
+        async ({ body, authPlugin, set }) => {
             // Fallback for dev mode as plugins.ts returns {} in dev
             const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
 
@@ -53,7 +59,7 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
             }
 
             // Create session
-            const result = await GeminiChatService.createSession(u_id);
+            const result = await GeminiChatService.createSession(u_id, body.title);
             if (!result.success || !result.data) {
                 set.status = 500;
                 return {
@@ -68,6 +74,7 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                 success: true,
                 data: {
                     sessionId: session.sessionId,
+                    title: session.title,
                     status: session.status,
                     currentContext: session.currentContext || {}
                 }
@@ -119,7 +126,7 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                 return;
             }
 
-            const { message } = body;
+            const { message, courseId, labId, partId } = body;
 
             // Validate message content
             const messageValidation = GeminiChatValidator.validateMessageContent(message);
@@ -128,11 +135,15 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                 return;
             }
 
+            // Build context from body
+            const context = { courseId, labId, partId };
+
             // Stream the response
             for await (const chunk of GeminiChatService.sendMessageStream(
                 sessionId,
                 message,
-                u_id
+                u_id,
+                context
             )) {
                 yield `data: ${JSON.stringify(chunk)}\n\n`;
             }
@@ -192,6 +203,7 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                 data: {
                     session: {
                         sessionId: session.sessionId,
+                        title: session.title || 'Untitled Chat',
                         status: session.status,
                         currentContext: session.currentContext,
                         wizardState: session.wizardState || { step: 'course_list' },
@@ -220,6 +232,7 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                     data: t.Object({
                         session: t.Object({
                             sessionId: t.String(),
+                            title: t.String(),
                             status: t.String(),
                             currentContext: t.Object({
                                 courseId: t.Optional(t.String()),
@@ -271,8 +284,10 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                 data: {
                     sessions: sessions.map((s: any) => ({
                         sessionId: s.sessionId,
+                        title: s.title || 'Untitled Chat',
                         status: s.status,
                         currentContext: s.currentContext,
+                        wizardState: s.wizardState,
                         lastMessageAt: s.lastMessageAt,
                         createdAt: s.createdAt
                     }))
@@ -286,12 +301,19 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                     data: t.Object({
                         sessions: t.Array(t.Object({
                             sessionId: t.String(),
+                            title: t.String(),
                             status: t.String(),
                             currentContext: t.Object({
                                 courseId: t.Optional(t.String()),
                                 labId: t.Optional(t.String()),
                                 partId: t.Optional(t.String())
                             }),
+                            wizardState: t.Optional(t.Object({
+                                step: t.String(),
+                                courseId: t.Optional(t.String()),
+                                labId: t.Optional(t.String()),
+                                partId: t.Optional(t.String())
+                            })),
                             lastMessageAt: t.Date(),
                             createdAt: t.Date()
                         }))
@@ -307,6 +329,31 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                 description: "ดึงรายการ chat sessions ของ user",
                 tags: ["Gemini Chat"]
             }
+        }
+    )
+
+    // ============================================================================
+    // DELETE /gemini/chat/:sessionId - Delete session
+    // ============================================================================
+    .delete(
+        "/:sessionId",
+        async ({ params, authPlugin, set }) => {
+            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+            const { sessionId } = params;
+
+            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
+            if (!sessionValidation.valid) {
+                set.status = 404;
+                return { success: false, errors: sessionValidation.errors };
+            }
+
+            await GeminiChatService.deleteSession(sessionId);
+            return { success: true, message: "Session deleted" };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: { summary: "Delete Session", description: "ลบ chat session และข้อความทั้งหมด", tags: ["Gemini Chat"] }
         }
     )
 

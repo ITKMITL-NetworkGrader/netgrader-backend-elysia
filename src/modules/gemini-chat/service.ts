@@ -5,6 +5,7 @@ import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
 import { Course } from "../courses/model";
 import { v4 as uuidv4 } from "uuid";
+import { ArgumentExtractor } from "./argument-extractor";
 import "dotenv/config";
 
 // Initialize Gemini client
@@ -107,7 +108,7 @@ export class GeminiChatService {
     /**
      * Create a new chat session
      */
-    static async createSession(userId: string | undefined): Promise<{ success: boolean; errors: string[]; data?: IChatSession }> {
+    static async createSession(userId: string | undefined, title?: string): Promise<{ success: boolean; errors: string[]; data?: IChatSession }> {
         const errors: string[] = [];
 
         if (!userId || (typeof userId === 'string' && userId.trim() === "")) {
@@ -120,6 +121,7 @@ export class GeminiChatService {
         const session = new ChatSession({
             sessionId,
             userId,
+            title: title?.trim() || 'Untitled Chat',
             currentContext: {},
             status: "active",
             lastMessageAt: new Date()
@@ -163,6 +165,14 @@ export class GeminiChatService {
     }
 
     /**
+     * Delete a session and all its messages
+     */
+    static async deleteSession(sessionId: string): Promise<void> {
+        await ChatMessage.deleteMany({ sessionId });
+        await ChatSession.deleteOne({ sessionId });
+    }
+
+    /**
      * Get message history for a session
      */
     static async getHistory(sessionId: string): Promise<IChatMessage[]> {
@@ -202,13 +212,28 @@ export class GeminiChatService {
     static async *sendMessageStream(
         sessionId: string,
         userMessage: string,
-        userId: string
+        userId: string,
+        context?: { courseId?: string; labId?: string; partId?: string }
     ): AsyncGenerator<{ type: string; content?: string; data?: any; messageId?: string }> {
         // Get session
         const session = await this.getSession(sessionId);
         if (!session) {
             yield { type: "error", content: "Session not found" };
             return;
+        }
+        console.log(context)
+        // Update session context if provided
+        if (context && (context.courseId || context.labId || context.partId)) {
+            await ChatSession.updateOne(
+                { sessionId },
+                {
+                    $set: {
+                        ...(context.courseId && { 'currentContext.courseId': context.courseId }),
+                        ...(context.labId && { 'currentContext.labId': context.labId }),
+                        ...(context.partId && { 'currentContext.partId': context.partId })
+                    }
+                }
+            );
         }
 
         // Save user message
@@ -225,12 +250,22 @@ export class GeminiChatService {
         }));
 
         try {
+            // Build context info for AI
+            let contextInfo = '';
+            if (context?.courseId || context?.labId || context?.partId) {
+                contextInfo = '\n\n[Current Context]\n';
+                if (context.courseId) contextInfo += `- Working in Course ID: ${context.courseId}\n`;
+                if (context.labId) contextInfo += `- Working in Lab ID: ${context.labId}\n`;
+                if (context.partId) contextInfo += `- Working on Part ID: ${context.partId}\n`;
+                contextInfo += 'Use these IDs when calling functions that require them.';
+            }
+
             // Call Gemini with streaming
             const response = await ai.models.generateContentStream({
                 model: "gemini-2.5-flash",
                 contents: contents,
                 config: {
-                    systemInstruction: SYSTEM_INSTRUCTION,
+                    systemInstruction: SYSTEM_INSTRUCTION + contextInfo,
                     tools: [{ functionDeclarations }]
                 }
             });
@@ -255,7 +290,40 @@ export class GeminiChatService {
 
             // Handle function call if present
             if (functionCall) {
-                const draft = await this.createDraftFromFunctionCall(functionCall, userId);
+                // Extract and validate arguments
+                const extractionResult = ArgumentExtractor.extract(
+                    functionCall.name,
+                    functionCall.args || {},
+                    context
+                );
+
+                if (!extractionResult.complete) {
+                    // Missing required fields - ask follow-up question
+                    const followUpText = extractionResult.followUpQuestion ||
+                        'กรุณาให้ข้อมูลเพิ่มเติม';
+
+                    yield { type: "text", content: followUpText };
+
+                    // Save message with partial args for later completion
+                    await this.saveMessage(sessionId, {
+                        role: "model",
+                        textContent: followUpText,
+                        functionCall: {
+                            name: functionCall.name,
+                            args: extractionResult.collectedArgs,
+                            status: "collecting"
+                        }
+                    });
+
+                    yield { type: "done" };
+                    return;
+                }
+
+                // Args complete - create draft with merged args
+                const draft = await this.createDraftFromFunctionCall(
+                    { ...functionCall, args: extractionResult.collectedArgs },
+                    userId
+                );
 
                 // Save message with draft
                 const savedMessage = await this.saveMessage(sessionId, {
@@ -265,7 +333,7 @@ export class GeminiChatService {
                     jsonPreview: draft.data,
                     functionCall: {
                         name: functionCall.name,
-                        args: functionCall.args,
+                        args: extractionResult.collectedArgs,
                         status: "pending"
                     },
                     draftData: draft
