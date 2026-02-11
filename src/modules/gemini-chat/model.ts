@@ -133,7 +133,7 @@ export interface IChatMessage extends Document {
     functionCall?: {
         name: string;
         args: Record<string, any>;
-        status: 'pending' | 'approved' | 'rejected' | 'executed';
+        status: 'pending' | 'approved' | 'rejected' | 'executed' | 'collecting';
     };
 
     // Draft data
@@ -180,7 +180,7 @@ const chatMessageSchema = new Schema<IChatMessage>({
         args: { type: Schema.Types.Mixed, required: false },
         status: {
             type: String,
-            enum: ['pending', 'approved', 'rejected', 'executed'],
+            enum: ['pending', 'approved', 'rejected', 'executed', 'collecting'],
             required: false
         }
     },
