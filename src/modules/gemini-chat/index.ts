@@ -126,6 +126,12 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                 return;
             }
 
+            // For sending messages, session MUST be active
+            if (sessionValidation.session.status !== 'active') {
+                yield `data: ${JSON.stringify({ type: "error", message: "Session is no longer active", errors: ["Cannot send message to an inactive session"] })}\n\n`;
+                return;
+            }
+
             const { message, courseId, labId, partId } = body;
 
             // Validate message content
@@ -341,10 +347,16 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
             const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
             const { sessionId } = params;
 
-            const sessionValidation = await GeminiChatValidator.validateSessionOwnership(sessionId, u_id);
-            if (!sessionValidation.valid) {
+            // For delete, we only check ownership -- not active status
+            const { ChatSession } = await import("./model");
+            const sessionDoc = await ChatSession.findOne({ sessionId });
+            if (!sessionDoc) {
                 set.status = 404;
-                return { success: false, errors: sessionValidation.errors };
+                return { success: false, errors: ["Session not found"] };
+            }
+            if (sessionDoc.userId !== u_id) {
+                set.status = 403;
+                return { success: false, errors: ["Access denied: You do not own this session"] };
             }
 
             await GeminiChatService.deleteSession(sessionId);
@@ -517,10 +529,10 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
     )
 
     // ============================================================================
-    // DELETE /gemini/chat/:sessionId - Close session
+    // POST /gemini/chat/:sessionId/close - Close session
     // ============================================================================
-    .delete(
-        "/:sessionId",
+    .post(
+        "/:sessionId/close",
         async ({ params, authPlugin, set }) => {
             const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
             const { sessionId } = params;
@@ -787,6 +799,16 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
             }
 
             await GeminiChatService.setWizardStep(sessionId, newStep, context);
+
+            // Inject Part creation context (schema + topology) when entering part_create
+            if (target === 'part' && action === 'create') {
+                const session = sessionValidation.session;
+                const labId = session?.wizardState?.labId || session?.currentContext?.labId;
+                if (labId) {
+                    await GeminiChatService.injectPartCreationContext(sessionId, labId);
+                }
+            }
+
             const wizardState = await GeminiChatService.getWizardState(sessionId);
             return { success: true, data: wizardState };
         },

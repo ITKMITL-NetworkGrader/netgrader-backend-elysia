@@ -113,11 +113,6 @@ export class GeminiChatValidator {
             return { valid: false, errors };
         }
 
-        if (session.status !== "active") {
-            errors.push("Session is no longer active");
-            return { valid: false, errors };
-        }
-
         return {
             valid: true,
             errors,
