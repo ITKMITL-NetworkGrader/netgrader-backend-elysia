@@ -104,8 +104,8 @@ const functionSchemas: Record<string, ArgumentSchema[]> = {
         }
     ],
 
-    // Create Task (standalone add_task to existing Part)
-    create_task: [
+    // Add Task (standalone add_task to existing Part)
+    add_task: [
         { name: 'partId', type: 'string', required: true, description: 'Part ID', descriptionTh: 'รหัส Part' },
         { name: 'name', type: 'string', required: true, description: 'Task name', descriptionTh: 'ชื่อ Task' },
         { name: 'executionDevice', type: 'string', required: true, description: 'Source device (e.g. "PC1")', descriptionTh: 'อุปกรณ์ต้นทาง (เช่น "PC1")' },

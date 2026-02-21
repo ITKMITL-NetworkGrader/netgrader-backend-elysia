@@ -5,7 +5,18 @@ import { authPlugin, requireRole } from "../../plugins/plugins";
 
 // Request schemas
 const createSessionSchema = t.Object({
-    title: t.Optional(t.String({ description: "Chat session name" }))
+    title: t.Optional(t.String({ description: "Chat session name" })),
+    contextType: t.Optional(t.Union(
+        [t.Literal('course'), t.Literal('lab'), t.Literal('part')],
+        { description: "Context level: course, lab, or part" }
+    )),
+    action: t.Optional(t.Union(
+        [t.Literal('create'), t.Literal('edit')],
+        { description: "Action: create or edit" }
+    )),
+    courseId: t.Optional(t.String({ description: "Course ID (for lab/part context or course edit)" })),
+    labId: t.Optional(t.String({ description: "Lab ID (for part context or lab edit)" })),
+    partId: t.Optional(t.String({ description: "Part ID (for part edit)" }))
 });
 
 const sendMessageSchema = t.Object({
@@ -26,7 +37,14 @@ const sessionResponseSchema = t.Object({
             courseId: t.Optional(t.String()),
             labId: t.Optional(t.String()),
             partId: t.Optional(t.String())
-        })
+        }),
+        wizardState: t.Optional(t.Object({
+            step: t.String(),
+            courseId: t.Optional(t.String()),
+            labId: t.Optional(t.String()),
+            partId: t.Optional(t.String()),
+            editSection: t.Optional(t.String())
+        }))
     })),
     message: t.Optional(t.String()),
     errors: t.Optional(t.Array(t.String()))
@@ -58,8 +76,14 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                 };
             }
 
-            // Create session
-            const result = await GeminiChatService.createSession(u_id, body.title);
+            // Create session with optional context
+            const result = await GeminiChatService.createSession(u_id, body.title, {
+                contextType: body.contextType,
+                action: body.action,
+                courseId: body.courseId,
+                labId: body.labId,
+                partId: body.partId
+            });
             if (!result.success || !result.data) {
                 set.status = 500;
                 return {
@@ -76,7 +100,8 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                     sessionId: session.sessionId,
                     title: session.title,
                     status: session.status,
-                    currentContext: session.currentContext || {}
+                    currentContext: session.currentContext || {},
+                    wizardState: session.wizardState || { step: 'course_list' }
                 }
             };
         },

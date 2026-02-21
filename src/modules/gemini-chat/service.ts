@@ -219,8 +219,44 @@ export class GeminiChatService {
     }
 
     /**
+     * Read-only function names that should be executed immediately
+     */
+    private static readonly READ_ONLY_FUNCTIONS = ['list_courses', 'list_labs', 'list_parts'];
+
+    /**
+     * Execute a read-only function and return the result
+     */
+    private static async executeReadOnlyFunction(
+        functionName: string,
+        args: Record<string, any>,
+        userId: string
+    ): Promise<{ success: boolean; data?: any; error?: string }> {
+        if (functionName === 'list_courses') {
+            const courses = await this.getCoursesForUser(userId);
+            return { success: true, data: { courses } };
+        }
+        if (functionName === 'list_labs') {
+            if (!args.courseId) return { success: false, error: 'courseId is required' };
+            const labs = await this.getLabsForCourse(args.courseId);
+            return { success: true, data: { labs } };
+        }
+        if (functionName === 'list_parts') {
+            if (!args.labId) return { success: false, error: 'labId is required' };
+            const parts = await this.getPartsForLab(args.labId);
+            return { success: true, data: { parts } };
+        }
+        return { success: false, error: `Unknown read-only function: ${functionName}` };
+    }
+
+    /**
      * Send message with streaming response
      * Returns an async generator for SSE
+     *
+     * Flow:
+     * 1. Stream first Gemini response to client
+     * 2. If Gemini calls a read-only function (list_*) -> execute, send functionResponse back, repeat (max 5 rounds)
+     * 3. If Gemini calls a write function (create_*/add_*) -> create draft for user confirmation
+     * 4. If Gemini returns text only -> save and done
      */
     static async *sendMessageStream(
         sessionId: string,
@@ -234,7 +270,7 @@ export class GeminiChatService {
             yield { type: "error", content: "Session not found" };
             return;
         }
-        console.log(context)
+
         // Update session context if provided
         if (context && (context.courseId || context.labId || context.partId)) {
             await ChatSession.updateOne(
@@ -255,126 +291,186 @@ export class GeminiChatService {
             textContent: userMessage
         });
 
-        // Get conversation history
+        // Get conversation history (filter out system messages for Gemini)
         const history = await this.getHistory(sessionId);
-        const contents = history.map(msg => ({
-            role: msg.role === "model" ? "model" : "user",
-            parts: [{ text: msg.textContent }]
-        }));
+        const contents: Array<{ role: string; parts: any[] }> = history
+            .filter(msg => msg.role !== "system")
+            .map(msg => ({
+                role: msg.role === "model" ? "model" : "user",
+                parts: [{ text: msg.textContent }]
+            }));
 
-        try {
-            // Build context info for AI
-            let contextInfo = '';
-            if (context?.courseId || context?.labId || context?.partId) {
-                contextInfo = '\n\n[Current Context]\n';
-                if (context.courseId) contextInfo += `- Working in Course ID: ${context.courseId}\n`;
-                if (context.labId) contextInfo += `- Working in Lab ID: ${context.labId}\n`;
-                if (context.partId) contextInfo += `- Working on Part ID: ${context.partId}\n`;
-                contextInfo += 'Use these IDs when calling functions that require them.';
-            }
+        // Build context info for AI
+        let contextInfo = '';
+        if (context?.courseId || context?.labId || context?.partId) {
+            contextInfo = '\n\n[Current Context]\n';
+            if (context.courseId) contextInfo += `- Working in Course ID: ${context.courseId}\n`;
+            if (context.labId) contextInfo += `- Working in Lab ID: ${context.labId}\n`;
+            if (context.partId) contextInfo += `- Working on Part ID: ${context.partId}\n`;
+            contextInfo += 'Use these IDs when calling functions that require them.';
+        }
 
-            // Call Gemini with streaming
-            const response = await ai.models.generateContentStream({
-                model: "gemini-2.5-flash",
-                contents: contents,
-                config: {
-                    systemInstruction: SYSTEM_INSTRUCTION + contextInfo,
-                    tools: [{ functionDeclarations }]
+        const geminiConfig = {
+            systemInstruction: SYSTEM_INSTRUCTION + contextInfo,
+            tools: [{ functionDeclarations }]
+        };
+
+        const MAX_FUNCTION_CALL_ROUNDS = 5;
+
+        // ---- Round 1: Streaming response ----
+        const streamResponse = await ai.models.generateContentStream({
+            model: "gemini-2.5-flash",
+            contents: contents,
+            config: geminiConfig
+        }).catch((err: Error) => {
+            return null;
+        });
+
+        if (!streamResponse) {
+            yield { type: "error", content: "Failed to connect to Gemini API" };
+            return;
+        }
+
+        let fullText = "";
+        let functionCall: any = null;
+        let assistantContent: any = null;
+
+        // Stream text chunks from first response
+        for await (const chunk of streamResponse) {
+            const candidate = chunk.candidates?.[0];
+            if (candidate?.content) assistantContent = candidate.content;
+            const parts = candidate?.content?.parts || [];
+            for (const part of parts) {
+                if (part.functionCall) {
+                    functionCall = part.functionCall;
                 }
+                if (part.text) {
+                    fullText += part.text;
+                    yield { type: "text", content: part.text };
+                }
+            }
+        }
+
+        // ---- Function call loop (for read-only functions) ----
+        let round = 0;
+        while (functionCall && this.READ_ONLY_FUNCTIONS.includes(functionCall.name) && round < MAX_FUNCTION_CALL_ROUNDS) {
+            round++;
+
+            const execResult = await this.executeReadOnlyFunction(
+                functionCall.name,
+                functionCall.args || {},
+                userId
+            );
+
+            // Build contents with function call + response for next Gemini call
+            if (assistantContent) {
+                contents.push(assistantContent);
+            }
+            contents.push({
+                role: "user",
+                parts: [{
+                    functionResponse: {
+                        name: functionCall.name,
+                        response: execResult.success
+                            ? execResult.data
+                            : { error: execResult.error }
+                    }
+                }]
             });
 
-            let fullText = "";
-            let functionCall: any = null;
+            // Call Gemini again (non-streaming for follow-up rounds)
+            const followUpResponse = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: contents,
+                config: geminiConfig
+            }).catch((err: Error) => {
+                return null;
+            });
 
-            // Stream text chunks
-            for await (const chunk of response) {
-                // Check for function call
-                const parts = chunk.candidates?.[0]?.content?.parts || [];
-                for (const part of parts) {
-                    if (part.functionCall) {
-                        functionCall = part.functionCall;
-                    }
-                    if (part.text) {
-                        fullText += part.text;
-                        yield { type: "text", content: part.text };
-                    }
-                }
+            if (!followUpResponse) {
+                yield { type: "error", content: "Failed to get follow-up response from Gemini" };
+                return;
             }
 
-            // Handle function call if present
-            if (functionCall) {
-                // Extract and validate arguments
-                const extractionResult = ArgumentExtractor.extract(
-                    functionCall.name,
-                    functionCall.args || {},
-                    context
-                );
+            // Process follow-up response
+            functionCall = null;
+            assistantContent = followUpResponse.candidates?.[0]?.content || null;
+            const followUpParts = assistantContent?.parts || [];
 
-                if (!extractionResult.complete) {
-                    // Missing required fields - ask follow-up question
-                    const followUpText = extractionResult.followUpQuestion ||
-                        'กรุณาให้ข้อมูลเพิ่มเติม';
-
-                    yield { type: "text", content: followUpText };
-
-                    // Save message with partial args for later completion
-                    await this.saveMessage(sessionId, {
-                        role: "model",
-                        textContent: followUpText,
-                        functionCall: {
-                            name: functionCall.name,
-                            args: extractionResult.collectedArgs,
-                            status: "collecting"
-                        }
-                    });
-
-                    yield { type: "done" };
-                    return;
+            for (const part of followUpParts) {
+                if (part.functionCall) {
+                    functionCall = part.functionCall;
                 }
+                if (part.text) {
+                    fullText += part.text;
+                    yield { type: "text", content: part.text };
+                }
+            }
+        }
 
-                // Args complete - create draft with merged args
-                const draft = await this.createDraftFromFunctionCall(
-                    { ...functionCall, args: extractionResult.collectedArgs },
-                    userId
-                );
+        // ---- Handle write function call (create/add) or no function call ----
+        if (functionCall && !this.READ_ONLY_FUNCTIONS.includes(functionCall.name)) {
+            const extractionResult = ArgumentExtractor.extract(
+                functionCall.name,
+                functionCall.args || {},
+                context
+            );
 
-                // Save message with draft
-                const savedMessage = await this.saveMessage(sessionId, {
+            if (!extractionResult.complete) {
+                const followUpText = extractionResult.followUpQuestion ||
+                    '\u0e01\u0e23\u0e38\u0e13\u0e32\u0e43\u0e2b\u0e49\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e40\u0e15\u0e34\u0e21';
+
+                yield { type: "text", content: followUpText };
+
+                await this.saveMessage(sessionId, {
                     role: "model",
-                    textContent: fullText || "กำลังสร้าง draft...",
-                    humanReadablePreview: draft.previewText,
-                    jsonPreview: draft.data,
+                    textContent: followUpText,
                     functionCall: {
                         name: functionCall.name,
                         args: extractionResult.collectedArgs,
-                        status: "pending"
-                    },
-                    draftData: draft
+                        status: "collecting"
+                    }
                 });
 
-                yield {
-                    type: "draft",
-                    data: {
-                        type: draft.type,
-                        preview: draft.previewText,
-                        data: draft.data,
-                        messageId: savedMessage.messageId
-                    }
-                };
-            } else {
-                // Save final model response
-                await this.saveMessage(sessionId, {
-                    role: "model",
-                    textContent: fullText
-                });
+                yield { type: "done" };
+                return;
             }
 
-            yield { type: "done" };
+            const draft = await this.createDraftFromFunctionCall(
+                { ...functionCall, args: extractionResult.collectedArgs },
+                userId
+            );
 
-        } catch (error: any) {
-            console.error("Gemini Stream Error:", error);
-            yield { type: "error", content: error.message };
+            const savedMessage = await this.saveMessage(sessionId, {
+                role: "model",
+                textContent: fullText || "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2a\u0e23\u0e49\u0e32\u0e07 draft...",
+                humanReadablePreview: draft.previewText,
+                jsonPreview: draft.data,
+                functionCall: {
+                    name: functionCall.name,
+                    args: extractionResult.collectedArgs,
+                    status: "pending"
+                },
+                draftData: draft
+            });
+
+            yield {
+                type: "draft",
+                data: {
+                    type: draft.type,
+                    preview: draft.previewText,
+                    data: draft.data,
+                    messageId: savedMessage.messageId
+                }
+            };
+        } else {
+            await this.saveMessage(sessionId, {
+                role: "model",
+                textContent: fullText
+            });
         }
+
+        yield { type: "done" };
     }
 
     /**
@@ -441,46 +537,45 @@ export class GeminiChatService {
         const { type, data } = message.draftData;
         let result: any;
 
-        try {
-            if (type === "lab") {
-                result = await LabService.createLab(data, userId);
-                // Update session context
-                await ChatSession.updateOne(
-                    { sessionId },
-                    { $set: { "currentContext.labId": result._id || result.id } }
-                );
-            } else if (type === "part") {
-                result = await PartService.createPart(data, userId);
-                await ChatSession.updateOne(
-                    { sessionId },
-                    { $set: { "currentContext.partId": result._id || result.id } }
-                );
-            } else if (type === "task") {
-                const partId = data.partId;
-                const part = await PartService.getPartById(partId);
-                if (!part) throw new Error("Part not found");
-
-                const updatedTasks = [...(part.tasks || []), data];
-                result = await PartService.updatePart(partId, { tasks: updatedTasks });
-            }
-
-            // Update message status
-            await ChatMessage.updateOne(
-                { sessionId, messageId },
-                { $set: { "functionCall.status": "executed" } }
+        if (type === "lab") {
+            result = await LabService.createLab(data, userId).catch((err: Error) => null);
+            if (!result) return { success: false, error: "Failed to create lab" };
+            await ChatSession.updateOne(
+                { sessionId },
+                { $set: { "currentContext.labId": result._id || result.id } }
             );
+        } else if (type === "part") {
+            result = await PartService.createPart(data, userId).catch((err: Error) => null);
+            if (!result) return { success: false, error: "Failed to create part" };
+            await ChatSession.updateOne(
+                { sessionId },
+                { $set: { "currentContext.partId": result._id || result.id } }
+            );
+        } else if (type === "task") {
+            const partId = data.partId;
+            const part = await PartService.getPartById(partId);
+            if (!part) return { success: false, error: "Part not found" };
 
-            // Add system message
-            await this.saveMessage(sessionId, {
-                role: "system",
-                textContent: `[สำเร็จ] สร้าง ${type} เรียบร้อยแล้ว`
-            });
-
-            return { success: true, result };
-        } catch (error: any) {
-            console.error("Confirm Draft Error:", error);
-            return { success: false, error: error.message };
+            const updatedTasks = [...(part.tasks || []), data];
+            result = await PartService.updatePart(partId, { tasks: updatedTasks }).catch((err: Error) => null);
+            if (!result) return { success: false, error: "Failed to add task" };
+        } else {
+            return { success: false, error: `Unknown draft type: ${type}` };
         }
+
+        // Update message status
+        await ChatMessage.updateOne(
+            { sessionId, messageId },
+            { $set: { "functionCall.status": "executed" } }
+        );
+
+        // Add system message
+        await this.saveMessage(sessionId, {
+            role: "system",
+            textContent: `[\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08] \u0e2a\u0e23\u0e49\u0e32\u0e07 ${type} \u0e40\u0e23\u0e35\u0e22\u0e1a\u0e23\u0e49\u0e2d\u0e22\u0e41\u0e25\u0e49\u0e27`
+        });
+
+        return { success: true, result };
     }
 
     /**
@@ -537,46 +632,45 @@ export class GeminiChatService {
         return courses.map(c => ({
             id: c._id.toString(),
             title: c.title,
-            description: c.description,
-            visibility: c.visibility,
-            createdAt: c.createdAt
-        }));
-    }
+        if (type === "lab") {
+            result = await LabService.createLab(data, userId).catch((err: Error) => null);
+            if (!result) return { success: false, error: "Failed to create lab" };
+            await ChatSession.updateOne(
+                { sessionId },
+                { $set: { "currentContext.labId": result._id || result.id } }
+            );
+        } else if (type === "part") {
+            result = await PartService.createPart(data, userId).catch((err: Error) => null);
+            if (!result) return { success: false, error: "Failed to create part" };
+            await ChatSession.updateOne(
+                { sessionId },
+                { $set: { "currentContext.partId": result._id || result.id } }
+            );
+        } else if (type === "task") {
+            const partId = data.partId;
+            const part = await PartService.getPartById(partId);
+            if (!part) return { success: false, error: "Part not found" };
 
-    /**
-     * Get labs in a course
-     */
-    static async getLabsForCourse(courseId: string): Promise<any[]> {
-        const labs = await LabService.getLabsByCourse(courseId);
-        return labs.labs.map((lab: any) => ({
-            id: lab._id?.toString() || lab.id,
-            title: lab.title,
-            description: lab.description,
-            type: lab.type,
-            status: lab.status,
-            createdAt: lab.createdAt
-        }));
-    }
+            const updatedTasks = [...(part.tasks || []), data];
+            result = await PartService.updatePart(partId, { tasks: updatedTasks }).catch((err: Error) => null);
+            if (!result) return { success: false, error: "Failed to add task" };
+        } else {
+            return { success: false, error: `Unknown draft type: ${type}` };
+        }
 
-    /**
-     * Get parts in a lab
-     */
-    static async getPartsForLab(labId: string): Promise<any[]> {
-        const result = await PartService.getPartsByLab(labId);
-        return result.parts.map((part: any) => ({
-            id: part._id?.toString() || part.id,
-            title: part.title,
-            description: part.description,
-            order: part.order,
-            createdAt: part.createdAt
-        }));
-    }
+        // Update message status
+        await ChatMessage.updateOne(
+            { sessionId, messageId },
+            { $set: { "functionCall.status": "executed" } }
+        );
 
-    /**
-     * Get wizard state for a session
-     */
-    static async getWizardState(sessionId: string): Promise<any> {
-        const session = await ChatSession.findOne({ sessionId });
+        // Add system message
+        await this.saveMessage(sessionId, {
+            role: "system",
+            textContent: `[\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08] \u0e2a\u0e23\u0e49\u0e32\u0e07 ${type} \u0e40\u0e23\u0e35\u0e22\u0e1a\u0e23\u0e49\u0e2d\u0e22\u0e41\u0e25\u0e49\u0e27`
+        });
+
+        return { success: true, result };
         if (!session) return null;
         return session.wizardState || { step: 'course_list' };
     }
@@ -612,13 +706,7 @@ export class GeminiChatService {
 
         await ChatSession.updateOne(
             { sessionId },
-            { $set: update }
-        );
-
-        // Update lastMessageAt
-        await ChatSession.updateOne(
-            { sessionId },
-            { $set: { lastMessageAt: new Date() } }
+            { $set: { ...update, lastMessageAt: new Date() } }
         );
     }
 
@@ -698,75 +786,71 @@ export class GeminiChatService {
         };
         message?: string;
     }> {
-        try {
-            const lab = await LabService.getLabById(labId);
-            if (!lab) {
-                return { success: false, message: 'Lab not found' };
-            }
-
-            const network = lab.network;
-            if (!network) {
-                return { success: false, message: 'Network not configured' };
-            }
-
-            // Build VLAN info
-            const vlans = (network.vlanConfiguration?.vlans || []).map((v: any, idx: number) => ({
-                id: v.id,
-                vlanId: v.vlanId,
-                baseNetwork: v.baseNetwork,
-                subnetMask: v.subnetMask,
-                description: `VLAN ${idx + 1}: ${v.baseNetwork}/${v.subnetMask}`
-            }));
-
-            // Build device info with interfaces
-            const devices = (network.devices || []).map((d: any) => ({
-                deviceId: d.deviceId,
-                displayName: d.displayName,
-                interfaces: (d.ipVariables || []).map((v: any) => ({
-                    name: v.name,
-                    interfaceName: v.interface,
-                    type: v.inputType,
-                    vlanIndex: v.vlanIndex
-                }))
-            }));
-
-            // Build natural language summary
-            let summary = `Lab "${lab.title}" has a network named "${network.name}" with base network ${network.topology.baseNetwork}/${network.topology.subnetMask}.`;
-
-            if (vlans.length > 0) {
-                summary += ` It has ${vlans.length} VLAN(s): `;
-                summary += vlans.map((v: any) => `${v.baseNetwork}/${v.subnetMask}`).join(', ') + '.';
-            }
-
-            if (devices.length > 0) {
-                summary += ` The topology includes ${devices.length} device(s): `;
-                summary += devices.map((d: any) => d.displayName).join(', ') + '.';
-            }
-
-            const ipv6Enabled = network.ipv6Config?.enabled || false;
-            if (ipv6Enabled) {
-                summary += ' IPv6 is enabled.';
-            }
-
-            return {
-                success: true,
-                context: {
-                    labTitle: lab.title,
-                    networkName: network.name,
-                    topology: {
-                        baseNetwork: network.topology.baseNetwork,
-                        subnetMask: network.topology.subnetMask,
-                        allocationStrategy: network.topology.allocationStrategy
-                    },
-                    vlans,
-                    devices,
-                    ipv6Enabled,
-                    naturalLanguageSummary: summary
-                }
-            };
-        } catch (error: any) {
-            return { success: false, message: error.message || 'Failed to get topology context' };
+        const lab = await LabService.getLabById(labId).catch(() => null);
+        if (!lab) {
+            return { success: false, message: 'Lab not found' };
         }
+
+        const network = lab.network;
+        if (!network) {
+            return { success: false, message: 'Network not configured' };
+        }
+
+        // Build VLAN info
+        const vlans = (network.vlanConfiguration?.vlans || []).map((v: any, idx: number) => ({
+            id: v.id,
+            vlanId: v.vlanId,
+            baseNetwork: v.baseNetwork,
+            subnetMask: v.subnetMask,
+            description: `VLAN ${idx + 1}: ${v.baseNetwork}/${v.subnetMask}`
+        }));
+
+        // Build device info with interfaces
+        const devices = (network.devices || []).map((d: any) => ({
+            deviceId: d.deviceId,
+            displayName: d.displayName,
+            interfaces: (d.ipVariables || []).map((v: any) => ({
+                name: v.name,
+                interfaceName: v.interface,
+                type: v.inputType,
+                vlanIndex: v.vlanIndex
+            }))
+        }));
+
+        // Build natural language summary
+        let summary = `Lab "${lab.title}" has a network named "${network.name}" with base network ${network.topology.baseNetwork}/${network.topology.subnetMask}.`;
+
+        if (vlans.length > 0) {
+            summary += ` It has ${vlans.length} VLAN(s): `;
+            summary += vlans.map((v: any) => `${v.baseNetwork}/${v.subnetMask}`).join(', ') + '.';
+        }
+
+        if (devices.length > 0) {
+            summary += ` The topology includes ${devices.length} device(s): `;
+            summary += devices.map((d: any) => d.displayName).join(', ') + '.';
+        }
+
+        const ipv6Enabled = network.ipv6Config?.enabled || false;
+        if (ipv6Enabled) {
+            summary += ' IPv6 is enabled.';
+        }
+
+        return {
+            success: true,
+            context: {
+                labTitle: lab.title,
+                networkName: network.name,
+                topology: {
+                    baseNetwork: network.topology.baseNetwork,
+                    subnetMask: network.topology.subnetMask,
+                    allocationStrategy: network.topology.allocationStrategy
+                },
+                vlans,
+                devices,
+                ipv6Enabled,
+                naturalLanguageSummary: summary
+            }
+        };
     }
 
     // ========================================================================
