@@ -46,6 +46,13 @@ export interface IChatSession extends Document {
     // Wizard State - track navigation
     wizardState: IWizardState;
 
+    // Collecting Args - partial data during iterative extraction
+    collectingArgs?: {
+        functionName: string;
+        args: Record<string, any>;
+        lastUpdated: Date;
+    };
+
     status: 'active' | 'expired';
     createdAt: Date;
     updatedAt: Date;
@@ -93,6 +100,11 @@ const chatSessionSchema = new Schema<IChatSession>({
             enum: ['basic', 'network', 'parts'],
             required: false
         }
+    },
+    collectingArgs: {
+        functionName: { type: String, required: false },
+        args: { type: Schema.Types.Mixed, required: false },
+        lastUpdated: { type: Date, required: false }
     },
     status: {
         type: String,
@@ -164,7 +176,7 @@ const chatMessageSchema = new Schema<IChatMessage>({
     },
     textContent: {
         type: String,
-        required: true,
+        required: false,
         default: ''
     },
     humanReadablePreview: {

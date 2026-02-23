@@ -318,3 +318,179 @@ export class ArgumentExtractor {
         return line;
     }
 }
+
+// ============================================================================
+// Shared Interface for Data Extractors
+// ============================================================================
+
+export interface IDataExtractor {
+    extract(
+        input: string,
+        functionName: string,
+        currentArgs: Record<string, any>,
+        context?: { courseId?: string; labId?: string; partId?: string }
+    ): ExtractionResult;
+
+    generateSummary(functionName: string, args: Record<string, any>): string;
+}
+
+// ============================================================================
+// Context Validation -- allowed functions per wizard step
+// ============================================================================
+
+const ALLOWED_FUNCTIONS: Record<string, string[]> = {
+    'course_create': ['create_course'],
+    'course_edit': ['update_course'],
+    'lab_create': ['create_lab'],
+    'lab_edit_menu': ['update_lab'],
+    'lab_edit': ['update_lab'],
+    'part_create': ['create_part', 'add_task'],
+    'part_edit': ['update_part', 'add_task'],
+    'course_list': [], // empty = allow all
+    'lab_list': [],
+    'part_list': [],
+};
+
+export function isAllowedFunction(wizardStep: string, functionName: string): boolean {
+    const allowed = ALLOWED_FUNCTIONS[wizardStep];
+    // If step not found or empty array -> allow all (general mode)
+    if (!allowed || allowed.length === 0) return true;
+    return allowed.includes(functionName);
+}
+
+export function getContextRejectMessage(wizardStep: string): string {
+    const stepNames: Record<string, string> = {
+        'course_create': 'สร้าง Course',
+        'course_edit': 'แก้ไข Course',
+        'lab_create': 'สร้าง Lab',
+        'lab_edit_menu': 'แก้ไข Lab',
+        'lab_edit': 'แก้ไข Lab',
+        'part_create': 'สร้าง Part',
+        'part_edit': 'แก้ไข Part',
+    };
+    const name = stepNames[wizardStep] || wizardStep;
+    return `ขณะนี้อยู่ในโหมด **${name}** กรุณาใส่ข้อมูลที่เกี่ยวข้อง หรือสร้าง Chat ใหม่สำหรับงานอื่น`;
+}
+
+// ============================================================================
+// GeminiExtractor -- Primary extractor using Gemini function calling
+// ============================================================================
+
+export class GeminiExtractor implements IDataExtractor {
+
+    /**
+     * Extract data from Gemini function call result
+     * Merges with existing partial args and validates completeness
+     */
+    extract(
+        input: string,
+        functionName: string,
+        currentArgs: Record<string, any>,
+        context?: { courseId?: string; labId?: string; partId?: string }
+    ): ExtractionResult {
+        // Use ArgumentExtractor under the hood
+        const result = ArgumentExtractor.extract(functionName, currentArgs, context);
+
+        // Dev logging
+        console.log(
+            `[GeminiExtractor] fn=${functionName}`,
+            `args=${JSON.stringify(result.collectedArgs)}`,
+            `missing=[${result.missingFields.map(f => f.name).join(', ')}]`,
+            `complete=${result.complete}`,
+            `input="${input.substring(0, 100)}"`
+        );
+
+        return result;
+    }
+
+    /**
+     * Merge new args from Gemini response with existing partial args
+     */
+    mergeArgs(
+        existingArgs: Record<string, any>,
+        newArgs: Record<string, any>
+    ): Record<string, any> {
+        const merged = { ...existingArgs };
+        for (const [key, value] of Object.entries(newArgs)) {
+            if (value !== undefined && value !== null && value !== '') {
+                merged[key] = value;
+            }
+        }
+        console.log(
+            `[GeminiExtractor] merge:`,
+            `existing=${JSON.stringify(existingArgs)}`,
+            `new=${JSON.stringify(newArgs)}`,
+            `result=${JSON.stringify(merged)}`
+        );
+        return merged;
+    }
+
+    /**
+     * Generate a human-readable summary of collected args for confirmation
+     */
+    generateSummary(functionName: string, args: Record<string, any>): string {
+        const schema = ArgumentExtractor.getSchemaFor(functionName);
+        if (!schema) return JSON.stringify(args, null, 2);
+
+        const lines: string[] = [];
+        const fnDisplayNames: Record<string, string> = {
+            'create_lab': 'สร้าง Lab',
+            'create_part': 'สร้าง Part',
+            'create_course': 'สร้าง Course',
+            'update_lab': 'แก้ไข Lab',
+            'update_part': 'แก้ไข Part',
+            'update_course': 'แก้ไข Course',
+            'add_task': 'เพิ่ม Task',
+        };
+
+        lines.push(`**${fnDisplayNames[functionName] || functionName}** -- สรุปข้อมูล:`);
+        lines.push('');
+
+        for (const field of schema) {
+            const value = args[field.name];
+            if (value !== undefined && value !== null) {
+                if (typeof value === 'object') {
+                    lines.push(`- **${field.descriptionTh}**: ${JSON.stringify(value)}`);
+                } else {
+                    lines.push(`- **${field.descriptionTh}**: ${value}`);
+                }
+            }
+        }
+
+        lines.push('');
+        lines.push('ข้อมูลถูกต้องหรือไม่? พิมพ์ "ยืนยัน" เพื่อดำเนินการ หรือบอกส่วนที่ต้องการแก้ไข');
+
+        return lines.join('\n');
+    }
+}
+
+// ============================================================================
+// RegexExtractor -- Placeholder for future custom NLP (not implemented)
+// ============================================================================
+
+export class RegexExtractor implements IDataExtractor {
+
+    /**
+     * [NOT IMPLEMENTED] Extract using regex/keyword matching
+     * Reserved for future implementation to reduce Gemini token usage
+     */
+    extract(
+        _input: string,
+        _functionName: string,
+        _currentArgs: Record<string, any>,
+        _context?: { courseId?: string; labId?: string; partId?: string }
+    ): ExtractionResult {
+        // Placeholder: returns incomplete result
+        // Future: implement Thai + English keyword/regex patterns
+        return {
+            complete: false,
+            collectedArgs: {},
+            missingFields: [],
+            followUpQuestion: '[RegexExtractor] ยังไม่ได้ implement -- กรุณาใช้ GeminiExtractor'
+        };
+    }
+
+    generateSummary(_functionName: string, _args: Record<string, any>): string {
+        return '[RegexExtractor] ยังไม่ได้ implement';
+    }
+}

@@ -9,6 +9,7 @@ import { connectRedis, gracefulShutdown } from "./config/redis.js";
 import { initializeMinioBucket } from "./config/minio.js";
 import { LabSessionCleanupService } from "./services/lab-session-cleanup.js";
 import { enableGlobalTimestamps } from "./utils/logger.js";
+import { OpenAPIService } from "./services/openapi-service.js";
 
 // Enable timestamps on all console.log/warn/error calls
 enableGlobalTimestamps();
@@ -37,7 +38,15 @@ try {
 }
 
 const app = new Elysia()
-  .use(swagger())
+  .use(swagger({
+    documentation: {
+      info: {
+        title: "NetGrader API Swagger EIEI",
+        version: "1.0.0",
+        description: "NetGrader API Documentation",
+      },
+    },
+  }))
   .use(cors({
     origin: env.FRONTEND_ORIGIN,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
@@ -46,6 +55,23 @@ const app = new Elysia()
   }))
   .use(authPlugin)
   .use(routes)
+  // .onStart(async (app) => {
+  //   try {
+  //     const response = await app.handle(
+  //       new Request('http://localhost:4000/swagger/json')
+  //     )
+  //     if (response.ok) {
+  //       const spec = await response.text()
+  //       await Bun.write('openapi.json', spec)
+  //       console.log('✅ OpenAPI spec updated: openapi.json')
+  //     }
+  //   } catch (error) {
+  //     console.error('❌ Failed to export OpenAPI spec:', error)
+  //   }
+  // })
+  .onStart(async (app) => {
+    await OpenAPIService.generateYAML(app);
+  })
   .get("/", () => "Hello Elysia")
   .listen({ port: env.PORT || 3000, idleTimeout: 60 });
 
