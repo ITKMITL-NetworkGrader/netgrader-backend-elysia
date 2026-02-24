@@ -407,63 +407,77 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
     .post(
         "/:sessionId/confirm/:messageId",
         async ({ params, authPlugin, set }) => {
-            const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
-            const { sessionId, messageId } = params;
+            try {
+                const u_id = authPlugin?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+                const { sessionId, messageId } = params;
+                console.log(`\n[Confirm Handler] ===== sessionId: ${sessionId}, messageId: ${messageId}, u_id: ${u_id} =====`);
 
-            // Validate session ID format
-            const sessionIdValidation = GeminiChatValidator.validateSessionId(sessionId);
-            if (!sessionIdValidation.valid) {
-                set.status = 400;
-                return {
-                    success: false,
-                    message: "Invalid session ID",
-                    errors: sessionIdValidation.errors
-                };
-            }
-
-            // Validate draft action (session ownership + draft message)
-            const draftValidation = await GeminiChatValidator.validateDraftAction(
-                sessionId,
-                messageId,
-                u_id
-            );
-            if (!draftValidation.valid) {
-                const isNotFound = draftValidation.errors.some(e => e.includes("not found"));
-                const isAccessDenied = draftValidation.errors.some(e => e.includes("Access denied"));
-                if (isNotFound) {
-                    set.status = 404;
-                } else if (isAccessDenied) {
-                    set.status = 403;
-                } else {
+                // Validate session ID format
+                const sessionIdValidation = GeminiChatValidator.validateSessionId(sessionId);
+                if (!sessionIdValidation.valid) {
                     set.status = 400;
+                    return {
+                        success: false,
+                        message: "Invalid session ID",
+                        errors: sessionIdValidation.errors
+                    };
                 }
+
+                // Validate draft action (session ownership + draft message)
+                const draftValidation = await GeminiChatValidator.validateDraftAction(
+                    sessionId,
+                    messageId,
+                    u_id
+                );
+                console.log(`[Confirm Handler] draftValidation: valid=${draftValidation.valid}, errors=`, draftValidation.errors);
+
+                if (!draftValidation.valid) {
+                    const isNotFound = draftValidation.errors.some(e => e.includes("not found"));
+                    const isAccessDenied = draftValidation.errors.some(e => e.includes("Access denied"));
+                    if (isNotFound) {
+                        set.status = 404;
+                    } else if (isAccessDenied) {
+                        set.status = 403;
+                    } else {
+                        set.status = 400;
+                    }
+                    return {
+                        success: false,
+                        message: "Draft validation failed",
+                        errors: draftValidation.errors
+                    };
+                }
+
+                // Execute the draft
+                const result = await GeminiChatService.confirmDraft(
+                    sessionId,
+                    messageId,
+                    u_id
+                );
+                console.log(`[Confirm Handler] confirmDraft result:`, JSON.stringify(result).slice(0, 500));
+
+                if (!result.success) {
+                    set.status = 500;
+                    return {
+                        success: false,
+                        message: "Failed to confirm draft",
+                        errors: [result.error || "Unknown error"]
+                    };
+                }
+
                 return {
-                    success: false,
-                    message: "Draft validation failed",
-                    errors: draftValidation.errors
+                    success: true,
+                    data: result.result
                 };
-            }
-
-            // Execute the draft
-            const result = await GeminiChatService.confirmDraft(
-                sessionId,
-                messageId,
-                u_id
-            );
-
-            if (!result.success) {
+            } catch (err: any) {
+                console.error(`[Confirm Handler] UNHANDLED ERROR:`, err.message, err.stack);
                 set.status = 500;
                 return {
                     success: false,
-                    message: "Failed to confirm draft",
-                    errors: [result.error || "Unknown error"]
+                    message: err.message || "Internal server error",
+                    errors: [err.message || "Unknown error"]
                 };
             }
-
-            return {
-                success: true,
-                data: result.result
-            };
         },
         {
             params: t.Object({

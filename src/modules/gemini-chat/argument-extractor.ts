@@ -35,6 +35,10 @@ export class ArgumentExtractor {
         const paramType = (parameters?.type || '').toLowerCase();
         if (!parameters || paramType !== 'object' || !parameters.properties) return [];
         const requiredFields = parameters.required || [];
+
+        console.log(`[ArgumentExtractor] convertGeminiParamsToMeta - requiredFields: [${requiredFields.join(', ')}]`);
+        console.log(`[ArgumentExtractor] allProperties: [${Object.keys(parameters.properties).join(', ')}]`);
+
         const result: ArgumentSchema[] = [];
 
         for (const [key, value] of Object.entries(parameters.properties)) {
@@ -55,7 +59,11 @@ export class ArgumentExtractor {
     static async getSchemaFor(functionName: string): Promise<ArgumentSchema[] | null> {
         const declarations = await getFunctionDeclarations();
         const decl = declarations.find(d => d.name === functionName) as any;
-        if (!decl) return null;
+        if (!decl) {
+            console.warn(`[ArgumentExtractor] getSchemaFor: No declaration found for "${functionName}". Available: [${declarations.map((d: any) => d.name).join(', ')}]`);
+            return null;
+        }
+        console.log(`[ArgumentExtractor] getSchemaFor(${functionName}) - parameters.type: ${decl.parameters?.type}`);
         return this.convertGeminiParamsToMeta(decl.parameters);
     }
 
@@ -70,10 +78,14 @@ export class ArgumentExtractor {
         providedArgs: Record<string, any>
     ): Promise<ArgumentSchema[]> {
         const requiredFields = await this.getRequiredFields(functionName);
-        return requiredFields.filter(field => {
+        const missing = requiredFields.filter(field => {
             const value = providedArgs[field.name];
-            return value === undefined || value === null || value === '';
+            const isMissing = value === undefined || value === null || value === '';
+            console.log(`[ArgumentExtractor] getMissingFields - field "${field.name}": value=${JSON.stringify(value)}, missing=${isMissing}`);
+            return isMissing;
         });
+        console.log(`[ArgumentExtractor] getMissingFields(${functionName}) - provided keys: [${Object.keys(providedArgs).join(', ')}], missing: [${missing.map(f => f.name).join(', ')}]`);
+        return missing;
     }
 
     static async extract(
@@ -81,23 +93,33 @@ export class ArgumentExtractor {
         providedArgs: Record<string, any>,
         context?: { courseId?: string; labId?: string; partId?: string }
     ): Promise<ExtractionResult> {
+        console.log(`\n[ArgumentExtractor] ===== extract() called =====`);
+        console.log(`[ArgumentExtractor] functionName: ${functionName}`);
+        console.log(`[ArgumentExtractor] providedArgs:`, JSON.stringify(providedArgs, null, 2));
+        console.log(`[ArgumentExtractor] context:`, JSON.stringify(context));
+
         const schema = await this.getSchemaFor(functionName);
         if (!schema) {
+            console.error(`[ArgumentExtractor] Schema not found for function: ${functionName}`);
             return { complete: false, collectedArgs: {}, missingFields: [], followUpQuestion: `ไม่รู้จัก function: ${functionName}` };
         }
 
         const mergedArgs: Record<string, any> = { ...providedArgs };
 
-        if (context?.courseId && !mergedArgs.courseId) mergedArgs.courseId = context.courseId;
-        if (context?.labId && !mergedArgs.labId) mergedArgs.labId = context.labId;
-        if (context?.partId && !mergedArgs.partId) mergedArgs.partId = context.partId;
+        if (context?.courseId && !mergedArgs.courseId) { mergedArgs.courseId = context.courseId; console.log(`[ArgumentExtractor] Auto-injected courseId: ${context.courseId}`); }
+        if (context?.labId && !mergedArgs.labId) { mergedArgs.labId = context.labId; console.log(`[ArgumentExtractor] Auto-injected labId: ${context.labId}`); }
+        if (context?.partId && !mergedArgs.partId) { mergedArgs.partId = context.partId; console.log(`[ArgumentExtractor] Auto-injected partId: ${context.partId}`); }
+
+        console.log(`[ArgumentExtractor] mergedArgs after context inject:`, JSON.stringify(mergedArgs, null, 2));
 
         const missingFields = await this.getMissingFields(functionName, mergedArgs);
 
         if (missingFields.length === 0) {
+            console.log(`[ArgumentExtractor] COMPLETE - all required fields present`);
             return { complete: true, collectedArgs: mergedArgs, missingFields: [] };
         }
 
+        console.log(`[ArgumentExtractor] INCOMPLETE - missing: [${missingFields.map(f => f.name).join(', ')}]`);
         const followUpQuestion = this.generateFollowUp(missingFields, functionName);
 
         return { complete: false, collectedArgs: mergedArgs, missingFields, followUpQuestion };

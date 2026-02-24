@@ -92,21 +92,28 @@ export async function createDraftFromFunctionCall(
 ): Promise<any> {
     const { name, args } = functionCall;
 
+    // if (name === "create_lab" || name === "postV0Labs") {
+    //     return {
+    //         type: "lab",
+    //         data: {
+    //             ...args,
+    //             createdBy: userId,
+    //             network: {
+    //                 name: args.title || "Network",
+    //                 topology: {
+    //                     baseNetwork: "10.0.0.0",
+    //                     subnetMask: 24,
+    //                     allocationStrategy: "student_id_based"
+    //                 }
+    //             }
+    //         },
+    //         previewText: `[Lab] ต้องการสร้าง Lab: **${args.title || args.name}**\nประเภท: ${args.type || '-'}\nรายละเอียด: ${args.description || "-"}`
+    //     };
+    // }
     if (name === "create_lab" || name === "postV0Labs") {
         return {
             type: "lab",
-            data: {
-                ...args,
-                createdBy: userId,
-                network: {
-                    name: args.title || "Network",
-                    topology: {
-                        baseNetwork: "10.0.0.0",
-                        subnetMask: 24,
-                        allocationStrategy: "student_id_based"
-                    }
-                }
-            },
+            data: args,
             previewText: `[Lab] ต้องการสร้าง Lab: **${args.title || args.name}**\nประเภท: ${args.type || '-'}\nรายละเอียด: ${args.description || "-"}`
         };
     }

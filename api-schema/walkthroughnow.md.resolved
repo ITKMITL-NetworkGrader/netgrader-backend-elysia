@@ -1,0 +1,305 @@
+# Gemini Chat - Flow Walkthrough
+
+อธิบาย Flow การทำงานตั้งแต่ Frontend -> Backend -> Database -> Gemini API
+
+---
+
+## Architecture Overview
+
+```mermaid
+graph LR
+    subgraph Frontend
+        A[GeminiChat.vue] --> B[useGeminiChat.ts]
+    end
+    subgraph Backend
+        C[index.ts - API Routes]
+        D[service.ts - Business Logic]
+        E[gemini-client.ts - AI Client]
+        F[function-calling.ts - Tools]
+        G[argument-extractor.ts - Validation]
+        H[system-instruction.ts - Prompt]
+        I[welcome-message.ts - Welcome]
+        J[validator.ts - Input Validation]
+        K[model.ts - DB Schema]
+    end
+    subgraph External
+        L[(MongoDB)]
+        M[Gemini API]
+    end
+
+    B -->|HTTP/SSE| C
+    C --> D
+    D --> E
+    D --> F
+    D --> G
+    E --> H
+    E --> F
+    D --> I
+    C --> J
+    D --> K
+    K --> L
+    E --> M
+```
+
+### File Structure
+
+| File | หน้าที่ |
+|---|---|
+| [index.ts](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/index.ts) | API routes (Elysia) - 934 lines |
+| [service.ts](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/service.ts) | Business logic ทั้งหมด - 1012 lines |
+| [gemini-client.ts](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/gemini-client.ts) | Wrapper สำหรับ Gemini API |
+| [function-calling.ts](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/function-calling.ts) | Function declarations + execution |
+| [argument-extractor.ts](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/argument-extractor.ts) | ตรวจ/validate arguments ก่อนสร้าง draft |
+| [system-instruction.ts](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/system-instruction.ts) | System prompt สำหรับ Gemini |
+| [welcome-message.ts](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/welcome-message.ts) | สร้าง welcome message ตาม context |
+| [validator.ts](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/validator.ts) | Validate input (session, message, draft) |
+| [model.ts](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/model.ts) | Mongoose schema (ChatSession, ChatMessage) |
+| [useGeminiChat.ts](file:///d:/OatWorkSpace/netgrader-frontend/app/composables/useGeminiChat.ts) | Frontend composable (Vue) |
+| [GeminiChat.vue](file:///d:/OatWorkSpace/netgrader-frontend/app/components/chat/GeminiChat.vue) | UI component |
+
+---
+
+## Flow 1: Create Session
+
+```mermaid
+sequenceDiagram
+    participant FE as useGeminiChat.ts
+    participant API as index.ts
+    participant SVC as service.ts
+    participant DB as MongoDB
+    participant WM as welcome-message.ts
+
+    FE->>API: POST /gemini/chat<br/>{ title, contextType, action, courseId, labId, partId }
+    API->>SVC: createSession(userId, title, contextOptions)
+    SVC->>SVC: mapContextToWizardState(contextOptions)
+    Note over SVC: เช่น contextType=lab, action=create<br/>-> wizardState.step = "lab_create"
+    SVC->>DB: ChatSession.save()
+    SVC->>WM: WelcomeMessage.generate(wizardState)
+    Note over WM: ดึง API schema จาก OpenAPI<br/>แล้วสร้างข้อความต้อนรับ+บอก required fields
+    SVC->>DB: ChatMessage.save({ role: "model", textContent: welcomeMsg })
+    SVC-->>FE: { sessionId, wizardState }
+    FE->>API: GET /gemini/chat/:sessionId
+    API-->>FE: messages[] (welcome message)
+```
+
+**Context ที่ถูกบันทึกตอนสร้าง Session:**
+- `currentContext` -- `{ courseId, labId, partId }` ที่ user เลือก
+- `wizardState` -- `{ step, courseId, labId, partId }` ที่ map จาก contextType+action
+
+---
+
+## Flow 2: Send Message (Core Flow)
+
+นี่คือ **หัวใจหลัก** ของระบบ -- SSE Streaming + Function Calling
+
+### 2.1 เตรียมข้อมูลและส่งให้ Gemini
+
+```mermaid
+sequenceDiagram
+    participant FE as useGeminiChat.ts
+    participant API as index.ts
+    participant SVC as service.ts
+    participant DB as MongoDB
+    participant GC as gemini-client.ts
+    participant GM as Gemini API
+
+    FE->>FE: 1. เพิ่ม user message ลง messages[] ทันที (optimistic)
+    FE->>FE: 2. เพิ่ม streaming placeholder (isStreaming=true)
+    FE->>API: POST /gemini/chat/:sessionId/message<br/>{ message, courseId, labId, partId }
+    Note over API: Set SSE headers:<br/>Content-Type: text/event-stream
+
+    API->>SVC: sendMessageStream*(sessionId, message, userId, context)
+    SVC->>DB: Update session.currentContext
+    SVC->>DB: ChatMessage.save({ role: "user" })
+    SVC->>DB: ChatMessage.find({ sessionId }) -- ดึง history ทั้งหมด
+    SVC->>SVC: สร้าง contents[] จาก history<br/>(กรอง system messages ออก)
+```
+
+### 2.2 สิ่งที่ส่งให้ Gemini
+
+```mermaid
+graph TD
+    subgraph "Gemini Request"
+        A[System Instruction]
+        B[Context Info]
+        C[API Schema]
+        D[Function Declarations]
+        E[Chat History - contents]
+    end
+
+    A --> F["คุณคือ Netgrader Assistant<br/>ช่วยอาจารย์จัดการ Lab/Part/Task"]
+    B --> G["[Current Context]<br/>Course ID: xxx<br/>Lab ID: yyy"]
+    C --> H["[Active API Schema]<br/>JSON schema ของ endpoint ที่ตรงกับ wizardStep<br/>เช่น lab_create -> POST /v0/labs schema"]
+    D --> I["Custom: list_courses, list_labs, list_parts<br/>Dynamic: จาก OpenAPI (create_lab, create_part, ...)"]
+    E --> J["ข้อความทั้งหมดในห้องแชท<br/>map เป็น { role, parts: [{ text }] }"]
+```
+
+**Code ที่เกี่ยวข้อง:** [service.ts L277-299](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/service.ts#L277-L299)
+
+```typescript
+// Map wizardStep -> operationId เพื่อดึง schema ที่เกี่ยวข้อง
+const opIdMap = {
+    'lab_create': 'postV0Labs',
+    'part_create': 'postV0Parts',
+    // ...
+};
+const rawSchema = await SchemaReaderService.getSchemaForPromptContext(opId);
+const contextInfo = buildContextInfo(context) + schemaContext;
+const geminiConfig = await buildGeminiConfig(contextInfo);
+```
+
+### 2.3 รับ Response และจัดการ Function Calls
+
+```mermaid
+flowchart TD
+    A["streamGeminiResponse()"] --> B{Response มีอะไร?}
+
+    B -->|"Text เท่านั้น"| C["yield { type: text }<br/>save message -> Done"]
+
+    B -->|"functionCall"| D{ประเภท function?}
+
+    D -->|"Read-only<br/>(list_courses/labs/parts)"| E["executeReadOnlyFunction()"]
+    E --> F["ดึงข้อมูลจาก DB:<br/>getCoursesForUser()<br/>getLabsForCourse()<br/>getPartsForLab()"]
+    F --> G["ส่ง functionResponse กลับ Gemini"]
+    G --> H["callGemini() - non-streaming"]
+    H --> B
+    Note over E,H: "Loop สูงสุด 5 รอบ (MAX_FUNCTION_CALL_ROUNDS)"
+
+    D -->|"Write function<br/>(create_lab, create_part, ...)"| I["ไป Draft Flow"]
+```
+
+**Read-only loop** ([service.ts L341-391](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/service.ts#L341-L391)):
+- Gemini เรียก `list_courses` -> Backend ดึงข้อมูลจาก DB -> ส่งกลับ Gemini -> Gemini ตอบอีกรอบ
+- ทำงานอัตโนมัติ ไม่ต้องถาม user
+
+### 2.4 Write Function - Draft Flow
+
+```mermaid
+sequenceDiagram
+    participant SVC as service.ts
+    participant AE as argument-extractor.ts
+    participant FC as function-calling.ts
+    participant DB as MongoDB
+    participant FE as Frontend
+
+    SVC->>AE: isAllowedFunction(wizardStep, functionName)?
+    Note over AE: ตรวจว่า function ตรงกับ context<br/>เช่น lab_create อนุญาตเฉพาะ create_lab
+
+    alt Function ไม่ตรง context
+        AE-->>SVC: false
+        SVC-->>FE: yield { type: "text", content: rejectMessage }
+    end
+
+    SVC->>SVC: Merge existingArgs (จาก session.collectingArgs)<br/>+ newArgs (จาก Gemini response)
+    SVC->>AE: extract(userMessage, functionName, mergedArgs, context)
+    Note over AE: ตรวจ required fields จาก OpenAPI schema
+
+    alt ข้อมูลยังไม่ครบ
+        AE-->>SVC: { complete: false, missingFields, followUpQuestion }
+        SVC->>DB: session.collectingArgs = { functionName, args (partial) }
+        SVC->>DB: ChatMessage.save({ functionCall.status: "collecting" })
+        SVC-->>FE: yield { type: "text", content: "กรุณาให้ข้อมูล..." }
+    else ข้อมูลครบแล้ว
+        AE-->>SVC: { complete: true, collectedArgs }
+        SVC->>SVC: generateSummary() -- สรุปข้อมูลเป็น Markdown
+        SVC->>FC: createDraftFromFunctionCall() -- สร้าง draft object
+        SVC->>DB: ChatMessage.save({ draftData, functionCall.status: "pending" })
+        SVC->>DB: session.collectingArgs = null
+        SVC-->>FE: yield { type: "draft", data: { type, preview, messageId } }
+    end
+```
+
+> [!IMPORTANT]
+> `session.collectingArgs` คือกลไกที่ทำให้ Gemini สามารถ **ถามข้อมูลทีละ field** ได้ เมื่อ user ตอบมาอีกรอบ system จะ merge args เก่า + ใหม่เข้าด้วยกัน จนครบ required fields แล้วค่อยสร้าง draft
+
+---
+
+## Flow 3: Confirm/Reject Draft
+
+```mermaid
+sequenceDiagram
+    participant FE as Frontend
+    participant API as index.ts
+    participant SVC as service.ts
+    participant DB as MongoDB
+    participant LS as LabService/PartService
+
+    alt Confirm
+        FE->>API: POST /gemini/chat/:sessionId/confirm/:messageId
+        API->>SVC: confirmDraft(sessionId, messageId, userId)
+        SVC->>DB: ChatMessage.findOne({ messageId }) -- ดึง draftData
+        SVC->>SVC: Auto-inject missing IDs จาก session context
+        SVC->>SVC: Auto-inject defaults (network config, type)
+        SVC->>LS: LabService.createLab(data) / PartService.createPart(data)
+        LS->>DB: สร้าง entity จริงใน DB
+        SVC->>DB: functionCall.status = "executed"
+        SVC->>DB: Save system message "[สำเร็จ]"
+        SVC->>DB: Update session.currentContext กับ ID ใหม่
+        SVC-->>FE: { success: true, result }
+    else Reject
+        FE->>API: POST /gemini/chat/:sessionId/reject/:messageId
+        API->>SVC: rejectDraft(sessionId, messageId)
+        SVC->>DB: functionCall.status = "rejected"
+        SVC->>DB: Save system message "[ยกเลิก]"
+        SVC-->>FE: { success: true }
+    end
+```
+
+**Auto-inject ตอน Confirm** ([service.ts L552-660](file:///d:/OatWorkSpace/netgrader-backend-elysia/src/modules/gemini-chat/service.ts#L552-L660)):
+- `courseId` / `labId` จาก `session.currentContext` หรือ `wizardState`
+- Default `network` config สำหรับ Lab (baseNetwork, subnetMask)
+- Default `type = "lab"` ถ้าไม่ได้ระบุ
+
+---
+
+## Database Schema
+
+### ChatSession (collection: `chat_sessions`)
+
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| `sessionId` | string (UUID) | Primary key |
+| `userId` | string | เจ้าของ session (จาก JWT) |
+| `title` | string | ชื่อห้องแชท |
+| `currentContext` | object | `{ courseId, labId, partId }` ปัจจุบัน |
+| `wizardState` | object | `{ step, courseId, labId, partId, editSection }` |
+| `collectingArgs` | object | `{ functionName, args, lastUpdated }` -- partial data ระหว่างถามข้อมูล |
+| `status` | enum | `active` / `expired` |
+
+### ChatMessage (collection: `chat_messages`)
+
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| `sessionId` | string | FK -> ChatSession |
+| `messageId` | string (UUID) | Primary key |
+| `role` | enum | `user` / `model` / `system` |
+| `textContent` | string | เนื้อหาข้อความ |
+| `functionCall` | object | `{ name, args, status }` -- status: `pending`/`executed`/`rejected`/`collecting` |
+| `draftData` | object | `{ type, data, previewText }` -- ข้อมูลพร้อมสร้าง |
+
+---
+
+## Summary Diagram
+
+```mermaid
+flowchart LR
+    A["User พิมพ์ข้อความ"] --> B["Frontend<br/>useGeminiChat.ts"]
+    B -->|"POST SSE"| C["Backend API<br/>index.ts"]
+    C --> D["Service<br/>service.ts"]
+    D -->|"save"| E[(MongoDB)]
+    D -->|"history + context"| F["Gemini Client<br/>gemini-client.ts"]
+    F -->|"stream request"| G["Gemini API"]
+    G -->|"text chunks"| F
+    G -->|"functionCall"| F
+
+    F --> H{Function Type?}
+    H -->|"read-only"| I["Execute ทันที<br/>แล้ว loop กลับ Gemini"]
+    H -->|"write"| J["ArgumentExtractor<br/>ตรวจข้อมูล"]
+    J -->|"ไม่ครบ"| K["save partial args<br/>+ ถาม user เพิ่ม"]
+    J -->|"ครบแล้ว"| L["สร้าง Draft<br/>ให้ user Confirm"]
+    L --> M{User ตัดสินใจ}
+    M -->|"Confirm"| N["เรียก LabService/PartService<br/>สร้าง entity จริง"]
+    M -->|"Reject"| O["ยกเลิก"]
+
+    H -->|"text only"| P["save message<br/>แสดงผลทันที"]
+```

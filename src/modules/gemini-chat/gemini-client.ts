@@ -24,8 +24,19 @@ export async function buildGeminiConfig(
     contextInfo?: string
 ): Promise<{ systemInstruction: string; tools: any[] }> {
     const functionDeclarations = await getFunctionDeclarations();
+
+    const systemInstruction = SYSTEM_INSTRUCTION + (contextInfo || '');
+
+    console.log(`\n[GeminiClient] ===== buildGeminiConfig =====`);
+    console.log(`[GeminiClient] Tools count: ${functionDeclarations.length}`);
+    console.log(`[GeminiClient] Tool names: [${functionDeclarations.map((d: any) => d.name).join(', ')}]`);
+    console.log(`[GeminiClient] System instruction length: ${systemInstruction.length} chars`);
+    if (contextInfo) {
+        console.log(`[GeminiClient] Context info injected:\n${contextInfo}`);
+    }
+
     return {
-        systemInstruction: SYSTEM_INSTRUCTION + (contextInfo || ''),
+        systemInstruction,
         tools: [{ functionDeclarations }]
     };
 }
@@ -55,11 +66,19 @@ export async function streamGeminiResponse(
     contents: Array<{ role: string; parts: any[] }>,
     config: { systemInstruction: string; tools: any[] }
 ): Promise<AsyncIterable<any> | null> {
+    console.log(`\n[GeminiClient] ===== streamGeminiResponse =====`);
+    console.log(`[GeminiClient] Model: ${GEMINI_MODEL}`);
+    console.log(`[GeminiClient] History turns: ${contents.length}`);
+    if (contents.length > 0) {
+        const last = contents[contents.length - 1];
+        console.log(`[GeminiClient] Last message role: ${last.role}, text: "${last.parts.map((p: any) => p.text || '[non-text]').join('')?.slice(0, 200)}"`);
+    }
     return ai.models.generateContentStream({
         model: GEMINI_MODEL,
         contents,
         config
     }).catch((err: Error) => {
+        console.error(`[GeminiClient] streamGeminiResponse error:`, err.message);
         return null;
     });
 }
@@ -72,11 +91,14 @@ export async function callGemini(
     contents: Array<{ role: string; parts: any[] }>,
     config: { systemInstruction: string; tools: any[] }
 ): Promise<any | null> {
+    console.log(`\n[GeminiClient] ===== callGemini (non-streaming) =====`);
+    console.log(`[GeminiClient] History turns: ${contents.length}`);
     return ai.models.generateContent({
         model: GEMINI_MODEL,
         contents,
         config
     }).catch((err: Error) => {
+        console.error(`[GeminiClient] callGemini error:`, err.message);
         return null;
     });
 }

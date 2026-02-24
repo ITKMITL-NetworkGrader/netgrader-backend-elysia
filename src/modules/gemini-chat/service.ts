@@ -315,15 +315,27 @@ export class GeminiChatService {
             const candidate = chunk.candidates?.[0];
             if (candidate?.content) assistantContent = candidate.content;
             const parts = candidate?.content?.parts || [];
+            if (parts.length === 0) {
+                const finishReason = candidate?.finishReason;
+                console.warn(`[Service] Stream chunk has empty parts. finishReason: ${finishReason}`);
+            }
             for (const part of parts) {
                 if (part.functionCall) {
                     functionCall = part.functionCall;
+                    console.log(`\n[Service] FUNCTION CALL detected: name="${part.functionCall.name}"`);
+                    console.log(`[Service] Function Call args:`, JSON.stringify(part.functionCall.args, null, 2));
                 }
                 if (part.text) {
                     fullText += part.text;
                     yield { type: "text", content: part.text };
                 }
             }
+        }
+
+        if (!functionCall && !fullText) {
+            console.warn(`[Service] WARNING: Gemini returned empty response (no text, no functionCall). Candidate finishReason may indicate safety block or empty model output.`);
+        } else if (!functionCall) {
+            console.log(`[Service] Text-only response received, length: ${fullText.length} chars`);
         }
 
         // ---- Function call loop (for read-only functions) ----
@@ -406,6 +418,12 @@ export class GeminiChatService {
             const newArgs = functionCall.args || {};
             const mergedArgs = extractor.mergeArgs(existingArgs, newArgs);
 
+            console.log(`\n[Service] ===== Write Function Call: ${functionCall.name} =====`);
+            console.log(`[Service] existingArgs from session.collectingArgs:`, JSON.stringify(existingArgs));
+            console.log(`[Service] newArgs from Gemini:`, JSON.stringify(newArgs));
+            console.log(`[Service] mergedArgs:`, JSON.stringify(mergedArgs));
+            console.log(`[Service] wizardStep: ${wizardStep}`);
+
             // Extract and validate
             const extractionResult = await extractor.extract(
                 userMessage,
@@ -414,7 +432,10 @@ export class GeminiChatService {
                 context
             );
 
+            console.log(`[Service] extractionResult.complete: ${extractionResult.complete}`);
             if (!extractionResult.complete) {
+                console.log(`[Service] Missing fields: [${extractionResult.missingFields.map(f => f.name).join(', ')}]`);
+
                 // Save partial args to session.collectingArgs
                 await ChatSession.updateOne(
                     { sessionId },
@@ -515,10 +536,81 @@ export class GeminiChatService {
         }
 
         const { type, data } = message.draftData;
+
+        // Get session context for auto-injecting missing IDs
+        const session = await ChatSession.findOne({ sessionId });
+        const ctx = session?.currentContext || {};
+        const wiz = session?.wizardState || {};
+
+        console.log(`\n[confirmDraft] ===== type: ${type} =====`);
+        console.log(`[confirmDraft] draft data keys: [${Object.keys(data).join(', ')}]`);
+        console.log(`[confirmDraft] session context:`, JSON.stringify(ctx));
+
         let result: any;
         let lastError: string | null = null;
 
         if (type === "lab") {
+            // --- Validation ---
+            const errors: string[] = [];
+
+            // Auto-inject courseId from session context if missing
+            if (!data.courseId && (ctx.courseId || wiz.courseId)) {
+                data.courseId = ctx.courseId || wiz.courseId;
+                console.log(`[confirmDraft] Auto-injected courseId: ${data.courseId}`);
+            }
+            if (!data.courseId) errors.push("courseId is required");
+            if (!data.title) errors.push("title is required");
+
+            // Inject default network config if Gemini did not provide one
+            if (!data.network) {
+                data.network = {
+                    name: data.title || "Network",
+                    topology: {
+                        baseNetwork: "10.0.0.0",
+                        subnetMask: 24,
+                        allocationStrategy: "student_id_based"
+                    },
+                    devices: []
+                };
+                console.log(`[confirmDraft] Auto-injected default network config`);
+            } else {
+                // Gemini cannot provide valid ObjectId templateIds for devices,
+                // so strip devices to prevent BSONError on cast
+                if (data.network.devices && data.network.devices.length > 0) {
+                    console.log(`[confirmDraft] Stripping ${data.network.devices.length} Gemini-generated devices (invalid templateIds)`);
+                    data.network.devices = [];
+                }
+                // Ensure network.name exists
+                if (!data.network.name) {
+                    data.network.name = data.title || "Network";
+                }
+                // Ensure topology defaults
+                if (!data.network.topology) {
+                    data.network.topology = {
+                        baseNetwork: "10.0.0.0",
+                        subnetMask: 24,
+                        allocationStrategy: "student_id_based"
+                    };
+                    console.log(`[confirmDraft] Auto-injected default topology`);
+                } else {
+                    if (!data.network.topology.baseNetwork) data.network.topology.baseNetwork = "10.0.0.0";
+                    if (!data.network.topology.subnetMask) data.network.topology.subnetMask = 24;
+                    if (!data.network.topology.allocationStrategy) data.network.topology.allocationStrategy = "student_id_based";
+                }
+            }
+
+            // Set default type if missing
+            if (!data.type) {
+                data.type = "lab";
+                console.log(`[confirmDraft] Auto-injected default type: lab`);
+            }
+
+            if (errors.length > 0) {
+                console.error(`[confirmDraft] Lab validation failed:`, errors);
+                return { success: false, error: `Validation failed: ${errors.join(', ')}` };
+            }
+
+            console.log(`[confirmDraft] Creating lab with data:`, JSON.stringify(data, null, 2));
             result = await LabService.createLab(data, userId).catch((err: Error) => { lastError = err.message; return null; });
             if (!result) return { success: false, error: lastError || "Failed to create lab" };
             await ChatSession.updateOne(
@@ -526,6 +618,23 @@ export class GeminiChatService {
                 { $set: { "currentContext.labId": result._id || result.id } }
             );
         } else if (type === "part") {
+            // --- Validation ---
+            const errors: string[] = [];
+
+            // Auto-inject labId from session context if missing
+            if (!data.labId && (ctx.labId || wiz.labId)) {
+                data.labId = ctx.labId || wiz.labId;
+                console.log(`[confirmDraft] Auto-injected labId: ${data.labId}`);
+            }
+            if (!data.labId) errors.push("labId is required");
+            if (!data.title) errors.push("title is required");
+
+            if (errors.length > 0) {
+                console.error(`[confirmDraft] Part validation failed:`, errors);
+                return { success: false, error: `Validation failed: ${errors.join(', ')}` };
+            }
+
+            console.log(`[confirmDraft] Creating part with data keys: [${Object.keys(data).join(', ')}]`);
             result = await PartService.createPart(data, userId).catch((err: Error) => { lastError = err.message; return null; });
             if (!result) return { success: false, error: lastError || "Failed to create part" };
             await ChatSession.updateOne(
@@ -533,7 +642,13 @@ export class GeminiChatService {
                 { $set: { "currentContext.partId": result._id || result.id } }
             );
         } else if (type === "task") {
-            const partId = data.partId;
+            // --- Validation ---
+            const partId = data.partId || ctx.partId || wiz.partId;
+            if (!partId) {
+                return { success: false, error: "Validation failed: partId is required" };
+            }
+            data.partId = partId;
+
             const part = await PartService.getPartById(partId).catch((err: Error) => { lastError = err.message; return null; });
             if (!part) return { success: false, error: lastError || "Part not found" };
 
