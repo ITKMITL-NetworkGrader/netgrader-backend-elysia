@@ -7,6 +7,7 @@ import { ArgumentExtractor, GeminiExtractor, isAllowedFunction, getContextReject
 import { buildGeminiConfig, buildContextInfo, streamGeminiResponse, callGemini, MAX_FUNCTION_CALL_ROUNDS } from "./gemini-client";
 import { READ_ONLY_FUNCTIONS, executeReadOnlyFunction, createDraftFromFunctionCall, type DataFetchers } from "./function-calling";
 import { WelcomeMessage } from "./welcome-message";
+import { SchemaReaderService } from "../../services/schema-reader-service";
 
 // ============================================================================
 // Service Class
@@ -274,8 +275,28 @@ export class GeminiChatService {
             }));
 
         // Build Gemini config using helpers
-        const contextInfo = buildContextInfo(context);
-        const geminiConfig = buildGeminiConfig(contextInfo);
+        const wizardStep = session.wizardState?.step || 'course_list';
+        let schemaContext = '';
+        const opIdMap: Record<string, string> = {
+            'course_create': 'postV0Courses',
+            'course_edit': 'putV0CoursesById',
+            'lab_create': 'postV0Labs',
+            'lab_edit': 'putV0LabsById',
+            'lab_edit_menu': 'putV0LabsById',
+            'part_create': 'postV0Parts',
+            'part_edit': 'putV0PartsById',
+            'add_task': 'postV0Tasks'
+        };
+        const opId = opIdMap[wizardStep];
+        if (opId) {
+            const rawSchema = await SchemaReaderService.getSchemaForPromptContext(opId);
+            if (rawSchema) {
+                schemaContext = `\n\n[Active API Schema for Current Step: ${opId}]\n\`\`\`json\n${rawSchema}\n\`\`\`\n`;
+            }
+        }
+
+        const contextInfo = buildContextInfo(context) + schemaContext;
+        const geminiConfig = await buildGeminiConfig(contextInfo);
 
         // ---- Round 1: Streaming response ----
         const streamResponse = await streamGeminiResponse(contents, geminiConfig);
@@ -386,7 +407,7 @@ export class GeminiChatService {
             const mergedArgs = extractor.mergeArgs(existingArgs, newArgs);
 
             // Extract and validate
-            const extractionResult = extractor.extract(
+            const extractionResult = await extractor.extract(
                 userMessage,
                 functionCall.name,
                 mergedArgs,
@@ -428,7 +449,7 @@ export class GeminiChatService {
             }
 
             // Data complete -- generate summary for confirmation
-            const summaryText = extractor.generateSummary(
+            const summaryText = await extractor.generateSummary(
                 functionCall.name,
                 extractionResult.collectedArgs
             );
@@ -798,7 +819,7 @@ export class GeminiChatService {
         labId: string
     ): Promise<void> {
         // 1. Get schema markdown from ArgumentExtractor
-        const schemaMarkdown = ArgumentExtractor.toMarkdown('create_part');
+        const schemaMarkdown = await ArgumentExtractor.toMarkdown('postV0Parts');
 
         // 2. Get topology context
         let topologySection = '';

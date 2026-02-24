@@ -1,10 +1,11 @@
 import { FunctionDeclaration } from "@google/genai";
+import { SchemaReaderService } from "../../services/schema-reader-service";
 
 // ============================================================================
 // Function Declarations (Tools for Gemini to call)
 // ============================================================================
 
-export const functionDeclarations: FunctionDeclaration[] = [
+export const CUSTOM_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
     {
         name: "list_courses",
         description: "ดึงรายการ Course ที่อาจารย์สอนหรือเป็นเจ้าของ"
@@ -19,7 +20,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
             },
             required: ["courseId"]
         }
-    },
+    } as any,
     {
         name: "list_parts",
         description: "ดึงรายการ Part ทั้งหมดใน Lab ที่กำหนด พร้อมแสดง title, order, type, และจำนวน task",
@@ -30,50 +31,13 @@ export const functionDeclarations: FunctionDeclaration[] = [
             },
             required: ["labId"]
         }
-    },
-    {
-        name: "create_lab",
-        description: "สร้าง Lab ใหม่ใน Course ที่กำหนด",
-        parametersJsonSchema: {
-            type: "object",
-            properties: {
-                courseId: { type: "string", description: "Course ID ที่ต้องการสร้าง Lab" },
-                title: { type: "string", description: "ชื่อ Lab" },
-                description: { type: "string", description: "คำอธิบาย Lab" },
-                type: { type: "string", enum: ["lab", "exam"], description: "ประเภท Lab" }
-            },
-            required: ["courseId", "title", "type"]
-        }
-    },
-    {
-        name: "create_part",
-        description: "สร้าง Part ใหม่ใน Lab ที่กำหนด",
-        parametersJsonSchema: {
-            type: "object",
-            properties: {
-                labId: { type: "string", description: "Lab ID ที่ต้องการสร้าง Part" },
-                title: { type: "string", description: "ชื่อ Part" },
-                description: { type: "string", description: "คำอธิบาย Part" },
-                order: { type: "number", description: "ลำดับของ Part" }
-            },
-            required: ["labId", "title"]
-        }
-    },
-    {
-        name: "add_task",
-        description: "เพิ่ม Task ใหม่ลงใน Part ที่กำหนด",
-        parametersJsonSchema: {
-            type: "object",
-            properties: {
-                partId: { type: "string", description: "Part ID ที่ต้องการเพิ่ม Task" },
-                title: { type: "string", description: "ชื่อ Task" },
-                instruction: { type: "string", description: "คำสั่งสำหรับนักศึกษา" },
-                maxScore: { type: "number", description: "คะแนนเต็ม" }
-            },
-            required: ["partId", "title", "instruction", "maxScore"]
-        }
-    }
+    } as any
 ];
+
+export async function getFunctionDeclarations(): Promise<FunctionDeclaration[]> {
+    const dynamicDeclarations = await SchemaReaderService.getFunctionDeclarations();
+    return [...CUSTOM_FUNCTION_DECLARATIONS, ...dynamicDeclarations];
+}
 
 // ============================================================================
 // Read-only functions (executed immediately without user confirmation)
@@ -128,14 +92,14 @@ export async function createDraftFromFunctionCall(
 ): Promise<any> {
     const { name, args } = functionCall;
 
-    if (name === "create_lab") {
+    if (name === "create_lab" || name === "postV0Labs") {
         return {
             type: "lab",
             data: {
                 ...args,
                 createdBy: userId,
                 network: {
-                    name: args.title,
+                    name: args.title || "Network",
                     topology: {
                         baseNetwork: "10.0.0.0",
                         subnetMask: 24,
@@ -143,23 +107,23 @@ export async function createDraftFromFunctionCall(
                     }
                 }
             },
-            previewText: `[Lab] ต้องการสร้าง Lab: **${args.title}**\nประเภท: ${args.type}\nรายละเอียด: ${args.description || "-"}`
+            previewText: `[Lab] ต้องการสร้าง Lab: **${args.title || args.name}**\nประเภท: ${args.type || '-'}\nรายละเอียด: ${args.description || "-"}`
         };
     }
 
-    if (name === "create_part") {
+    if (name === "create_part" || name === "postV0Parts") { // TODO: Check actual operationId for post part!
         return {
             type: "part",
             data: args,
-            previewText: `[Part] ต้องการสร้าง Part: **${args.title}**\nรายละเอียด: ${args.description || "-"}`
+            previewText: `[Part] ต้องการสร้าง Part: **${args.title || args.name}**\nรายละเอียด: ${args.description || "-"}`
         };
     }
 
-    if (name === "add_task") {
+    if (name === "add_task" || name === "postV0Tasks") { // TODO: Check actual operationId for post task!
         return {
             type: "task",
             data: args,
-            previewText: `[Task] ต้องการเพิ่ม Task: **${args.title}**\nคะแนนเต็ม: ${args.maxScore}`
+            previewText: `[Task] ต้องการเพิ่ม Task: **${args.title || args.name}**\nคะแนนเต็ม: ${args.maxScore || '-'}`
         };
     }
 

@@ -2,7 +2,7 @@ import { env } from "process";
 import { GoogleGenAI } from "@google/genai";
 import "dotenv/config";
 import { SYSTEM_INSTRUCTION } from "./system-instruction";
-import { functionDeclarations } from "./function-calling";
+import { getFunctionDeclarations } from "./function-calling";
 
 // ============================================================================
 // Gemini AI Client
@@ -20,9 +20,10 @@ export const MAX_FUNCTION_CALL_ROUNDS = 5;
 // Build Gemini Config
 // ============================================================================
 
-export function buildGeminiConfig(
+export async function buildGeminiConfig(
     contextInfo?: string
-): { systemInstruction: string; tools: any[] } {
+): Promise<{ systemInstruction: string; tools: any[] }> {
+    const functionDeclarations = await getFunctionDeclarations();
     return {
         systemInstruction: SYSTEM_INSTRUCTION + (contextInfo || ''),
         tools: [{ functionDeclarations }]

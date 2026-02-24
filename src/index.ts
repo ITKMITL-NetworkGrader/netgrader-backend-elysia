@@ -70,7 +70,7 @@ const app = new Elysia()
   //   }
   // })
   .onStart(async (app) => {
-    await OpenAPIService.generateYAML(app);
+    await OpenAPIService.extractAPI(app);
   })
   .get("/", () => "Hello Elysia")
   .listen({ port: env.PORT || 3000, idleTimeout: 60 });

@@ -15,9 +15,10 @@ export class OpenAPIService {
     };
 
     /**
-     * ดึง OpenAPI JSON จาก Elysia app และแปลงเป็น YAML เฉพาะส่วนที่เลือก
+     * ดึง OpenAPI JSON จาก Elysia app และกรองเฉพาะส่วนที่เลือก
+     * @returns JSON Spec ที่ผ่านการกรองแล้ว
      */
-    public static async generateYAML(app: Elysia<any, any, any, any, any, any, any>) {
+    public static async extractJSON(app: Elysia<any, any, any, any, any, any, any>) {
         try {
             // 1. จำลอง Request ไปดึง JSON Spec มาจาก Swagger Plugin
             const response = await app.handle(
@@ -26,7 +27,7 @@ export class OpenAPIService {
 
             if (!response.ok) {
                 console.error('❌ Failed to fetch Swagger JSON');
-                return;
+                return null;
             }
 
             const jsonSpec = (await response.json()) as {
@@ -56,23 +57,85 @@ export class OpenAPIService {
             }
 
             // 3. สร้าง Spec ใหม่ที่โดนกรองแล้ว
-            const minimalSpec = {
+            return {
                 ...jsonSpec,
                 paths: filteredPaths,
             };
+        } catch (error) {
+            console.error('❌ Error extracting JSON spec:', error);
+            return null;
+        }
+    }
 
-            // 4. เขียนลงไฟล์ openapi.yaml
-            const yamlContent = yaml.dump(minimalSpec, {
+    /**
+     * ดึง OpenAPI JSON จาก Elysia app และเขียนเป็นไฟล์ทั้ง JSON และ YAML แยกตามแต่ละ Path และ Method, รวมไปถึงไฟล์รวมทั้งหมดด้วย
+     */
+    public static async extractAPI(app: Elysia<any, any, any, any, any, any, any>) {
+        try {
+            const minimalSpec = await this.extractJSON(app);
+            if (!minimalSpec) return;
+
+            // 1. เขียนไฟล์รวม (openapi.json และ openapi.yaml)
+            const combinedJsonContent = JSON.stringify(minimalSpec, null, 2);
+            await Bun.write('api-schema/openapi.json', combinedJsonContent);
+            console.log('✨ [JSON] Combined API Spec updated: api-schema/openapi.json');
+
+            const combinedYamlContent = yaml.dump(minimalSpec, {
                 indent: 2,
                 lineWidth: -1,
                 noRefs: true,
             });
+            await Bun.write('api-schema/openapi.yaml', combinedYamlContent);
+            console.log('✨ [YAML] Combined API Spec updated: api-schema/openapi.yaml');
 
-            await Bun.write('api-yaml/openapi.yaml', yamlContent);
+            // 2. วนลูปตามแต่ละ path ที่มีในสเปคที่เรากรองมา เพื่อเขียนไฟล์แยก
+            for (const [path, methods] of Object.entries(minimalSpec.paths)) {
 
-            console.log('✨ [YAML] API Spec updated: api-yaml/openapi.yaml');
+                // วนลูปตามแต่ละ method ใน path นั้น
+                for (const [method, operation] of Object.entries(methods as Record<string, any>)) {
+
+                    // สร้าง Spec สำหรับ path และ method นี้
+                    const pathMethodSpec = {
+                        ...minimalSpec,
+                        paths: {
+                            [path]: {
+                                [method]: operation
+                            }
+                        }
+                    };
+
+                    // แปลงชื่อ path ให้เป็นชื่อไฟล์ที่ปลอดภัย (แทนที่ / ด้วย - และตัดพารามิเตอร์)
+                    let fileName = path
+                        .replace(/^\/|\/$/g, '')        // ลบ / หน้าสุดและหลังสุด
+                        .replace(/\//g, '-')            // เปลี่ยน / ตรงกลางเป็น -
+                        .replace(/\{|\}/g, '');         // ลบปีกกา {} ออก
+
+                    if (!fileName) fileName = 'root';
+
+                    // เติม method ต่อท้ายชื่อไฟล์
+                    fileName = `${fileName}-${method.toLowerCase()}`;
+
+                    const jsonFilePath = `api-schema/${fileName}.json`;
+                    const yamlFilePath = `api-schema/${fileName}.yaml`;
+
+                    // เขียนไฟล์ JSON
+                    const jsonContent = JSON.stringify(pathMethodSpec, null, 2);
+                    await Bun.write(jsonFilePath, jsonContent);
+                    console.log(`✨ [JSON] API Spec updated: ${jsonFilePath}`);
+
+                    // เขียนไฟล์ YAML
+                    const yamlContent = yaml.dump(pathMethodSpec, {
+                        indent: 2,
+                        lineWidth: -1,
+                        noRefs: true,
+                    });
+                    await Bun.write(yamlFilePath, yamlContent);
+                    console.log(`✨ [YAML] API Spec updated: ${yamlFilePath}`);
+                }
+            }
+
         } catch (error) {
-            console.error('❌ Error saving YAML spec:', error);
+            console.error('❌ Error saving API spec:', error);
         }
     }
 }

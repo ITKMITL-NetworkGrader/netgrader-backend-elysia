@@ -1,7 +1,6 @@
 import { Elysia, t } from "elysia";
 import { GeminiChatService } from "./service";
 import { GeminiChatValidator } from "./validator";
-import { SchemaManager } from "./api-schema";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 
 // Request schemas
@@ -270,6 +269,13 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
                                 courseId: t.Optional(t.String()),
                                 labId: t.Optional(t.String()),
                                 partId: t.Optional(t.String())
+                            }),
+                            wizardState: t.Object({
+                                step: t.String(),
+                                courseId: t.Optional(t.String()),
+                                labId: t.Optional(t.String()),
+                                partId: t.Optional(t.String()),
+                                editSection: t.Optional(t.String())
                             }),
                             lastMessageAt: t.Date()
                         }),
@@ -909,76 +915,5 @@ export const geminiChatRoutes = new Elysia({ prefix: "/gemini/chat" })
             params: t.Object({ sessionId: t.String() }),
             beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
             detail: { summary: "Get Topology Context", description: "Get lab topology context for Part AI prompting", tags: ["Gemini Chat Wizard"] }
-        }
-    )
-
-    // ============================================================================
-    // POST /gemini/chat/schema/refresh - Refresh API schemas using Gemini (SSE)
-    // ============================================================================
-    .post(
-        "/schema/refresh",
-        async ({ set }) => {
-            set.headers['Content-Type'] = 'text/event-stream';
-            set.headers['Cache-Control'] = 'no-cache';
-            set.headers['Connection'] = 'keep-alive';
-
-            const encoder = new TextEncoder();
-            const stream = new ReadableStream({
-                async start(controller) {
-                    const sendEvent = (type: string, data: any) => {
-                        controller.enqueue(
-                            encoder.encode(`data: ${JSON.stringify({ type, ...data })}\n\n`)
-                        );
-                    };
-
-                    const onProgress = (percent: number, message: string) => {
-                        sendEvent('progress', { percent, message });
-                    };
-
-                    const result = await SchemaManager.refreshSchemas(onProgress);
-
-                    sendEvent('result', {
-                        success: result.success,
-                        totalDiscovered: result.totalDiscovered,
-                        updated: result.updated,
-                        errors: result.errors
-                    });
-
-                    controller.close();
-                }
-            });
-
-            return new Response(stream);
-        },
-        {
-            beforeHandle: requireRole(["ADMIN"]),
-            detail: {
-                summary: "Refresh API Schemas (SSE)",
-                description: "Use Gemini to read API source code and generate argument schemas. Streams progress events.",
-                tags: ["Gemini Chat Schema"]
-            }
-        }
-    )
-
-    // ============================================================================
-    // GET /gemini/chat/schema - List all stored API schemas
-    // ============================================================================
-    .get(
-        "/schema",
-        async () => {
-            const schemas = await SchemaManager.getAllSchemas();
-            return {
-                success: true,
-                data: schemas,
-                total: schemas.length
-            };
-        },
-        {
-            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
-            detail: {
-                summary: "List API Schemas",
-                description: "Get all stored API argument schemas from DB",
-                tags: ["Gemini Chat Schema"]
-            }
         }
     );

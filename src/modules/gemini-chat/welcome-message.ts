@@ -1,4 +1,4 @@
-import { SchemaManager, IFieldSchema } from './api-schema';
+import { ArgumentExtractor, ArgumentSchema } from './argument-extractor';
 import { LabService } from '../labs/service';
 import { PartService } from '../parts/service';
 
@@ -76,15 +76,19 @@ export class WelcomeMessage {
         functionName: string,
         entityName: string
     ): Promise<WelcomeResult> {
-        // Fetch schema from DB
-        const fields = await SchemaManager.getSchema(functionName);
+        // Map legacy function names to OpenAPI operation IDs
+        let opId = functionName;
+        if (functionName === 'create_course') opId = 'postV0Courses';
+        if (functionName === 'create_lab') opId = 'postV0Labs';
+        if (functionName === 'create_part') opId = 'postV0Parts';
 
-        if (!fields) {
+        // Fetch schema from dynamically parsed OpenAPI
+        const fields = await ArgumentExtractor.getSchemaFor(opId);
+
+        if (!fields || fields.length === 0) {
             return {
                 message: [
                     `สวัสดีครับ! มาสร้าง ${entityName} กันเถอะ`,
-                    '',
-                    '(ยังไม่มี API Schema ใน Database กรุณากดปุ่ม "Refresh API Schema" ก่อน)',
                     '',
                     'กรุณาบอกรายละเอียดของ ' + entityName + ' ที่ต้องการสร้างได้เลยครับ'
                 ].join('\n')
@@ -250,17 +254,5 @@ export class WelcomeMessage {
         }
     }
 
-    /**
-     * Format field schema to readable bullet point
-     */
-    private static formatField(field: IFieldSchema): string {
-        let line = `- ${field.descriptionTh || field.description}`;
-        if (field.enum && field.enum.length > 0) {
-            line += ` (${field.enum.join('/')})`;
-        }
-        if (field.required) {
-            line += ' *';
-        }
-        return line;
-    }
+    // formatField removed because it was unused
 }

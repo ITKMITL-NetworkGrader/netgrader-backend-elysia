@@ -3,8 +3,8 @@
  * Validates and collects required arguments for MCP function calls
  * Also generates readable schema descriptions for Gemini context injection
  */
+import { getFunctionDeclarations } from "./function-calling";
 
-// Schema for function arguments
 export interface ArgumentSchema {
     name: string;
     type: 'string' | 'number' | 'boolean' | 'object' | 'array';
@@ -13,10 +13,9 @@ export interface ArgumentSchema {
     descriptionTh: string;
     enum?: string[];
     default?: any;
-    children?: ArgumentSchema[];  // Nested fields for object/array items
+    children?: ArgumentSchema[];
 }
 
-// Result of extraction
 export interface ExtractionResult {
     complete: boolean;
     collectedArgs: Record<string, any>;
@@ -24,304 +23,143 @@ export interface ExtractionResult {
     followUpQuestion?: string;
 }
 
-// Partial arguments stored in session
 export interface PartialArguments {
     functionName: string;
     args: Record<string, any>;
     lastUpdated: Date;
 }
 
-// ============================================================================
-// Function Schemas - Define required arguments for each MCP function
-// ============================================================================
-
-const functionSchemas: Record<string, ArgumentSchema[]> = {
-    // List Courses
-    list_courses: [],
-
-    // List Labs
-    list_labs: [
-        { name: 'courseId', type: 'string', required: true, description: 'Course ID', descriptionTh: 'รหัสคอร์ส' }
-    ],
-
-    // List Parts
-    list_parts: [
-        { name: 'labId', type: 'string', required: true, description: 'Lab ID', descriptionTh: 'รหัส Lab' }
-    ],
-
-    // Create Lab
-    create_lab: [
-        { name: 'courseId', type: 'string', required: true, description: 'Course ID', descriptionTh: 'รหัสคอร์ส' },
-        { name: 'title', type: 'string', required: true, description: 'Lab title', descriptionTh: 'ชื่อ Lab' },
-        { name: 'type', type: 'string', required: true, description: 'Lab type', descriptionTh: 'ประเภท Lab', enum: ['lab', 'exam'] },
-        { name: 'description', type: 'string', required: false, description: 'Lab description', descriptionTh: 'คำอธิบาย Lab' }
-    ],
-
-    // Create Part (expanded with task sub-fields)
-    create_part: [
-        { name: 'labId', type: 'string', required: true, description: 'Lab ID this part belongs to', descriptionTh: 'รหัส Lab ที่ Part นี้อยู่' },
-        { name: 'title', type: 'string', required: true, description: 'Part title', descriptionTh: 'ชื่อ Part' },
-        { name: 'partType', type: 'string', required: true, description: 'Part type', descriptionTh: 'ประเภท Part', enum: ['fill_in_blank', 'network_config', 'dhcp_config'] },
-        { name: 'order', type: 'number', required: true, description: 'Display order (1, 2, 3...)', descriptionTh: 'ลำดับการแสดง (1, 2, 3...)' },
-        { name: 'description', type: 'string', required: false, description: 'Part description', descriptionTh: 'คำอธิบาย Part' },
-        { name: 'totalPoints', type: 'number', required: true, description: 'Total points for this part', descriptionTh: 'คะแนนรวมของ Part นี้' },
-        {
-            name: 'tasks', type: 'array', required: false, description: 'List of grading tasks', descriptionTh: 'รายการ Task สำหรับตรวจให้คะแนน',
-            children: [
-                { name: 'taskId', type: 'string', required: true, description: 'Unique task ID', descriptionTh: 'รหัส Task (unique)' },
-                { name: 'name', type: 'string', required: true, description: 'Task name', descriptionTh: 'ชื่อ Task' },
-                { name: 'description', type: 'string', required: false, description: 'Task description', descriptionTh: 'คำอธิบาย Task' },
-                { name: 'executionDevice', type: 'string', required: true, description: 'Source device to run command from (e.g. "PC1", "Router1")', descriptionTh: 'อุปกรณ์ต้นทางที่ใช้รันคำสั่ง (เช่น "PC1", "Router1")' },
-                { name: 'targetDevices', type: 'array', required: false, description: 'Target devices (e.g. ["PC2"])', descriptionTh: 'อุปกรณ์ปลายทาง (เช่น ["PC2"])' },
-                { name: 'templateId', type: 'string', required: true, description: 'Command template ID', descriptionTh: 'รหัส Template คำสั่ง' },
-                {
-                    name: 'parameters', type: 'object', required: true, description: 'Command parameters (e.g. destination IP)', descriptionTh: 'พารามิเตอร์คำสั่ง (เช่น IP ปลายทาง)',
-                    children: [
-                        { name: 'destination', type: 'string', required: false, description: 'Destination IP or hostname', descriptionTh: 'IP หรือ hostname ปลายทาง' },
-                        { name: 'count', type: 'number', required: false, description: 'Number of attempts', descriptionTh: 'จำนวนครั้ง' }
-                    ]
-                },
-                {
-                    name: 'testCases', type: 'array', required: true, description: 'Expected results for grading', descriptionTh: 'ผลลัพธ์ที่คาดหวังสำหรับตรวจคะแนน',
-                    children: [
-                        { name: 'comparison_type', type: 'string', required: true, description: 'Comparison type', descriptionTh: 'ประเภทการเปรียบเทียบ', enum: ['equals', 'contains', 'regex', 'success', 'ssh_success', 'greater_than', 'not_equals'] },
-                        { name: 'expected_result', type: 'string', required: true, description: 'Expected value', descriptionTh: 'ค่าที่คาดหวัง' }
-                    ]
-                },
-                { name: 'order', type: 'number', required: true, description: 'Task order within part', descriptionTh: 'ลำดับ Task ภายใน Part' },
-                { name: 'points', type: 'number', required: true, description: 'Points for this task', descriptionTh: 'คะแนนของ Task นี้' }
-            ]
-        },
-        {
-            name: 'questions', type: 'array', required: false, description: 'Fill-in-the-blank questions (for fill_in_blank type)', descriptionTh: 'คำถามแบบเติมคำ (สำหรับ fill_in_blank)',
-            children: [
-                { name: 'questionId', type: 'string', required: true, description: 'Question ID', descriptionTh: 'รหัสคำถาม' },
-                { name: 'questionText', type: 'string', required: true, description: 'Question text', descriptionTh: 'ข้อความคำถาม' },
-                { name: 'questionType', type: 'string', required: true, description: 'Question type', descriptionTh: 'ประเภทคำถาม', enum: ['network_address', 'first_usable_ip', 'last_usable_ip', 'broadcast_address', 'subnet_mask', 'ip_address', 'number', 'custom_text'] },
-                { name: 'order', type: 'number', required: true, description: 'Question order', descriptionTh: 'ลำดับคำถาม' },
-                { name: 'points', type: 'number', required: true, description: 'Points for this question', descriptionTh: 'คะแนนของคำถามนี้' }
-            ]
-        }
-    ],
-
-    // Add Task (standalone add_task to existing Part)
-    add_task: [
-        { name: 'partId', type: 'string', required: true, description: 'Part ID', descriptionTh: 'รหัส Part' },
-        { name: 'name', type: 'string', required: true, description: 'Task name', descriptionTh: 'ชื่อ Task' },
-        { name: 'executionDevice', type: 'string', required: true, description: 'Source device (e.g. "PC1")', descriptionTh: 'อุปกรณ์ต้นทาง (เช่น "PC1")' },
-        { name: 'targetDevices', type: 'array', required: false, description: 'Destination devices', descriptionTh: 'อุปกรณ์ปลายทาง' },
-        { name: 'templateId', type: 'string', required: true, description: 'Command template ID', descriptionTh: 'รหัส Template คำสั่ง' },
-        { name: 'command', type: 'string', required: false, description: 'Command to execute', descriptionTh: 'คำสั่ง' },
-        { name: 'expectedOutput', type: 'string', required: false, description: 'Expected output pattern', descriptionTh: 'รูปแบบผลลัพธ์ที่คาดหวัง' },
-        { name: 'points', type: 'number', required: true, description: 'Points for this task', descriptionTh: 'คะแนนของ Task นี้' }
-    ],
-
-    // Update Lab
-    update_lab: [
-        { name: 'labId', type: 'string', required: true, description: 'Lab ID', descriptionTh: 'รหัส Lab' },
-        { name: 'title', type: 'string', required: false, description: 'New lab title', descriptionTh: 'ชื่อ Lab ใหม่' },
-        { name: 'description', type: 'string', required: false, description: 'New description', descriptionTh: 'คำอธิบายใหม่' }
-    ],
-
-    // Update Part
-    update_part: [
-        { name: 'partId', type: 'string', required: true, description: 'Part ID', descriptionTh: 'รหัส Part' },
-        { name: 'title', type: 'string', required: false, description: 'New part title', descriptionTh: 'ชื่อ Part ใหม่' },
-        { name: 'description', type: 'string', required: false, description: 'New description', descriptionTh: 'คำอธิบายใหม่' }
-    ]
-};
-
-// ============================================================================
-// ArgumentExtractor Class
-// ============================================================================
-
 export class ArgumentExtractor {
-    /**
-     * Get schema for a function
-     */
-    static getSchemaFor(functionName: string): ArgumentSchema[] | null {
-        return functionSchemas[functionName] || null;
+
+    private static convertGeminiParamsToMeta(parameters?: any): ArgumentSchema[] {
+        const paramType = (parameters?.type || '').toLowerCase();
+        if (!parameters || paramType !== 'object' || !parameters.properties) return [];
+        const requiredFields = parameters.required || [];
+        const result: ArgumentSchema[] = [];
+
+        for (const [key, value] of Object.entries(parameters.properties)) {
+            const field = value as any;
+            result.push({
+                name: key,
+                type: (field.type || '').toLowerCase() as any,
+                required: requiredFields.includes(key),
+                description: field.description || key,
+                descriptionTh: field.description || key,
+                enum: field.enum,
+                children: field.properties ? this.convertGeminiParamsToMeta(field) : (field.items && field.items.properties ? this.convertGeminiParamsToMeta(field.items) : undefined)
+            });
+        }
+        return result;
     }
 
-    /**
-     * Get required fields for a function
-     */
-    static getRequiredFields(functionName: string): ArgumentSchema[] {
-        const schema = this.getSchemaFor(functionName);
+    static async getSchemaFor(functionName: string): Promise<ArgumentSchema[] | null> {
+        const declarations = await getFunctionDeclarations();
+        const decl = declarations.find(d => d.name === functionName) as any;
+        if (!decl) return null;
+        return this.convertGeminiParamsToMeta(decl.parameters);
+    }
+
+    static async getRequiredFields(functionName: string): Promise<ArgumentSchema[]> {
+        const schema = await this.getSchemaFor(functionName);
         if (!schema) return [];
         return schema.filter(field => field.required);
     }
 
-    /**
-     * Check which required fields are missing
-     */
-    static getMissingFields(
+    static async getMissingFields(
         functionName: string,
         providedArgs: Record<string, any>
-    ): ArgumentSchema[] {
-        const requiredFields = this.getRequiredFields(functionName);
+    ): Promise<ArgumentSchema[]> {
+        const requiredFields = await this.getRequiredFields(functionName);
         return requiredFields.filter(field => {
             const value = providedArgs[field.name];
             return value === undefined || value === null || value === '';
         });
     }
 
-    /**
-     * Extract arguments from context and provided data
-     */
-    static extract(
+    static async extract(
         functionName: string,
         providedArgs: Record<string, any>,
         context?: { courseId?: string; labId?: string; partId?: string }
-    ): ExtractionResult {
-        const schema = this.getSchemaFor(functionName);
+    ): Promise<ExtractionResult> {
+        const schema = await this.getSchemaFor(functionName);
         if (!schema) {
-            return {
-                complete: false,
-                collectedArgs: {},
-                missingFields: [],
-                followUpQuestion: `ไม่รู้จัก function: ${functionName}`
-            };
+            return { complete: false, collectedArgs: {}, missingFields: [], followUpQuestion: `ไม่รู้จัก function: ${functionName}` };
         }
 
-        // Merge context with provided args (context provides defaults)
         const mergedArgs: Record<string, any> = { ...providedArgs };
 
-        // Auto-fill from context
-        if (context?.courseId && !mergedArgs.courseId) {
-            mergedArgs.courseId = context.courseId;
-        }
-        if (context?.labId && !mergedArgs.labId) {
-            mergedArgs.labId = context.labId;
-        }
-        if (context?.partId && !mergedArgs.partId) {
-            mergedArgs.partId = context.partId;
-        }
+        if (context?.courseId && !mergedArgs.courseId) mergedArgs.courseId = context.courseId;
+        if (context?.labId && !mergedArgs.labId) mergedArgs.labId = context.labId;
+        if (context?.partId && !mergedArgs.partId) mergedArgs.partId = context.partId;
 
-        // Check missing fields
-        const missingFields = this.getMissingFields(functionName, mergedArgs);
+        const missingFields = await this.getMissingFields(functionName, mergedArgs);
 
         if (missingFields.length === 0) {
-            return {
-                complete: true,
-                collectedArgs: mergedArgs,
-                missingFields: []
-            };
+            return { complete: true, collectedArgs: mergedArgs, missingFields: [] };
         }
 
-        // Generate follow-up question
         const followUpQuestion = this.generateFollowUp(missingFields, functionName);
 
-        return {
-            complete: false,
-            collectedArgs: mergedArgs,
-            missingFields,
-            followUpQuestion
-        };
+        return { complete: false, collectedArgs: mergedArgs, missingFields, followUpQuestion };
     }
 
-    /**
-     * Generate follow-up question for missing fields
-     */
     static generateFollowUp(missingFields: ArgumentSchema[], functionName: string): string {
         if (missingFields.length === 0) return '';
-
         const fieldDescriptions = missingFields.map(field => {
             let desc = field.descriptionTh;
-            if (field.enum) {
-                desc += ` (${field.enum.join(' / ')})`;
-            }
+            if (field.enum) desc += ` (${field.enum.join(' / ')})`;
             return desc;
         });
-
-        if (missingFields.length === 1) {
-            return `กรุณาระบุ${fieldDescriptions[0]}`;
-        }
-
+        if (missingFields.length === 1) return `กรุณาระบุ${fieldDescriptions[0]}`;
         return `กรุณาระบุข้อมูลเพิ่มเติม:\n${fieldDescriptions.map((d, i) => `${i + 1}. ${d}`).join('\n')}`;
     }
 
-    /**
-     * Validate enum values
-     */
-    static validateEnumValue(functionName: string, fieldName: string, value: string): boolean {
-        const schema = this.getSchemaFor(functionName);
+    static async validateEnumValue(functionName: string, fieldName: string, value: string): Promise<boolean> {
+        const schema = await this.getSchemaFor(functionName);
         if (!schema) return true;
-
         const field = schema.find(f => f.name === fieldName);
         if (!field || !field.enum) return true;
-
         return field.enum.includes(value);
     }
 
-    /**
-     * Get all available function names
-     */
-    static getAvailableFunctions(): string[] {
-        return Object.keys(functionSchemas);
+    static async getAvailableFunctions(): Promise<string[]> {
+        const decls = await getFunctionDeclarations();
+        return decls.map(d => d.name).filter(n => n !== undefined) as string[];
     }
 
-    // ========================================================================
-    // Schema-to-Markdown for Gemini context injection
-    // ========================================================================
-
-    /**
-     * Convert a function's schema to readable markdown for Gemini
-     * Used to inject context when entering create/edit modes
-     */
-    static toMarkdown(functionName: string): string {
-        const schema = this.getSchemaFor(functionName);
-        if (!schema || schema.length === 0) {
-            return `No schema defined for function: ${functionName}`;
-        }
+    static async toMarkdown(functionName: string): Promise<string> {
+        const schema = await this.getSchemaFor(functionName);
+        if (!schema || schema.length === 0) return `No schema defined for function: ${functionName}`;
 
         const required = schema.filter(f => f.required);
         const optional = schema.filter(f => !f.required);
 
         let md = `## ${functionName} -- Required Fields\n`;
-
-        if (required.length > 0) {
-            md += required.map(f => this.fieldToMarkdown(f, 0)).join('\n');
-        } else {
-            md += '(no required fields)\n';
-        }
+        if (required.length > 0) md += required.map(f => this.fieldToMarkdown(f, 0)).join('\n');
+        else md += '(no required fields)\n';
 
         if (optional.length > 0) {
             md += `\n\n## ${functionName} -- Optional Fields\n`;
             md += optional.map(f => this.fieldToMarkdown(f, 0)).join('\n');
         }
-
         return md;
     }
 
-    /**
-     * Convert a single field to markdown line(s), with indentation for nesting
-     */
     private static fieldToMarkdown(field: ArgumentSchema, indent: number): string {
         const pad = '  '.repeat(indent);
         let line = `${pad}- **${field.name}** (${field.type}`;
         if (field.required) line += ', required';
         line += ')';
         line += `: ${field.descriptionTh}`;
-        if (field.enum) {
-            line += ` -- values: \`${field.enum.join('` | `')}\``;
-        }
-        if (field.default !== undefined) {
-            line += ` -- default: ${field.default}`;
-        }
+        if (field.enum) line += ` -- values: \`${field.enum.join('` | `')}\``;
+        if (field.default !== undefined) line += ` -- default: ${field.default}`;
 
-        // Render nested children
         if (field.children && field.children.length > 0) {
             line += '\n' + field.children.map(c => this.fieldToMarkdown(c, indent + 1)).join('\n');
         }
-
         return line;
     }
 }
-
-// ============================================================================
-// Shared Interface for Data Extractors
-// ============================================================================
 
 export interface IDataExtractor {
     extract(
@@ -329,31 +167,26 @@ export interface IDataExtractor {
         functionName: string,
         currentArgs: Record<string, any>,
         context?: { courseId?: string; labId?: string; partId?: string }
-    ): ExtractionResult;
+    ): Promise<ExtractionResult>;
 
-    generateSummary(functionName: string, args: Record<string, any>): string;
+    generateSummary(functionName: string, args: Record<string, any>): Promise<string>;
 }
 
-// ============================================================================
-// Context Validation -- allowed functions per wizard step
-// ============================================================================
-
 const ALLOWED_FUNCTIONS: Record<string, string[]> = {
-    'course_create': ['create_course'],
-    'course_edit': ['update_course'],
-    'lab_create': ['create_lab'],
-    'lab_edit_menu': ['update_lab'],
-    'lab_edit': ['update_lab'],
-    'part_create': ['create_part', 'add_task'],
-    'part_edit': ['update_part', 'add_task'],
-    'course_list': [], // empty = allow all
+    'course_create': ['create_course', 'postV0Courses'],
+    'course_edit': ['update_course', 'putV0CoursesById'],
+    'lab_create': ['create_lab', 'postV0Labs'],
+    'lab_edit_menu': ['update_lab', 'putV0LabsById'],
+    'lab_edit': ['update_lab', 'putV0LabsById'],
+    'part_create': ['create_part', 'postV0Parts', 'add_task', 'postV0Tasks'],
+    'part_edit': ['update_part', 'putV0PartsById', 'add_task', 'postV0Tasks'],
+    'course_list': [],
     'lab_list': [],
     'part_list': [],
 };
 
 export function isAllowedFunction(wizardStep: string, functionName: string): boolean {
     const allowed = ALLOWED_FUNCTIONS[wizardStep];
-    // If step not found or empty array -> allow all (general mode)
     if (!allowed || allowed.length === 0) return true;
     return allowed.includes(functionName);
 }
@@ -372,40 +205,17 @@ export function getContextRejectMessage(wizardStep: string): string {
     return `ขณะนี้อยู่ในโหมด **${name}** กรุณาใส่ข้อมูลที่เกี่ยวข้อง หรือสร้าง Chat ใหม่สำหรับงานอื่น`;
 }
 
-// ============================================================================
-// GeminiExtractor -- Primary extractor using Gemini function calling
-// ============================================================================
-
 export class GeminiExtractor implements IDataExtractor {
-
-    /**
-     * Extract data from Gemini function call result
-     * Merges with existing partial args and validates completeness
-     */
-    extract(
+    async extract(
         input: string,
         functionName: string,
         currentArgs: Record<string, any>,
         context?: { courseId?: string; labId?: string; partId?: string }
-    ): ExtractionResult {
-        // Use ArgumentExtractor under the hood
-        const result = ArgumentExtractor.extract(functionName, currentArgs, context);
-
-        // Dev logging
-        console.log(
-            `[GeminiExtractor] fn=${functionName}`,
-            `args=${JSON.stringify(result.collectedArgs)}`,
-            `missing=[${result.missingFields.map(f => f.name).join(', ')}]`,
-            `complete=${result.complete}`,
-            `input="${input.substring(0, 100)}"`
-        );
-
+    ): Promise<ExtractionResult> {
+        const result = await ArgumentExtractor.extract(functionName, currentArgs, context);
         return result;
     }
 
-    /**
-     * Merge new args from Gemini response with existing partial args
-     */
     mergeArgs(
         existingArgs: Record<string, any>,
         newArgs: Record<string, any>
@@ -416,31 +226,29 @@ export class GeminiExtractor implements IDataExtractor {
                 merged[key] = value;
             }
         }
-        console.log(
-            `[GeminiExtractor] merge:`,
-            `existing=${JSON.stringify(existingArgs)}`,
-            `new=${JSON.stringify(newArgs)}`,
-            `result=${JSON.stringify(merged)}`
-        );
         return merged;
     }
 
-    /**
-     * Generate a human-readable summary of collected args for confirmation
-     */
-    generateSummary(functionName: string, args: Record<string, any>): string {
-        const schema = ArgumentExtractor.getSchemaFor(functionName);
+    async generateSummary(functionName: string, args: Record<string, any>): Promise<string> {
+        const schema = await ArgumentExtractor.getSchemaFor(functionName);
         if (!schema) return JSON.stringify(args, null, 2);
 
         const lines: string[] = [];
         const fnDisplayNames: Record<string, string> = {
             'create_lab': 'สร้าง Lab',
+            'postV0Labs': 'สร้าง Lab',
             'create_part': 'สร้าง Part',
+            'postV0Parts': 'สร้าง Part',
             'create_course': 'สร้าง Course',
+            'postV0Courses': 'สร้าง Course',
             'update_lab': 'แก้ไข Lab',
+            'putV0LabsById': 'แก้ไข Lab',
             'update_part': 'แก้ไข Part',
+            'putV0PartsById': 'แก้ไข Part',
             'update_course': 'แก้ไข Course',
+            'putV0CoursesById': 'แก้ไข Course',
             'add_task': 'เพิ่ม Task',
+            'postV0Tasks': 'เพิ่ม Task',
         };
 
         lines.push(`**${fnDisplayNames[functionName] || functionName}** -- สรุปข้อมูล:`);
@@ -459,29 +267,17 @@ export class GeminiExtractor implements IDataExtractor {
 
         lines.push('');
         lines.push('ข้อมูลถูกต้องหรือไม่? พิมพ์ "ยืนยัน" เพื่อดำเนินการ หรือบอกส่วนที่ต้องการแก้ไข');
-
         return lines.join('\n');
     }
 }
 
-// ============================================================================
-// RegexExtractor -- Placeholder for future custom NLP (not implemented)
-// ============================================================================
-
 export class RegexExtractor implements IDataExtractor {
-
-    /**
-     * [NOT IMPLEMENTED] Extract using regex/keyword matching
-     * Reserved for future implementation to reduce Gemini token usage
-     */
-    extract(
+    async extract(
         _input: string,
         _functionName: string,
         _currentArgs: Record<string, any>,
         _context?: { courseId?: string; labId?: string; partId?: string }
-    ): ExtractionResult {
-        // Placeholder: returns incomplete result
-        // Future: implement Thai + English keyword/regex patterns
+    ): Promise<ExtractionResult> {
         return {
             complete: false,
             collectedArgs: {},
@@ -490,7 +286,7 @@ export class RegexExtractor implements IDataExtractor {
         };
     }
 
-    generateSummary(_functionName: string, _args: Record<string, any>): string {
+    async generateSummary(_functionName: string, _args: Record<string, any>): Promise<string> {
         return '[RegexExtractor] ยังไม่ได้ implement';
     }
 }
