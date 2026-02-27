@@ -18,6 +18,7 @@ import { playgroundRoutes } from "./playground";
 import { profileRoutes } from "./profile";
 import { geminiRoutes } from "./gemini";
 import { geminiChatRoutes } from "./gemini-chat";
+import { taskGeneratorRoutes } from "./task-generator";
 
 export const routes = new Elysia()
     .group("/v0", (app) => app
@@ -40,4 +41,5 @@ export const routes = new Elysia()
         .use(profileRoutes)
         .use(geminiRoutes)
         .use(geminiChatRoutes)
+        .use(taskGeneratorRoutes)
     )
