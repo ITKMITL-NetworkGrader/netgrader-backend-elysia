@@ -294,4 +294,88 @@ export const taskGeneratorRoutes = new Elysia({ prefix: "/task-generator" })
                 tags: ["Task Generator"]
             }
         }
+    )
+
+    // ========================================================================
+    // POST /task-generator/sessions/:sessionId/pipeline - Run full pipeline
+    // ========================================================================
+    .post(
+        "/sessions/:sessionId/pipeline",
+        async ({ params, body, authPlugin: auth, set }) => {
+            const { sessionId } = params;
+            const u_id = auth?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+
+            const session = await TaskGeneratorService.getSession(sessionId);
+
+            if (!session) {
+                set.status = 404;
+                return { success: false, message: "Session not found" };
+            }
+
+            if (session.userId !== u_id && process.env.NODE_ENV === 'production') {
+                set.status = 403;
+                return { success: false, message: "Access denied" };
+            }
+
+            const result = await TaskGeneratorService.runPipeline(
+                sessionId,
+                body.message,
+                u_id
+            );
+
+            return result;
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            body: chatRequestSchema,
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "Run Task Generator Pipeline",
+                description: "รัน pipeline 6 ขั้นตอน: extract intent > decompose > check scripts > generate > execute",
+                tags: ["Task Generator Pipeline"]
+            }
+        }
+    )
+
+    // ========================================================================
+    // POST /task-generator/extract-intent - Step 1 only (for step-by-step)
+    // ========================================================================
+    .post(
+        "/extract-intent",
+        async ({ body }) => {
+            const result = await TaskGeneratorService.extractIntent(body.message);
+            return result;
+        },
+        {
+            body: chatRequestSchema,
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "Extract Intent (Step 1)",
+                description: "แปลง natural language เป็น structured JSON intent",
+                tags: ["Task Generator Pipeline"]
+            }
+        }
+    )
+
+    // ========================================================================
+    // POST /task-generator/decompose-tasks - Step 2 only (for step-by-step)
+    // ========================================================================
+    .post(
+        "/decompose-tasks",
+        async ({ body }) => {
+            const result = await TaskGeneratorService.decomposeTasks(body.intent);
+            return result;
+        },
+        {
+            body: t.Object({
+                intent: t.Any({ description: "The extracted intent JSON from Step 1" })
+            }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "Decompose Tasks (Step 2)",
+                description: "แตก intent เป็น sub-tasks ที่สามารถ execute ได้",
+                tags: ["Task Generator Pipeline"]
+            }
+        }
     );
+
