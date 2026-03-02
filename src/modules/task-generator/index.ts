@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { TaskGeneratorService } from "./service";
+import { PipelineService } from "./pipeline-service";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 
 // ============================================================================
@@ -377,5 +378,232 @@ export const taskGeneratorRoutes = new Elysia({ prefix: "/task-generator" })
                 tags: ["Task Generator Pipeline"]
             }
         }
-    );
+    )
 
+    // ========================================================================
+    // POST /task-generator/sessions/:sessionId/pipeline/start
+    // ========================================================================
+    .post(
+        "/sessions/:sessionId/pipeline/start",
+        async ({ params, body, authPlugin: auth, set }) => {
+            const { sessionId } = params;
+            const u_id = auth?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+
+            const session = await TaskGeneratorService.getSession(sessionId);
+            if (!session) {
+                set.status = 404;
+                return { success: false, message: "Session not found" };
+            }
+
+            if (session.userId !== u_id && process.env.NODE_ENV === 'production') {
+                set.status = 403;
+                return { success: false, message: "Access denied" };
+            }
+
+            const result = await PipelineService.startPipeline(sessionId, body.message, u_id);
+            return result;
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            body: t.Object({
+                message: t.String({ minLength: 1, description: "Natural language task description" })
+            }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "Start Pipeline (Step-by-Step)",
+                description: "เริ่ม pipeline step-by-step: รัน Step 1 แล้วหยุดรอ User Confirm",
+                tags: ["Task Generator Pipeline v2"]
+            }
+        }
+    )
+
+    // ========================================================================
+    // GET /task-generator/sessions/:sessionId/pipeline/:pipelineId
+    // ========================================================================
+    .get(
+        "/sessions/:sessionId/pipeline/:pipelineId",
+        async ({ params, authPlugin: auth, set }) => {
+            const { sessionId, pipelineId } = params;
+            const u_id = auth?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+
+            const session = await TaskGeneratorService.getSession(sessionId);
+            if (!session) {
+                set.status = 404;
+                return { success: false, message: "Session not found" };
+            }
+
+            if (session.userId !== u_id && process.env.NODE_ENV === 'production') {
+                set.status = 403;
+                return { success: false, message: "Access denied" };
+            }
+
+            const { pipeline, modules } = await PipelineService.getPipelineRun(pipelineId);
+            if (!pipeline) {
+                set.status = 404;
+                return { success: false, message: "Pipeline not found" };
+            }
+
+            return { success: true, data: { pipeline, modules } };
+        },
+        {
+            params: t.Object({
+                sessionId: t.String(),
+                pipelineId: t.String()
+            }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "Get Pipeline Run",
+                description: "ดึงข้อมูล Pipeline Run พร้อม Modules ทั้งหมด",
+                tags: ["Task Generator Pipeline v2"]
+            }
+        }
+    )
+
+    // ========================================================================
+    // POST /task-generator/pipeline/:pipelineId/modules/:moduleId/confirm
+    // ========================================================================
+    .post(
+        "/pipeline/:pipelineId/modules/:moduleId/confirm",
+        async ({ params }) => {
+            const { pipelineId, moduleId } = params;
+            const result = await PipelineService.confirmModule(pipelineId, moduleId);
+            return result;
+        },
+        {
+            params: t.Object({
+                pipelineId: t.String(),
+                moduleId: t.String()
+            }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "Confirm Module",
+                description: "Confirm module ที่ waiting_confirm แล้วรัน step ถัดไป",
+                tags: ["Task Generator Pipeline v2"]
+            }
+        }
+    )
+
+    // ========================================================================
+    // POST /task-generator/pipeline/:pipelineId/modules/:moduleId/retry
+    // ========================================================================
+    .post(
+        "/pipeline/:pipelineId/modules/:moduleId/retry",
+        async ({ params, body }) => {
+            const { pipelineId, moduleId } = params;
+            const result = await PipelineService.retryModule(
+                pipelineId,
+                moduleId,
+                body.feedback
+            );
+            return result;
+        },
+        {
+            params: t.Object({
+                pipelineId: t.String(),
+                moduleId: t.String()
+            }),
+            body: t.Object({
+                feedback: t.Optional(t.String({ description: "Optional user feedback for retry" }))
+            }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "Retry Module",
+                description: "Retry module ใหม่ พร้อม feedback จาก user (ลบ modules ถัดไปทั้งหมด)",
+                tags: ["Task Generator Pipeline v2"]
+            }
+        }
+    )
+
+    // ========================================================================
+    // GET /task-generator/scripts/registry - List all registered scripts
+    // ========================================================================
+    .get(
+        "/scripts/registry",
+        async () => {
+            const scripts = await PipelineService.getScriptRegistry();
+            return { success: true, data: scripts };
+        },
+        {
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "List Script Registry",
+                description: "ดึง Script Registry ทั้งหมดจาก DB",
+                tags: ["Task Generator Script Registry"]
+            }
+        }
+    )
+
+    // ========================================================================
+    // POST /task-generator/scripts/registry - Add script to registry
+    // ========================================================================
+    .post(
+        "/scripts/registry",
+        async ({ body }) => {
+            const result = await PipelineService.addScriptToRegistry({
+                action: body.action,
+                deviceType: body.deviceType as "host" | "network_device",
+                os: body.os as "linux" | "cisco",
+                description: body.description,
+                arguments: body.arguments,
+                scriptPath: body.scriptPath,
+                source: (body.source || "manual") as "manual" | "generated"
+            });
+            return { success: true, data: result };
+        },
+        {
+            body: t.Object({
+                action: t.String({ description: "Action name e.g. ping" }),
+                deviceType: t.String({ description: "host or network_device" }),
+                os: t.String({ description: "linux or cisco" }),
+                description: t.String({ description: "Script description" }),
+                arguments: t.Array(t.Object({
+                    name: t.String(),
+                    description: t.String(),
+                    required: t.Boolean(),
+                    defaultValue: t.Optional(t.String())
+                })),
+                scriptPath: t.String({ description: "Path in script-storage" }),
+                source: t.Optional(t.String({ description: "manual or generated" }))
+            }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "Add Script to Registry",
+                description: "เพิ่ม Script เข้า Registry ด้วยมือ (manual)",
+                tags: ["Task Generator Script Registry"]
+            }
+        }
+    )
+
+    // ========================================================================
+    // GET /task-generator/sessions/:sessionId/pipeline/history
+    // ========================================================================
+    .get(
+        "/sessions/:sessionId/pipeline/history",
+        async ({ params, authPlugin: auth, set }) => {
+            const { sessionId } = params;
+            const u_id = auth?.u_id || (process.env.NODE_ENV !== 'production' ? "dev-instructor" : "");
+
+            const session = await TaskGeneratorService.getSession(sessionId);
+            if (!session) {
+                set.status = 404;
+                return { success: false, message: "Session not found" };
+            }
+
+            if (session.userId !== u_id && process.env.NODE_ENV === 'production') {
+                set.status = 403;
+                return { success: false, message: "Access denied" };
+            }
+
+            const history = await PipelineService.getPipelineHistory(sessionId);
+            return { success: true, data: history };
+        },
+        {
+            params: t.Object({ sessionId: t.String() }),
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+            detail: {
+                summary: "Pipeline History",
+                description: "ดึง Pipeline Run ทั้งหมดของ Session",
+                tags: ["Task Generator Pipeline v2"]
+            }
+        }
+    );
