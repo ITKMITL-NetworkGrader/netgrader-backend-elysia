@@ -12,8 +12,34 @@
 // - Router2 (network_device/cisco): 10.0.0.2 - connected to Router1 via Serial0/0
 // `;
 const TOPOLOGY_CONTEXT = `
-## Network Topology
-- PC1 (host/linux): 10.70.38.253 - connected to Internet`;
+## Network Topology Host in GNS3
+- Host Device use credential
+  - Username ubuntu 
+  - Password ubuntu
+- Network Device not use any credential
+- Connected to All Device with GNS3 Console Telnet and specific port
+- PC1 or ubuntu1 (host/linux): Console Port : Telnet gns3.it.kmitl.ac.th:5201
+  - have 1 interface IP : 172.50.131.130/27
+- PC2 or ubuntu2 (host/linux): Console Port : Telnet gns3.it.kmitl.ac.th:5202
+  - have 1 interface IP : 172.50.174.197/26
+- Switch0 (network_device/cisco): Console Port : Telnet gns3.it.kmitl.ac.th:5203
+  - have 1 interface VLAN 131 IP : 172.50.131.158/27
+  - connected to PC1 or ubuntu1 via E0/1
+  - connected to PC2 or ubuntu2 via E0/2
+  - connected to Router2 via E0/0
+- Router1 (network_device/cisco): Console Port : Telnet gns3.it.kmitl.ac.th:5205
+  - connected to Router2 via E0/0 have ip 192.168.1.1/24
+  - connected to internet via E0/1 have ip 10.70.38.159/24
+  - Nat 172.50.131.0/24 and 172.50.174.0/24 to E0/1 and overload
+  - DHCP Server For 172.50.174.192/26
+  - DNS Server and recursive to 10.70.38.1/24
+- Router2 (network_device/cisco): Console Port : Telnet gns3.it.kmitl.ac.th:5204
+  - connected to Switch0 via E0/0 have 2 sub-interface
+    - sub-interface E0/0.131 have IP : 172.50.131.129/27
+    - sub-interface E0/0.174 have IP : 172.50.174.193/26
+  - connected to Router1 via E0/1 have ip 192.168.1.254/24
+
+`;
 
 // -- Step 1: Extract Intent from natural language --------------------------
 export const EXTRACT_INTENT_INSTRUCTION = `You are a Network Test Intent Extractor.

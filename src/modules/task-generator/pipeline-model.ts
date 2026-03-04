@@ -67,7 +67,8 @@ export type PipelineModuleName =
     | 'decompose_tasks'
     | 'check_scripts'
     | 'generate_scripts'
-    | 'execute_tasks';
+    | 'execute_tasks'
+    | 'pipeline_result';
 
 export type PipelineModuleStatus =
     | 'pending'
@@ -111,7 +112,7 @@ const pipelineModuleSchema = new Schema<IPipelineModule>({
     },
     moduleName: {
         type: String,
-        enum: ['extract_intent', 'decompose_tasks', 'check_scripts', 'generate_scripts', 'execute_tasks'],
+        enum: ['extract_intent', 'decompose_tasks', 'check_scripts', 'generate_scripts', 'execute_tasks', 'pipeline_result'],
         required: true
     },
     status: {
