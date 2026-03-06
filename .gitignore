@@ -48,7 +48,9 @@ CLAUDE.md
 .playwright-mcp
 skills-lock.json
 
-/.agent*
+/.agent
+/.agents
 /.codex
 /.gemini
 /.vscode
+/skills
