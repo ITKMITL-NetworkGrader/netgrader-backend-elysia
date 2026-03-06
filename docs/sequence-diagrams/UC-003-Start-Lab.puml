@@ -6,16 +6,16 @@ autonumber
 actor Student
 participant "Client" as Client
 participant "Lab API" as API
-participant "SessionService" as SessionService
-database "MongoDB" as DB
 participant "IPGenerator" as IPGenerator
+participant "SessionService" as SessionService
+participant "LargeSubnetAllocator" as LargeSubnet
+database "MongoDB" as DB
 
 == Start Lab Flow ==
 Student -> Client: Click "Start Lab"
-Client -> API: POST /v0/labs/:id/start
+Client -> API: POST /labs/:id/start
 
 API -> API: Verify student authentication (JWT)
-
 API -> DB: Fetch lab document
 DB --> API: Lab details
 
@@ -26,13 +26,14 @@ alt Lab not available
     API --> Client: 403 Forbidden
     Client --> Student: Lab not available yet
 else Lab available
-    API -> SessionService: getOrCreateSession(studentId, labId)
+    API -> IPGenerator: generateStudentNetworkConfiguration(lab, studentId)
+
+    IPGenerator -> SessionService: getOrCreateSession(studentId, lab)
 
     SessionService -> DB: Find active session
 
     alt Active session exists
         DB --> SessionService: Existing session with IP
-        SessionService --> API: Return existing session
     else No active session
         DB --> SessionService: No session found
 
@@ -48,15 +49,27 @@ else Lab available
         else IP available
             DB --> SessionService: Session created
         end
-
-        SessionService --> API: New session with Management IP
     end
 
-    API -> IPGenerator: generateStudentNetworkConfiguration()
+    SessionService --> IPGenerator: Return Session (with Management IP)
 
-    IPGenerator -> IPGenerator: Generate Management IPs for devices
-    IPGenerator -> IPGenerator: Calculate VLAN IPs based on topology
-    IPGenerator -> IPGenerator: Build complete network config
+    alt Large Subnet Mode Enabled
+        IPGenerator -> IPGenerator: Check session for existing allocation
+
+        alt Allocation needed (First time or new)
+            IPGenerator -> LargeSubnet: allocateSubnet(studentId, labId)
+            LargeSubnet -> DB: Fetch all active allocations (collision check)
+            DB --> LargeSubnet: Allocated indices
+            LargeSubnet -> LargeSubnet: Calculate hash & Resolve collisions
+            LargeSubnet --> IPGenerator: Allocation Result (Subnet + VLANs)
+
+            IPGenerator -> DB: Save allocation to Session
+        end
+    end
+
+    IPGenerator -> IPGenerator: Generate IP Mappings (IPv4/IPv6)
+    IPGenerator -> IPGenerator: Generate VLAN Mappings
+    IPGenerator -> IPGenerator: Calculate VLAN Subnets
 
     IPGenerator --> API: Complete network configuration
 

@@ -11,65 +11,67 @@ sequenceDiagram
     actor Student
     participant Client
     participant Submission API<br/>(Elysia)
-    participant SubmissionService
+    participant GNS3Service
     participant IPGenerator
-    participant SessionService
+    participant SubmissionService
     participant MongoDB
     participant RabbitMQ
-    participant Queue Consumer<br/>(FastAPI)
     participant Grading Service<br/>(FastAPI)
+    participant Devices<br/>(GNS3)
 
     Student->>Client: Submit lab answers
-    Client->>Submission API<br/>(Elysia): POST /v0/submissions
+    Client->>Submission API<br/>(Elysia): POST /v0/submissions<br/>(with project_id)
 
     Submission API<br/>(Elysia)->>Submission API<br/>(Elysia): Verify authentication (JWT)
+    Submission API<br/>(Elysia)->>MongoDB: Validate Lab & Part (Check Deadlines/Prereqs)
 
-    Submission API<br/>(Elysia)->>SubmissionService: createSubmission(submissionData)
+    opt If project_id is provided
+        Submission API<br/>(Elysia)->>GNS3Service: getProjectNodes(projectId)
+        GNS3Service->>GNS3Service: Fetch assigned GNS3 Server config
+        GNS3Service->>Elysia Backend: Return Node List (Name, Console Port, Status)
+    end
 
-    SubmissionService->>MongoDB: Fetch lab and part details
-    MongoDB-->>SubmissionService: Lab and part data
+    Submission API<br/>(Elysia)->>IPGenerator: generateJobFromLab(..., gns3Nodes)
+    
+    IPGenerator->>IPGenerator: Generate IPs (Management + VLANs)
+    IPGenerator->>IPGenerator: Map Device Names to GNS3 Console Ports
 
-    SubmissionService->>SessionService: Get student's lab session
-    SessionService->>MongoDB: Fetch active session
-    MongoDB-->>SessionService: Session with Management IP
-    SessionService-->>SubmissionService: Session details
+    IPGenerator->>IPGenerator: Build Job Payload (Task ID, Template Name, Params)
 
-    SubmissionService->>IPGenerator: generateJobFromLab()
+    Submission API<br/>(Elysia)->>SubmissionService: createSubmission(status: pending)
+    SubmissionService->>MongoDB: Insert Submission Record
 
-    IPGenerator->>IPGenerator: Generate Management IPs for all devices
-    IPGenerator->>IPGenerator: Calculate VLAN IPs
-    IPGenerator->>IPGenerator: Build complete job payload
+    Submission API<br/>(Elysia)->>RabbitMQ: Publish Grading Job
+    RabbitMQ-->>Submission API<br/>(Elysia): Job Queued
 
-    IPGenerator-->>SubmissionService: Job payload with all device configs
+    Submission API<br/>(Elysia)-->>Client: 200 OK + jobId
+    Client-->>Student: Grading in progress...
 
-    SubmissionService->>MongoDB: Create submission record (status: pending)
-    MongoDB-->>SubmissionService: Submission created
+    Note over RabbitMQ,Grading Service<br/>(FastAPI): Async Grading Execution
 
-    SubmissionService->>RabbitMQ: Publish grading job
-    RabbitMQ-->>SubmissionService: Job queued
+    RabbitMQ->>Grading Service<br/>(FastAPI): Consume Job
 
-    SubmissionService-->>Submission API<br/>(Elysia): Submission created + jobId
-    Submission API<br/>(Elysia)-->>Client: 201 Created + jobId
-    Client-->>Student: Submission received, grading in progress
+    loop For each Task in Job
+        Grading Service<br/>(FastAPI)->>MinIO: Fetch Custom Task Template (YAML)
+        MinIO-->>Grading Service<br/>(FastAPI): Return YAML Content
+        Grading Service<br/>(FastAPI)->>Grading Service<br/>(FastAPI): Parse Template & Prepare Nornir Task
+    end
 
-    Note over RabbitMQ,Grading Service<br/>(FastAPI): Grading Execution (Async)
+    loop For each device in job
+        Grading Service<br/>(FastAPI)->>Devices<br/>(GNS3): Connect via Console Port / SSH
+        Devices<br/>(GNS3)-->>Grading Service<br/>(FastAPI): Connection Established
+        Grading Service<br/>(FastAPI)->>Devices<br/>(GNS3): Execute Commands (from Task Template)
+        Devices<br/>(GNS3)-->>Grading Service<br/>(FastAPI): Command Output
+    end
 
-    RabbitMQ->>Queue Consumer<br/>(FastAPI): Consume grading job
-    Queue Consumer<br/>(FastAPI)->>Grading Service<br/>(FastAPI): process_grading_job()
-
-    Grading Service<br/>(FastAPI)->>Grading Service<br/>(FastAPI): Detect device types (SNMP)
-    Grading Service<br/>(FastAPI)->>Grading Service<br/>(FastAPI): Initialize Nornir connections
-    Grading Service<br/>(FastAPI)->>Grading Service<br/>(FastAPI): Execute tasks (ping, command, NAPALM)
-    Grading Service<br/>(FastAPI)->>Grading Service<br/>(FastAPI): Evaluate test cases
-    Grading Service<br/>(FastAPI)->>Grading Service<br/>(FastAPI): Calculate scores
-
-    Note right of Grading Service<br/>(FastAPI): Progress updates sent<br/>via callbacks (UC-005)
+    Grading Service<br/>(FastAPI)->>Grading Service<br/>(FastAPI): Validate Outputs against Expected Regex/Values
+    Grading Service<br/>(FastAPI)->>Grading Service<br/>(FastAPI): Calculate Final Score
 
     Grading Service<br/>(FastAPI)->>Submission API<br/>(Elysia): POST /v0/submissions/result
     Submission API<br/>(Elysia)->>SubmissionService: storeGradingResult()
-    SubmissionService->>MongoDB: Update submission (status: completed)
-    MongoDB-->>SubmissionService: Updated
-    SubmissionService-->>Submission API<br/>(Elysia): Result stored
+    SubmissionService->>MongoDB: Update Submission (status: completed/failed)
+    
+    SubmissionService-->>Submission API<br/>(Elysia): Result Stored
     Submission API<br/>(Elysia)-->>Grading Service<br/>(FastAPI): 200 OK
 ```
 
@@ -77,39 +79,34 @@ sequenceDiagram
 
 ### Elysia Backend Services
 - **Submission API**: `src/modules/submissions/index.ts`
+- **GNS3Service**: `src/modules/gns3-student-lab/service.ts`
+- **IPGenerator**: `src/modules/submissions/ip-generator.ts` (Handles GNS3 node mapping)
 - **SubmissionService**: `src/modules/submissions/service.ts`
-- **IPGenerator**: `src/modules/submissions/ip-generator.ts`
-- **SessionService**: `src/modules/student-lab-sessions/service.ts`
 
 ### FastAPI Grader Services
+- **Location**: `/home/nitruzx/netgrader2025/netgrader-backend-fastapi`
 - **Queue Consumer**: `app/services/pipeline/queue_consumer.py`
-- **Grading Service**: `app/services/grading/simple_grading_service.py`
-- **Nornir Grading Service**: `app/services/grading/nornir_grading_service.py`
+- **Grading Service**: `app/services/grading/nornir_grading_service.py`
+- **Template Service**: Responsible for fetching `custom_templates` from MinIO.
 
 ### Infrastructure
 - **MongoDB**: Submissions collection
+- **MinIO**: Object storage for Custom Task Templates (YAML)
 - **RabbitMQ**: Asynchronous job queue
+- **GNS3 Server**: Hosts the virtual network devices
 
 ## Main Flow
-1. Student submits lab work through client
-2. Elysia backend creates submission record
-3. System generates complete job payload with IP configurations
-4. Job is published to RabbitMQ queue
-5. FastAPI worker consumes job asynchronously
-6. Grader executes network tests (ping, SSH commands, NAPALM operations)
-7. Results are calculated and sent back to Elysia backend
-8. Submission status updated to "completed"
+1. Student submits lab work (including GNS3 project ID).
+2. Backend retrieves GNS3 node details (specifically **Console Ports**) to allow out-of-band management access.
+3. `IPGenerator` creates a job payload containing target device parameters (IPs, VLANs) and GNS3 connection info.
+4. Job is queued in RabbitMQ.
+5. FastAPI Worker consumes the job.
+6. **Worker fetches the required Custom Template (YAML) from MinIO** using the `template_name` provided in the job.
+7. Worker connects to devices using the logic defined in the fetched template.
+8. Commands were executed and outputs validated.
+9. Results sent back to Elysia backend for storage.
 
-## Grading Task Types
-- **Ping**: Network connectivity tests
-- **Command**: SSH CLI commands with output validation
-- **NAPALM**: Network device operations (get_interfaces, get_facts, etc.)
-- **SSH Test**: SSH connectivity verification
-- **Custom**: Instructor-defined tasks
-
-## Error Scenarios
-- **Lab not found** (404): Invalid lab ID
-- **No active session** (400): Student hasn't started the lab
-- **Queue unavailable** (500): RabbitMQ connection error
-- **Grading timeout** (500): Tasks exceed execution timeout
-- **Device unreachable** (failed): Network device not accessible
+## Notes
+- **Napalm & SNMP Detection** have been removed in favor of explicit Custom Templates and direct command execution.
+- **Console Access**: Critical for initial configuration verification where SSH might not be configured yet.
+- **MinIO Fetching**: The **Grading Service** fetches the YAML template at runtime. This ensures the grader always uses the latest version of the template if it was updated in MinIO.
