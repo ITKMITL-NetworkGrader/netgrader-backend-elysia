@@ -46,3 +46,9 @@ docker-compose.yml
 CLAUDE.md
 .claude
 .playwright-mcp
+skills-lock.json
+
+/.agent*
+/.codex
+/.gemini
+/.vscode
