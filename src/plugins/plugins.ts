@@ -16,7 +16,7 @@ export const authPlugin = new Elysia({ name: "authPlugin" })
   )
   .derive({ as: 'global' }, async ({ jwt, set, path, cookie: { auth_token } }) => {
     console.log(path)
-    const excludedPaths = ["/", "/health", "/swagger", "/swagger/json", "/v0/auth/login", "/v0/auth/register", "/v0/auth/me", "/v0/submissions/progress", "/v0/submissions/result", "/v0/submissions/started"];
+    const excludedPaths = ["/", "/health", "/swagger", "/swagger/json", "/v0/auth/login", "/v0/auth/register", "/v0/auth/me", "/v0/submissions/progress", "/v0/submissions/result", "/v0/submissions/started", "/v0/auth/sso/login", "/v0/auth/sso/callback", "/v0/auth/sso/complete", "/v0/auth/sso/logout"];
 
     // Also exclude SSE stream endpoints (they include jobId in path)
     if (path.includes("/stream")) {
