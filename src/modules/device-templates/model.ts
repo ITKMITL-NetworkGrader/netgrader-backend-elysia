@@ -2,11 +2,12 @@ import { Schema, model, Document, Types } from 'mongoose';
 
 export interface IDeviceTemplate extends Document {
   name: string;            // Display name
-  
+
   // Device Classification
   deviceType: 'router' | 'switch' | 'server';
-  platform: string;       // "cisco_ios", "linux"  
-  
+  platform: string;       // "cisco_ios", "linux"
+  image: string;          // Docker image, e.g. "vrnetlab/vr-csr:17.03.06"  
+
   // Network Interfaces
   defaultInterfaces: Array<{
     name: string;          // "GigabitEthernet0/1", "eth0"
@@ -14,12 +15,12 @@ export interface IDeviceTemplate extends Document {
     description?: string;
     isManagement?: boolean; // True for management interfaces
   }>;
-  
+
   // Connection Configuration
   connectionParams: {
     defaultSSHPort: number;
     alternativePorts?: number[];
-    
+
     // Authentication Templates
     authentication: {
       usernameTemplate: string;    // "admin", "student{index}", "user{lab_id}"
@@ -27,7 +28,7 @@ export interface IDeviceTemplate extends Document {
       enablePasswordTemplate?: string; // For Cisco devices
     };
   };
-  
+
   // Documentation
   description: string;
   createdAt: Date;
@@ -49,6 +50,12 @@ const deviceTemplateSchema = new Schema<IDeviceTemplate>({
     type: String,
     required: true,
     trim: true
+  },
+  image: {
+    type: String,
+    required: true,
+    trim: true,
+    minlength: 1
   },
   defaultInterfaces: [{
     name: {
