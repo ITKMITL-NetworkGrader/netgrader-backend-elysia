@@ -13,15 +13,17 @@
 import { Elysia, t } from 'elysia';
 import { ClabStudentLabService } from './service';
 import { authPlugin, requireRole } from '../../plugins/plugins';
-import {
-    enforceSelfServiceUserAccess,
-    resolveAuthContext,
-    type AuthRole,
-    type RouteAuthPlugin,
-    type RouteSet,
-} from '../auth/route-helpers.js';
+import { JWTPayload } from '../../index.js';
 import { User } from '../auth/model';
 import { Lab } from '../labs/model';
+
+// ─── Types ─────────────────────────────────────────────────────────────────
+
+type AuthRole = 'ADMIN' | 'INSTRUCTOR' | 'STUDENT';
+
+type RouteSet = {
+    status?: number | string;
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -47,32 +49,27 @@ function verifyLabOwnership(
 }
 
 async function authorizeLabAccess(
-    authPlugin: RouteAuthPlugin,
+    authPlugin: JWTPayload | undefined,
     labName: string,
     set: RouteSet,
 ): Promise<
     | { userId: string; role: AuthRole }
     | { error: string }
 > {
-    const authContext = await resolveAuthContext(authPlugin, set);
-    if ('error' in authContext) {
-        return authContext;
+    const userId = authPlugin?.u_id?.toLowerCase();
+    const role = authPlugin?.role as AuthRole | undefined;
+
+    if (!userId || !role) {
+        set.status = 401;
+        return { error: 'Unauthorized — missing auth context' };
     }
 
-    const ownershipError = verifyLabOwnership(
-        labName,
-        authContext.userId,
-        authContext.role,
-        set,
-    );
+    const ownershipError = verifyLabOwnership(labName, userId, role, set);
     if (ownershipError) {
         return ownershipError;
     }
 
-    return {
-        userId: authContext.userId,
-        role: authContext.role,
-    };
+    return { userId, role };
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -87,38 +84,33 @@ export const clabStudentLabRoutes = new Elysia({
     .post(
         '/setup',
         async ({ body, set, authPlugin: auth }) => {
-            const authContext = await resolveAuthContext(auth, set);
-            if ('error' in authContext) {
+            const userId = auth?.u_id?.toLowerCase();
+            const role = auth?.role as AuthRole | undefined;
+
+            if (!userId || !role) {
+                set.status = 401;
                 return {
                     success: false,
-                    error: authContext.error,
+                    error: 'Unauthorized — missing auth context',
                 };
             }
 
-            // Normalize studentId once
-            const requestedStudentId = body.studentId.trim().toLowerCase();
-            const setupAccess = enforceSelfServiceUserAccess(
-                authContext,
-                requestedStudentId,
-                set,
-            );
-            if ('error' in setupAccess) {
+            // STUDENT: can only setup their own lab
+            // ADMIN/INSTRUCTOR: can setup for any student
+            const studentId = role === 'STUDENT'
+                ? userId
+                : body.studentId.trim().toLowerCase();
+
+            if (role === 'STUDENT' && studentId !== userId) {
+                set.status = 403;
                 return {
                     success: false,
-                    error:
-                        setupAccess.error ===
-                        'Forbidden — students can only act on their own account'
-                            ? 'Forbidden — students can only setup their own lab'
-                            : setupAccess.error,
+                    error: 'Forbidden — students can only setup their own lab',
                 };
             }
-            const { userId: studentId } = setupAccess;
 
             // Find user in MongoDB
-            const studentUser =
-                studentId === authContext.userId
-                    ? authContext.user
-                    : await User.findOne({ u_id: studentId });
+            const studentUser = await User.findOne({ u_id: studentId });
             if (!studentUser) {
                 set.status = 404;
                 return {
