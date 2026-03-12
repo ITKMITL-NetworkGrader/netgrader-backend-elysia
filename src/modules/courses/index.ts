@@ -80,7 +80,7 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
       } catch (error: any) {
         console.error("Error creating course:", error);
         set.status = 400;
-        return { message: "Error creating course", error: error.message };
+        return { message: "Error creating course" };
       }
     },
     {
@@ -116,8 +116,9 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
 
         return { courses: transformedCourses };
       } catch (error: any) {
+        console.error("Error fetching courses:", error);
         set.status = 500;
-        return { message: "Error fetching courses", error: error.message };
+        return { message: "Error fetching courses" };
       }
     },
     {
@@ -162,8 +163,9 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
           }
         };
       } catch (error: any) {
+        console.error("Error fetching course:", error);
         set.status = 500;
-        return { message: "Error fetching course", error: error.message };
+        return { message: "Error fetching course" };
       }
     },
     {
@@ -242,8 +244,9 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
           course: courseData,
         };
       } catch (error: any) {
+        console.error("Error updating course:", error);
         set.status = 400;
-        return { message: "Error updating course", error: error.message };
+        return { message: "Error updating course" };
       }
     },
     {
@@ -275,8 +278,9 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
           message: "Course and related enrollments deleted successfully",
         };
       } catch (error: any) {
+        console.error("Error deleting course:", error);
         set.status = 500;
-        return { message: "Error deleting course", error: error.message };
+        return { message: "Error deleting course" };
       }
     },
     {
@@ -304,8 +308,9 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
 
         return { enrollments };
       } catch (error: any) {
+        console.error("Error fetching enrollments:", error);
         set.status = 500;
-        return { message: "Error fetching enrollments", error: error.message };
+        return { message: "Error fetching enrollments" };
       }
     },
     {
@@ -337,7 +342,8 @@ export const courseRoutes = new Elysia({ prefix: "/courses" })
 
       return { courses: transformedCourses };
     } catch (error: any) {
+      console.error("Error fetching created courses:", error);
       set.status = 500;
-      return { message: "Error fetching created courses", error: error.message };
+      return { message: "Error fetching created courses" };
     }
   });

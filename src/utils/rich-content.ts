@@ -1,3 +1,9 @@
+import createDOMPurify from 'dompurify';
+import { JSDOM } from 'jsdom';
+
+const window = new JSDOM('').window;
+const DOMPurify = createDOMPurify(window);
+
 export interface RichContent {
   html: string;
   json: any;
@@ -57,7 +63,7 @@ const generateHeadingId = (text: string, index: number): string => {
 
 export function extractHeadingStructure(json: any): Array<{ level: number; text: string; id: string }> {
   const headings: Array<{ level: number; text: string; id: string }> = [];
-  
+
   function traverse(node: any, headingIndex: { value: number }) {
     if (node.type === 'heading' && node.content) {
       const text = node.content.map((n: any) => n.text || '').join('');
@@ -71,17 +77,17 @@ export function extractHeadingStructure(json: any): Array<{ level: number; text:
 
       headingIndex.value += 1;
     }
-    
+
     if (node.content) {
       node.content.forEach((child: any) => traverse(child, headingIndex));
     }
   }
-  
+
   if (json.content) {
     const headingIndex = { value: 0 };
     json.content.forEach((node: any) => traverse(node, headingIndex));
   }
-  
+
   return headings;
 }
 
@@ -95,7 +101,7 @@ export function hasImages(json: any): boolean {
     }
     return false;
   }
-  
+
   return json.content ? json.content.some(traverse) : false;
 }
 
@@ -109,19 +115,22 @@ export function hasCodeBlocks(json: any): boolean {
     }
     return false;
   }
-  
+
   return json.content ? json.content.some(traverse) : false;
 }
 
 export function processRichContent(html: string, json: any): RichContent {
-  const plainText = extractPlainText(html);
+  // DSEC-02: Sanitize HTML before storing to prevent XSS
+  const sanitizedHtml = DOMPurify.sanitize(html);
+
+  const plainText = extractPlainText(sanitizedHtml);
   const wordCount = countWords(plainText);
   const characterCount = countCharacters(plainText);
   const estimatedReadingTime = estimateReadingTime(wordCount);
   const headingStructure = extractHeadingStructure(json);
-  
+
   return {
-    html,
+    html: sanitizedHtml,
     json,
     plainText,
     metadata: {

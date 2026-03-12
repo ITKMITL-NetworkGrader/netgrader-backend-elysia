@@ -81,7 +81,7 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
         set.status = 500;
         return {
           error: 'Failed to upload profile picture',
-          details: error instanceof Error ? error.message : 'Unknown error',
+
         };
       }
     },
@@ -213,7 +213,7 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
         set.status = 500;
         return {
           error: 'Failed to upload course banner',
-          details: error instanceof Error ? error.message : 'Unknown error',
+
         };
       }
     },
@@ -276,7 +276,7 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
         set.status = 500;
         return {
           error: 'Failed to delete course banner',
-          details: error instanceof Error ? error.message : 'Unknown error',
+
         };
       }
     },
@@ -292,37 +292,4 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
     }
   )
 
-  /**
-   * Get file URL (for testing purposes)
-   * GET /storage/url/:path
-   */
-  .get(
-    '/url/:path',
-    async ({ params, set }) => {
-      try {
-        const { path } = params;
-        const url = await storageService.getPresignedUrl(path);
-
-        return {
-          url,
-        };
-      } catch (error) {
-        console.error('Error getting file URL:', error);
-        set.status = 500;
-        return {
-          error: 'Failed to get file URL',
-          details: error instanceof Error ? error.message : 'Unknown error',
-        };
-      }
-    },
-    {
-      params: t.Object({
-        path: t.String(),
-      }),
-      detail: {
-        summary: 'Get presigned URL for a file',
-        description: 'Get a presigned URL for accessing a file in MinIO',
-        tags: ['Storage'],
-      },
-    }
-  );
+  // DEEP2-4: Open presigned URL endpoint removed for security

@@ -239,7 +239,7 @@ async function listObjects(client: MinioClient): Promise<BucketItem[]> {
 
 async function loadAndParseTemplate(client: MinioClient, objectName: string) {
   const data = await loadObjectData(client, objectName);
-  return yaml.load(data) as Record<string, any>;
+  return yaml.load(data, { schema: yaml.JSON_SCHEMA }) as Record<string, any>;
 }
 
 async function loadObjectData(client: MinioClient, objectName: string): Promise<string> {

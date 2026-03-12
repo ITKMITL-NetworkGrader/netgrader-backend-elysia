@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { EnrollmentService } from "./service";
-import { authPlugin } from "../../plugins/plugins";
+import { authPlugin, requireRole } from "../../plugins/plugins";
 import { User } from "../auth/model";
 import { ObjectId } from "mongodb";
 
@@ -26,6 +26,7 @@ export const enrollmentRoutes = new Elysia({ prefix: "/enrollments" })
       }
     },
     {
+      beforeHandle: requireRole(["ADMIN"]),
       detail: {
         tags: ["Enrollments"],
         summary: "Get All Enrollments",

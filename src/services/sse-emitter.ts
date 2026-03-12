@@ -5,7 +5,7 @@
  * Provides instant updates to connected clients without polling.
  *
  * Architecture:
- * - Python Worker → HTTP Callback → Elysia → SSE Broadcast → Frontend
+ * - Python Worker -> HTTP Callback -> Elysia -> SSE Broadcast -> Frontend
  * - One SSE connection per student submission (jobId)
  * - Automatic cleanup when jobs complete
  */
@@ -16,6 +16,9 @@ export interface SSEClient {
   connectionTime: Date;
 }
 
+const MAX_CLIENTS_PER_CHANNEL = 5;
+const MAX_TOTAL_CLIENTS = 500;
+
 export class SSEService {
   private clients: Map<string, Set<SSEClient>> = new Map();
 
@@ -23,8 +26,23 @@ export class SSEService {
    * Register a new SSE client for a specific job
    */
   addClient(channelId: string, controller: ReadableStreamDefaultController): void {
+    // DEEP-7: Enforce global client limit
+    if (this.getActiveConnections() >= MAX_TOTAL_CLIENTS) {
+      console.warn(`[SSE] Global client limit (${MAX_TOTAL_CLIENTS}) reached. Rejecting connection for channel ${channelId}.`);
+      try { controller.close(); } catch (_) { /* already closed */ }
+      return;
+    }
+
     if (!this.clients.has(channelId)) {
       this.clients.set(channelId, new Set());
+    }
+
+    // DEEP-7: Enforce per-channel client limit
+    const channelClients = this.clients.get(channelId)!;
+    if (channelClients.size >= MAX_CLIENTS_PER_CHANNEL) {
+      console.warn(`[SSE] Per-channel limit (${MAX_CLIENTS_PER_CHANNEL}) reached for channel ${channelId}. Rejecting connection.`);
+      try { controller.close(); } catch (_) { /* already closed */ }
+      return;
     }
 
     const client: SSEClient = {
@@ -33,8 +51,8 @@ export class SSEService {
       connectionTime: new Date()
     };
 
-    this.clients.get(channelId)!.add(client);
-    console.log(`[SSE] Client connected to channel ${channelId}. Total clients: ${this.clients.get(channelId)!.size}`);
+    channelClients.add(client);
+    console.log(`[SSE] Client connected to channel ${channelId}. Total clients: ${channelClients.size}`);
   }
 
   /**

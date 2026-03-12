@@ -3,6 +3,68 @@
  * Used for playground testing with custom GNS3 servers
  */
 
+/**
+ * DSEC-01: SSRF validation — blocks requests to internal/loopback addresses.
+ * Must be called before every outbound HTTP request.
+ */
+function validateGNS3Target(ip: string, port: number): void {
+    const normalised = ip.trim().toLowerCase();
+
+    // R2-2: Only allow dotted-decimal IPv4 to prevent DNS rebinding/octal/hex bypasses
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(normalised)) {
+        throw new Error('SSRF blocked: only dotted-decimal IPv4 addresses are allowed');
+    }
+
+    // R4-5: Validate each octet is 0-255
+    const octets = normalised.split('.').map(Number);
+    if (octets.some(o => o < 0 || o > 255)) {
+        throw new Error('SSRF blocked: invalid IPv4 octet (must be 0-255)');
+    }
+
+    // R4-5: Block 0.0.0.0/8 (routes to localhost on many systems)
+    if (octets[0] === 0) {
+        throw new Error('SSRF blocked: 0.x.x.x range is not allowed');
+    }
+
+    // Block localhost variants
+    if (
+        normalised === 'localhost' ||
+        normalised === '::1'
+    ) {
+        throw new Error('SSRF blocked: loopback/internal address is not allowed');
+    }
+
+    // Block 127.x.x.x (loopback range)
+    if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(normalised)) {
+        throw new Error('SSRF blocked: loopback/internal address is not allowed');
+    }
+
+    // Block 169.254.x.x (link-local)
+    if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(normalised)) {
+        throw new Error('SSRF blocked: link-local address is not allowed');
+    }
+
+    // D-4: Block RFC1918 private ranges
+    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(normalised)) {
+        throw new Error('SSRF blocked: private network address (10.x) is not allowed');
+    }
+    if (/^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(normalised)) {
+        throw new Error('SSRF blocked: private network address (172.16-31.x) is not allowed');
+    }
+    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(normalised)) {
+        throw new Error('SSRF blocked: private network address (192.168.x) is not allowed');
+    }
+    // Block IPv4-mapped IPv6
+    if (normalised.startsWith('::ffff:')) {
+        throw new Error('SSRF blocked: IPv4-mapped IPv6 address is not allowed');
+    }
+
+    // Validate port range
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error('SSRF blocked: invalid port number');
+    }
+}
+
 interface GNS3Config {
     serverIp: string;
     serverPort: number;
@@ -60,6 +122,7 @@ export class GNS3Service {
         error?: string;
     }> {
         try {
+            validateGNS3Target(config.serverIp, config.serverPort);
             const url = `${this.buildBaseUrl(config)}/v2/version`;
             const response = await fetch(url, {
                 method: 'GET',
@@ -115,6 +178,7 @@ export class GNS3Service {
         error?: string;
     }> {
         try {
+            validateGNS3Target(config.serverIp, config.serverPort);
             const url = `${this.buildBaseUrl(config)}/v2/projects`;
             const response = await fetch(url, {
                 method: 'POST',
@@ -180,6 +244,7 @@ export class GNS3Service {
         error?: string;
     }> {
         try {
+            validateGNS3Target(config.serverIp, config.serverPort);
             const url = `${this.buildBaseUrl(config)}/v2/projects`;
             const response = await fetch(url, {
                 method: 'GET',
@@ -233,6 +298,7 @@ export class GNS3Service {
         error?: string;
     }> {
         try {
+            validateGNS3Target(config.serverIp, config.serverPort);
             const url = `${this.buildBaseUrl(config)}/v2/projects`;
             const response = await fetch(url, {
                 method: 'GET',
@@ -283,6 +349,7 @@ export class GNS3Service {
         error?: string;
     }> {
         try {
+            validateGNS3Target(config.serverIp, config.serverPort);
             const url = `${this.buildBaseUrl(config)}/v2/projects/${projectId}/open`;
             const response = await fetch(url, {
                 method: 'POST',
@@ -327,6 +394,7 @@ export class GNS3Service {
         error?: string;
     }> {
         try {
+            validateGNS3Target(config.serverIp, config.serverPort);
             const url = `${this.buildBaseUrl(config)}/v2/projects/${projectId}/nodes`;
             const response = await fetch(url, {
                 method: 'GET',

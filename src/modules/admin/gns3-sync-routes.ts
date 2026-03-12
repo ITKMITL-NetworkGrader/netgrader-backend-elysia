@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 import { AuthService } from "../auth/service";
 import { User } from "../auth/model";
+import crypto from "crypto";
 
 /**
  * Admin routes for syncing users to GNS3
@@ -37,6 +38,7 @@ export const gns3SyncRoutes = new Elysia({ prefix: "/admin/gns3-sync" })
                 );
 
                 if (result.success) {
+                    // DEEP2-7: Do not include tempPassword in response
                     return {
                         status: "success",
                         message: `GNS3 user and pool created for ${user.u_id}`,
@@ -45,7 +47,6 @@ export const gns3SyncRoutes = new Elysia({ prefix: "/admin/gns3-sync" })
                             poolId: result.poolId,
                             gns3Username: `it${user.u_id}`,
                             gns3PoolName: `it${user.u_id}-pool`,
-                            tempPassword: tempPassword,
                         }
                     };
                 } else {
@@ -114,7 +115,7 @@ export const gns3SyncRoutes = new Elysia({ prefix: "/admin/gns3-sync" })
 
                 // Sync each user
                 const results: {
-                    synced: { u_id: string; gns3Username: string; tempPassword: string }[];
+                    synced: { u_id: string; gns3Username: string }[];
                     failed: { u_id: string; error: string }[];
                     skipped: { u_id: string; reason: string }[];
                 } = {
@@ -134,10 +135,10 @@ export const gns3SyncRoutes = new Elysia({ prefix: "/admin/gns3-sync" })
                         );
 
                         if (result.success) {
+                            // DEEP2-7: Do not include tempPassword in response
                             results.synced.push({
                                 u_id: user.u_id,
                                 gns3Username: `it${user.u_id}`,
-                                tempPassword: tempPassword
                             });
                         } else {
                             // Check if the error indicates the user already exists
@@ -243,13 +244,8 @@ export const gns3SyncRoutes = new Elysia({ prefix: "/admin/gns3-sync" })
     );
 
 /**
- * Generate a temporary password for GNS3 user
+ * DEEP2-13: Generate a temporary password using cryptographically secure random bytes
  */
 function generateTempPassword(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    let password = '';
-    for (let i = 0; i < 12; i++) {
-        password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return password + '!';
+    return crypto.randomBytes(12).toString("base64url");
 }

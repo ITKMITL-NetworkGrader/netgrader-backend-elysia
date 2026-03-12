@@ -85,6 +85,16 @@ export interface SetupResult {
  * Format: GNS3_SERVERS=host1,host2  GNS3_PORTS=3080,3080
  */
 function parseServersFromEnv(): GNS3ServerConfig[] {
+    // DEEP-6: Fail-fast in production if credentials are not explicitly set
+    if (env.NODE_ENV === 'production') {
+        if (!env.GNS3_USERNAME) {
+            throw new Error("GNS3_USERNAME must be set in production");
+        }
+        if (!env.GNS3_PASSWORD) {
+            throw new Error("GNS3_PASSWORD must be set in production");
+        }
+    }
+
     const serversEnv = env.GNS3_SERVERS || env.GNS3_SERVER || 'localhost';
     const portsEnv = env.GNS3_PORTS || env.GNS3_PORT || '3080';
     const version = env.GNS3_VERSION || 'v3';
@@ -151,8 +161,12 @@ export class GNS3v3Service {
      * Same password is generated for the same username every time
      */
     static generateDeterministicPassword(username: string): string {
+        const salt = env.GNS3_PASSWORD_SALT;
+        if (!salt) {
+            throw new Error("GNS3_PASSWORD_SALT environment variable is not set");
+        }
         return crypto.createHash("sha256")
-            .update(username + "netg")
+            .update(username + salt)
             .digest("hex")
             .substring(0, 16);
     }
@@ -682,7 +696,7 @@ export class GNS3v3Service {
 
     /**
      * Complete Setup Workflow with Lazy Initialization and Server Sharding
-     * 
+     *
      * @param studentId - Student ID (without "it" prefix)
      * @param courseName - Course name for project naming
      * @param labName - Lab name for project naming

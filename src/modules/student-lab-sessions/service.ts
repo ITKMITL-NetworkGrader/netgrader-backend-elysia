@@ -88,7 +88,7 @@ export class StudentLabSessionService {
         }
 
         // Not a duplicate key error or max retries reached
-        throw new Error(`Failed to create session: ${error.message}`);
+        throw new Error('Failed to create session');
       }
     }
 
@@ -258,7 +258,7 @@ export class StudentLabSessionService {
         reopened++;
         details.push({ studentId, status: 'reopened' });
       } catch (error) {
-        details.push({ studentId, status: `failed: ${(error as Error).message}` });
+        details.push({ studentId, status: 'failed' });
       }
     }
 
@@ -364,7 +364,9 @@ export class StudentLabSessionService {
         exemptRanges.map(r => ({ start: r.start, end: r.end || r.start })),
         await this.getAssignedIpRanges(lab.id)
       );
-      console.log(`Merged Exempt Ranges:`, mergedExemptRanges.map(r => ({ start: this.longToIp(r.start), end: this.longToIp(r.end) }))) // --- IGNORE ---
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`Merged Exempt Ranges:`, mergedExemptRanges.map(r => ({ start: this.longToIp(r.start), end: this.longToIp(r.end) })));
+      }
 
       const candidateIp = this.getAvailableIp(
         baseIpLong + 1,
@@ -379,7 +381,7 @@ export class StudentLabSessionService {
 
       return candidateIp;
     } catch (error) {
-      throw new Error(`Error calculating management IP: ${(error as Error).message}`);
+      throw new Error('Error calculating management IP');
     }
   }
 
@@ -595,7 +597,7 @@ export class StudentLabSessionService {
         sufficient
       };
     } catch (error) {
-      throw new Error(`Error calculating IP capacity: ${(error as Error).message}`);
+      throw new Error('Error calculating IP capacity');
     }
   }
 
@@ -693,7 +695,7 @@ export class StudentLabSessionService {
         reassignedCount++;
 
       } catch (error) {
-        console.error(`Failed to reassign IP for student ${oldSession.studentId}:`, error);
+        console.error(`Failed to reassign IP for a student session:`, error);
         // Continue with other students even if one fails
       }
     }

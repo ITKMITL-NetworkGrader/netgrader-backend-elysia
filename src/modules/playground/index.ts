@@ -1,9 +1,35 @@
 import { Elysia, t } from "elysia";
+import crypto from "crypto";
 import { PlaygroundService } from "./service";
 import { LabService } from "../labs/service";
 import { PartService } from "../parts/service";
 import { authPlugin } from "../../plugins/plugins";
 import { sseService } from "../../services/sse-emitter";
+import { env } from "process";
+
+// Worker callback authentication for playground
+const WORKER_SECRET = env.WORKER_CALLBACK_SECRET;
+if (!WORKER_SECRET) {
+  console.error("FATAL: WORKER_CALLBACK_SECRET not set (playground)");
+  process.exit(1);
+}
+
+function verifyPlaygroundWorkerSecret(request: Request, set: any): boolean {
+  const secret = request.headers.get("x-worker-secret");
+  if (!secret || secret.length !== WORKER_SECRET.length) {
+    set.status = 403;
+    return false;
+  }
+  const isValid = crypto.timingSafeEqual(
+    Buffer.from(secret),
+    Buffer.from(WORKER_SECRET)
+  );
+  if (!isValid) {
+    set.status = 403;
+    return false;
+  }
+  return true;
+}
 
 export const playgroundRoutes = new Elysia({ prefix: "/playground" })
     .use(authPlugin)
@@ -29,10 +55,11 @@ export const playgroundRoutes = new Elysia({ prefix: "/playground" })
                     totalDevices: devices.length,
                 };
             } catch (error) {
+                console.error("Failed to get devices:", error);
                 set.status = 500;
                 return {
                     success: false,
-                    error: `Failed to get devices: ${(error as Error).message}`
+                    error: "Failed to get devices"
                 };
             }
         },
@@ -77,10 +104,11 @@ export const playgroundRoutes = new Elysia({ prefix: "/playground" })
                     totalDevices: devices.length,
                 };
             } catch (error) {
+                console.error("Failed to get devices for part:", error);
                 set.status = 500;
                 return {
                     success: false,
-                    error: `Failed to get devices: ${(error as Error).message}`
+                    error: "Failed to get devices"
                 };
             }
         },
@@ -138,21 +166,23 @@ export const playgroundRoutes = new Elysia({ prefix: "/playground" })
                 const result = await PlaygroundService.submitPlaygroundJob(jobPayload);
 
                 if (!result.success) {
+                    console.error("Playground job submission failed:", result.error);
                     set.status = 503;
-                    return { success: false, error: result.error };
+                    return { success: false, error: "Failed to submit grading job" };
                 }
 
+                // R4-6: Strip jobPayload from response to avoid leaking GNS3 credentials
                 return {
                     success: true,
                     jobId: result.jobId,
                     message: "Playground grading job submitted",
-                    jobPayload, // Return for debugging/display
                 };
             } catch (error) {
+                console.error("Failed to start playground grading:", error);
                 set.status = 500;
                 return {
                     success: false,
-                    error: `Failed to start grading: ${(error as Error).message}`
+                    error: "Failed to start grading"
                 };
             }
         },
@@ -257,7 +287,10 @@ export const playgroundRoutes = new Elysia({ prefix: "/playground" })
      */
     .post(
         "/started",
-        async ({ body }) => {
+        async ({ body, request, set }) => {
+            if (!verifyPlaygroundWorkerSecret(request, set)) {
+              return { error: "Forbidden" };
+            }
             const jobId = body.job_id;
             console.log(`[Playground] Job Started: ${jobId}`);
 
@@ -287,7 +320,10 @@ export const playgroundRoutes = new Elysia({ prefix: "/playground" })
      */
     .post(
         "/progress",
-        async ({ body }) => {
+        async ({ body, request, set }) => {
+            if (!verifyPlaygroundWorkerSecret(request, set)) {
+              return { error: "Forbidden" };
+            }
             const jobId = body.job_id;
             
             console.log(`[Playground] Progress for job ${jobId}: ${body.percentage || 0}% - ${body.message || ""}`);
@@ -332,7 +368,10 @@ export const playgroundRoutes = new Elysia({ prefix: "/playground" })
      */
     .post(
         "/result",
-        async ({ body }) => {
+        async ({ body, request, set }) => {
+            if (!verifyPlaygroundWorkerSecret(request, set)) {
+              return { error: "Forbidden" };
+            }
             const jobId = body.job_id;
             
             console.log(`[Playground] Final Result for job ${jobId}: Status - ${body.status}, Points Earned - ${body.total_points_earned}/${body.total_points_possible}`);

@@ -8,7 +8,7 @@ export const gns3StudentLabRoutes = new Elysia({ prefix: "/student-lab/gns3" })
 
     /**
      * Complete student lab setup workflow with Lazy Initialization
-     * 
+     *
      * - Automatically creates GNS3 user if not exists
      * - Automatically creates pool if not exists
      * - Automatically creates ACE if not exists
@@ -17,7 +17,19 @@ export const gns3StudentLabRoutes = new Elysia({ prefix: "/student-lab/gns3" })
      */
     .post(
         "/setup",
-        async ({ body, set }) => {
+        async ({ body, set, authPlugin }) => {
+            // DEEP-4: Ownership / role check - require authentication
+            if (!authPlugin?.u_id) {
+                set.status = 401;
+                return { success: false, error: "Authentication required" };
+            }
+            const callerRole = authPlugin.role as string | undefined;
+            const isPrivileged = callerRole === "ADMIN" || callerRole === "INSTRUCTOR";
+            if (!isPrivileged && authPlugin.u_id.toLowerCase() !== body.studentId.toLowerCase()) {
+                set.status = 403;
+                return { success: false, error: "You can only set up labs for your own account" };
+            }
+
             // Find user in MongoDB
             const user = await User.findOne({ u_id: body.studentId.toLowerCase() });
             if (!user) {

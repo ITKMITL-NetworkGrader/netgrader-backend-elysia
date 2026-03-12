@@ -48,11 +48,12 @@ export class EnrollmentService {
       throw new Error("Course not found");
     }
 
-    // Check if course requires password and validate it
-    // Skip password validation if:
-    // 1. Course creator is auto-enrolling as instructor, OR
-    // 2. Course doesn't have a password
+    // Prevent privilege escalation: only allow STUDENT for self-enrollment
+    // INSTRUCTOR/TA role can only be assigned by course creator or via manageCourseEnrollments
     const isCreatorEnrolling = u_role === "INSTRUCTOR" && course.created_by === u_id;
+    if (!isCreatorEnrolling && u_role !== "STUDENT") {
+      throw new Error("Cannot self-enroll with elevated role");
+    }
 
     if (course.password && course.password.trim() !== "" && !isCreatorEnrolling) {
       if (!password) {
@@ -267,6 +268,10 @@ export class EnrollmentService {
         }
       }
 
+      // Prevent TAs from promoting users to TA — only INSTRUCTORs can assign TA role
+      if (managerRole === "TA" && change.newRole === "TA") {
+        throw new EnrollmentServiceError("Teaching Assistants cannot promote users to TA.", 403);
+      }
       enrollment.u_role = change.newRole;
       await enrollment.save();
       updated.push({ u_id: enrollment.u_id, newRole: enrollment.u_role });

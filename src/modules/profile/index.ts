@@ -39,7 +39,6 @@ export const profileRoutes = new Elysia({ prefix: '/profile' })
                 set.status = 500;
                 return {
                     error: 'Failed to get profile',
-                    details: error instanceof Error ? error.message : 'Unknown error',
                 };
             }
         },
@@ -82,7 +81,6 @@ export const profileRoutes = new Elysia({ prefix: '/profile' })
                 set.status = 500;
                 return {
                     error: 'Failed to get profile',
-                    details: error instanceof Error ? error.message : 'Unknown error',
                 };
             }
         },
@@ -131,7 +129,6 @@ export const profileRoutes = new Elysia({ prefix: '/profile' })
                 set.status = 500;
                 return {
                     error: 'Failed to update bio',
-                    details: error instanceof Error ? error.message : 'Unknown error',
                 };
             }
         },

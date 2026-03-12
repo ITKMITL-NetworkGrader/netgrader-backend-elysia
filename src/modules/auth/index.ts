@@ -26,7 +26,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   .use(
     jwt({
       name: "jwt",
-      secret: env.JWT_SECRET || "secret",
+      secret: env.JWT_SECRET!,
       exp: '1d',
     })
   )
@@ -65,12 +65,14 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       const value = await jwt.sign(payload);
       auth_token.value = value;
       auth_token.httpOnly = true;
+      auth_token.secure = env.NODE_ENV === "production";
+      auth_token.sameSite = "lax";
+      auth_token.path = "/";
       set.status = 200;
       return {
         success: true,
         message: authResult.message || "Authentication successful",
         isFirstTimeLogin: authResult.isFirstTimeLogin,
-        value,
         user: {
           id: (authResult.user._id as Types.ObjectId).toString(),
           u_id: authResult.user.u_id,
@@ -118,65 +120,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       },
     }
   )
-  //-------------------------------------------------------------------------------------------------------
-  .post(
-    "/register",
-    async ({ body, set }) => {
-      try {
-        const { u_id, password, fullName, role } = body;
-        const userData = new User({
-          u_id,
-          password,
-          fullName,
-          role,
-          ldapAuthenticated: false,
-          lastLogin: new Date(),
-        });
-        const createdUserResult = await AuthService.createUser(userData);
-        if (!createdUserResult) {
-          set.status = 400;
-          return { success: false, message: "User already exists" };
-        }
-        set.status = 200;
-        return {
-          success: true,
-          user: createdUserResult.u_id,
-          role: createdUserResult.role,
-          message: "User registered successfully",
-        };
-      } catch (error: any) {
-        set.status = 400;
-        return {
-          success: false,
-          message: error.message || "Error registering user",
-        };
-      }
-    },
-    {
-      body: UserSchema,
-      response: {
-        200: t.Object({
-          success: t.Boolean(),
-          message: t.String(),
-          user: t.String(),
-        }),
-        400: t.Object({
-          success: t.Boolean(),
-          message: t.String(),
-        }),
-        401: t.Object({
-          success: t.Boolean(),
-          message: t.String(),
-        }),
-      },
-      detail: {
-        tags: ["Authentication"],
-        summary: "User Registration",
-        description:
-          "Register a new user with username, password, full name, and role. If the user already exists, it will return an error.",
-      },
-    }
-  )
+  // NG-SEC-003: Public registration endpoint removed for security
   //-------------------------------------------------------------------------------------------------------
   .post(
     "/logout",
@@ -197,7 +141,6 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   .get(
     "/me",
     async ({ jwt, set, cookie: { auth_token } }) => {
-      console.log(auth_token.value)
       const profile = await jwt.verify(auth_token.value);
       if (!profile) {
         set.status = 401;
@@ -265,7 +208,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     "/surrogate",
     async ({ body, jwt, set, cookie: { auth_token } }) => {
       // Only allow in development environment
-      if (env.SURROGATE_LOGIN_ENABLED === "false") {
+      if (env.SURROGATE_LOGIN_ENABLED !== "true") {
         set.status = 403;
         return {
           success: false,
@@ -305,14 +248,14 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       const value = await jwt.sign(payload);
       auth_token.value = value;
       auth_token.httpOnly = true;
+      auth_token.secure = env.NODE_ENV === "production";
+      auth_token.sameSite = "lax";
+      auth_token.path = "/";
       set.status = 200;
-
-      console.log(`[DEV] Surrogate login for user: ${user.u_id}`);
 
       return {
         success: true,
         message: "Surrogate login successful (DEV ONLY)",
-        value,
         user: {
           id: (user._id as Types.ObjectId).toString(),
           u_id: user.u_id,

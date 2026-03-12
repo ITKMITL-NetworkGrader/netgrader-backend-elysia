@@ -12,6 +12,11 @@ import {
 
 type TaskTemplateDTO = CustomTaskTemplate & { rawYaml?: string };
 
+/** Escape special regex characters in user input to prevent ReDoS / injection */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * TaskTemplate Service - Business logic for task template operations
  */
@@ -56,8 +61,8 @@ export class TaskTemplateService {
       const { templateId, name, page, limit } = filters;
 
       const dbFilter: any = {};
-      if (templateId) dbFilter.templateId = { $regex: templateId, $options: 'i' };
-      if (name) dbFilter.name = { $regex: name, $options: 'i' };
+      if (templateId) dbFilter.templateId = { $regex: escapeRegex(templateId), $options: 'i' };
+      if (name) dbFilter.name = { $regex: escapeRegex(name), $options: 'i' };
 
       const [mongoTemplates, externalTemplates] = await Promise.all([
         TaskTemplate.find(dbFilter)
@@ -292,10 +297,10 @@ export class TaskTemplateService {
 
   private static matchesFilters(template: TaskTemplateDTO, templateId?: string, name?: string): boolean {
     const matchesTemplateId = templateId
-      ? new RegExp(templateId, 'i').test(template.templateId ?? '')
+      ? new RegExp(escapeRegex(templateId), 'i').test(template.templateId ?? '')
       : true;
 
-    const matchesName = name ? new RegExp(name, 'i').test(template.name ?? '') : true;
+    const matchesName = name ? new RegExp(escapeRegex(name), 'i').test(template.name ?? '') : true;
 
     return matchesTemplateId && matchesName;
   }

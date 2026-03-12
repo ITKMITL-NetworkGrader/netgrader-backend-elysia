@@ -7,6 +7,7 @@ import { User } from "../auth/model";
 import { processRichContent } from "../../utils/rich-content";
 import { LabPart } from "../parts/model";
 import { Submission } from "../submissions/model";
+import crypto from 'crypto';
 
 /**
  * Lab Service - Business logic for lab operations
@@ -408,11 +409,11 @@ export class LabService {
           // Update labId to new lab
           partClone.labId = savedLab._id;
 
-          // Generate new task IDs for all tasks
+          // DSEC-03: Generate new task IDs using cryptographically secure random bytes
           if (partClone.tasks && Array.isArray(partClone.tasks)) {
             partClone.tasks = partClone.tasks.map((task: any) => ({
               ...task,
-              taskId: `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+              taskId: `task_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`
             }));
           }
 
