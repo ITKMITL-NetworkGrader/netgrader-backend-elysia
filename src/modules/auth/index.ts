@@ -7,6 +7,7 @@ import { Types } from "mongoose";
 import { User } from "./model";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 import { GNS3v3Service } from "../gns3-student-lab/service";
+import { ssoRoutes } from "./sso";
 
 const UserSchema = t.Object({
   u_id: t.String({ minLength: 1 }),
@@ -22,6 +23,7 @@ const UserSchema = t.Object({
 });
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
+  .use(ssoRoutes)
   .use(authPlugin)
   .use(
     jwt({
