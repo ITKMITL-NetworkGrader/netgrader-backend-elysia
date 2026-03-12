@@ -150,7 +150,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       // Fetch additional user data from DB including profilePicture
       const user = await User.findOne(
         { u_id: profile.u_id },
-        { profilePicture: 1, bio: 1 }
+        { profilePicture: 1, bio: 1, themePreference: 1, colorMode: 1 }
       );
 
       // Generate presigned URL for profile picture if exists
@@ -168,6 +168,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         ...profile,
         profilePicture: profilePictureUrl,
         bio: user?.bio || '',
+        themePreference: user?.themePreference || 'default',
+        colorMode: user?.colorMode || 'dark',
       };
     },
     {

@@ -11,6 +11,8 @@ export interface IUser extends Document {
   bio?: string; // User bio (max 500 chars)
   gns3ServerIndex?: number; // Assigned GNS3 server index (0 or 1), set once on first lab start
   gns3AceId?: string; // ACE ID for student pool access, set once on first lab start
+  themePreference?: string; // Theme preset ID, default "default"
+  colorMode?: string; // "light" | "dark" | "system", default "dark"
   createdAt: Date;
   updatedAt: Date;
   lastLogin: Date;
@@ -61,6 +63,17 @@ const UserSchema = new Schema<IUser>({
   gns3AceId: {
     type: String,
     required: false
+  },
+  themePreference: {
+    type: String,
+    required: false,
+    default: 'default'
+  },
+  colorMode: {
+    type: String,
+    required: false,
+    enum: ['light', 'dark', 'system'],
+    default: 'dark'
   },
   lastLogin: {
     type: Date,
