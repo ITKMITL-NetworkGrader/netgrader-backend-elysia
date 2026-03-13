@@ -27,4 +27,11 @@ const enrollmentSchema = new Schema({
     }
 });
 
+// Indexes for efficient querying
+enrollmentSchema.index({ u_id: 1, c_id: 1 }, { unique: true }); // Primary lookup - user in course
+enrollmentSchema.index({ c_id: 1, u_role: 1 }); // Course role queries
+enrollmentSchema.index({ u_id: 1 }); // User's enrollments
+enrollmentSchema.index({ c_id: 1 }); // Course's enrollments
+enrollmentSchema.index({ enrollmentDate: -1 }); // Sort by enrollment date
+
 export const Enrollment = model<IEnrollment>("Enrollment", enrollmentSchema);

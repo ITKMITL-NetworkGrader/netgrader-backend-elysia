@@ -217,6 +217,7 @@ export class SubmissionService {
   /**
    * Check if student has completed ALL parts of a lab with 100% score
    * Handles multiple submissions per part (checks if at least ONE perfect submission exists per part)
+   * OPTIMIZED: Uses single aggregation instead of N+1 queries
    */
   private static async areAllPartsCompleted(
     studentId: string,
@@ -234,10 +235,6 @@ export class SubmissionService {
         return false; // No parts defined
       }
 
-      const partIds = partsResponse.parts.map(p => p.partId);
-
-      // For EACH part, check if there's at least ONE submission with 100%
-      const completedPartIds = new Set<string>();
       let labSessionObjectId: Types.ObjectId | undefined;
 
       if (options?.labSessionId) {
@@ -246,30 +243,35 @@ export class SubmissionService {
           : new Types.ObjectId(options.labSessionId);
       }
 
-      for (const partId of partIds) {
-        const perfectSubmission = await Submission.findOne({
-          studentId,
-          labId,
-          partId,
-          status: 'completed',
-          ...(labSessionObjectId ? { labSessionId: labSessionObjectId } : {}),
-          $expr: {
-            $and: [
-              { $gt: ['$gradingResult.total_points_possible', 0] },
-              { $eq: ['$gradingResult.total_points_earned', '$gradingResult.total_points_possible'] }
-            ]
-          }
-        });
-
-        if (perfectSubmission) {
-          completedPartIds.add(partId);
+      // OPTIMIZED: Single aggregation query instead of loop
+      const matchConditions: any = {
+        studentId,
+        labId,
+        status: 'completed',
+        $expr: {
+          $and: [
+            { $gt: ['$gradingResult.total_points_possible', 0] },
+            { $eq: ['$gradingResult.total_points_earned', '$gradingResult.total_points_possible'] }
+          ]
         }
+      };
+
+      if (labSessionObjectId) {
+        matchConditions.labSessionId = labSessionObjectId;
       }
 
-      const allCompleted = completedPartIds.size === totalParts;
+      // Single query: get unique partIds with perfect submissions
+      const result = await Submission.aggregate([
+        { $match: matchConditions },
+        { $group: { _id: '$partId' } },
+        { $count: 'completedCount' }
+      ]);
+
+      const completedCount = result[0]?.completedCount || 0;
+      const allCompleted = completedCount === totalParts;
 
       const attemptLabel = labSessionObjectId ? ` (session: ${labSessionObjectId.toString()})` : '';
-      console.log(`[Parts Check] Student ${studentId} - Lab ${labId}${attemptLabel}: ${completedPartIds.size}/${totalParts} parts completed`);
+      console.log(`[Parts Check] Student ${studentId} - Lab ${labId}${attemptLabel}: ${completedCount}/${totalParts} parts completed`);
 
       return allCompleted;
     } catch (error) {

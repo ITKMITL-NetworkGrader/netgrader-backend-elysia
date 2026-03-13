@@ -136,6 +136,7 @@ export class PartService {
         processedInstructions = {
           html: partData.instructions,
           json: { type: 'doc', content: [] }, // Empty TipTap JSON
+          markdown: '', // No markdown for plain HTML strings
           plainText: partData.instructions.replace(/<[^>]*>/g, '').trim(),
           metadata: {
             wordCount: 0,
@@ -153,6 +154,10 @@ export class PartService {
           partData.instructions.html,
           partData.instructions.json
         );
+        // Store markdown if provided (for image support)
+        if (partData.instructions.markdown) {
+          processedInstructions.markdown = partData.instructions.markdown;
+        }
       }
 
       const newPart = new LabPart({
@@ -310,11 +315,16 @@ export class PartService {
               };
             } else {
               // New format: process rich content normally
-              const richContent = filteredData[field] as { html: string; json: any };
-              updateFields[field] = processRichContent(
+              const richContent = filteredData[field] as { html: string; json: any; markdown?: string };
+              const processed = processRichContent(
                 richContent.html,
                 richContent.json
               );
+              // Store markdown if provided (for image support)
+              if (richContent.markdown) {
+                processed.markdown = richContent.markdown;
+              }
+              updateFields[field] = processed;
             }
           } else if (field === 'tasks' && Array.isArray(filteredData[field])) {
             // Ensure task descriptions have default empty strings

@@ -20,7 +20,7 @@ export class LabService {
   static async createLab(labData: any, createdBy: string) {
     try {
       // Find user by u_id and get their MongoDB _id
-      const user = await User.findOne({ u_id: createdBy });
+      const user = await User.findOne({ u_id: createdBy }).lean();
       if (!user) {
         throw new Error(`User not found with u_id: ${createdBy}`);
       }
@@ -34,6 +34,10 @@ export class LabService {
             labData.instructions.html,
             labData.instructions.json
           );
+          // Store markdown if provided (for image support)
+          if (labData.instructions.markdown) {
+            processedInstructions.markdown = labData.instructions.markdown;
+          }
         }
       }
 
@@ -169,6 +173,10 @@ export class LabService {
                   ip.html,
                   ip.json
                 );
+                // Store markdown if provided (for image support)
+                if (ip.markdown) {
+                  updateFields.instructions.markdown = ip.markdown;
+                }
               } else {
                 // Fallback: preserve provided object (or adjust as needed)
                 updateFields.instructions = instructionsPayload;
@@ -366,7 +374,7 @@ export class LabService {
   ) {
     try {
       // Find user by u_id and get their MongoDB _id
-      const user = await User.findOne({ u_id: createdBy });
+      const user = await User.findOne({ u_id: createdBy }).lean();
       if (!user) {
         throw new Error(`User not found with u_id: ${createdBy}`);
       }

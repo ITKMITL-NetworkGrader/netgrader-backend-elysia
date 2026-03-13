@@ -21,7 +21,7 @@ export class EnrollmentServiceError extends Error {
 export class EnrollmentService {
   static async getAllEnrollments(): Promise<IEnrollment[]> {
     try {
-      const enrollments = await Enrollment.find();
+      const enrollments = await Enrollment.find().lean();
       return enrollments;
     } catch (error) {
       console.error("Error fetching all enrollments:", error);
@@ -37,7 +37,7 @@ export class EnrollmentService {
     // First, check if enrollment already exists
     const existingEnrollment = await Enrollment.findOne({
       $and: [{ u_id: u_id }, { c_id: c_id }],
-    });
+    }).lean();
     if (existingEnrollment) {
       throw new Error("Enrollment already exists for this user and course.");
     }
@@ -97,7 +97,7 @@ export class EnrollmentService {
 
   static async getEnrollmentsByUserId(u_id: string): Promise<IEnrollment[]> {
     try {
-      const enrollments = await Enrollment.find({ u_id: u_id });
+      const enrollments = await Enrollment.find({ u_id: u_id }).lean();
       return enrollments;
     } catch (error) {
       console.error("Error fetching enrollments by user ID:", error);
@@ -139,7 +139,7 @@ export class EnrollmentService {
     u_id: string
   ): Promise<{ isEnrolled: boolean; role?: string; enrollmentDate?: Date }> {
     try {
-      const enrollment = await Enrollment.findOne({ c_id, u_id });
+      const enrollment = await Enrollment.findOne({ c_id, u_id }).lean();
       if (enrollment) {
         return {
           isEnrolled: true,
@@ -214,7 +214,7 @@ export class EnrollmentService {
     const managerEnrollment = await Enrollment.findOne({
       u_id: managerId,
       c_id: sanitizedCourseId
-    });
+    }).lean();
 
     if (!managerEnrollment) {
       throw new EnrollmentServiceError("You are not enrolled in this course.", 403);
@@ -233,7 +233,7 @@ export class EnrollmentService {
     const targetEnrollments = await Enrollment.find({
       c_id: sanitizedCourseId,
       u_id: { $in: uniqueTargetIds }
-    });
+    }).lean();
 
     const enrollmentMap = new Map<string, IEnrollment>(
       targetEnrollments.map(enrollment => [enrollment.u_id, enrollment])

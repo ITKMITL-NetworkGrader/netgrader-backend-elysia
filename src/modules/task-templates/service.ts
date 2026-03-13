@@ -9,6 +9,7 @@ import {
   updateTemplateFile,
   deleteTemplateFile,
 } from "./custom-template-source";
+import { CacheService } from "../../config/redis";
 
 type TaskTemplateDTO = CustomTaskTemplate & { rawYaml?: string };
 
@@ -123,22 +124,38 @@ export class TaskTemplateService {
    */
   static async getTaskTemplateById(id: string, includeRawYaml: boolean = true) {
     try {
+      // Check cache first
+      const cached = await CacheService.getTaskTemplate(id);
+      if (cached && !includeRawYaml) {
+        return cached;
+      }
+
       let template = null;
       if (Types.ObjectId.isValid(id)) {
         template = await TaskTemplate.findById(id).lean();
       }
+
+      let result: any = null;
 
       if (!template) {
         const minioTemplate = await getCustomTaskTemplateById(id);
         if (minioTemplate && includeRawYaml) {
           // Fetch raw YAML content for MinIO templates
           const rawYaml = await getRawYamlContent(id);
-          return { ...minioTemplate, rawYaml: rawYaml || undefined };
+          result = { ...minioTemplate, rawYaml: rawYaml || undefined };
+        } else {
+          result = minioTemplate;
         }
-        return minioTemplate;
+      } else {
+        result = TaskTemplateService.normalizeMongoTemplate(template);
       }
 
-      return TaskTemplateService.normalizeMongoTemplate(template);
+      // Cache the result
+      if (result) {
+        await CacheService.setTaskTemplate(id, result);
+      }
+
+      return result;
     } catch (error) {
       throw new Error(`Error fetching task template: ${(error as Error).message}`);
     }
@@ -207,6 +224,9 @@ export class TaskTemplateService {
         return null;
       }
 
+      // Invalidate cache
+      await CacheService.clearCachePattern(`task_template:${id}*`);
+
       return TaskTemplateService.normalizeMongoTemplate(updatedTemplate.toObject());
     } catch (error) {
       throw new Error(`Error updating task template: ${(error as Error).message}`);
@@ -236,6 +256,9 @@ export class TaskTemplateService {
         return null;
       }
 
+      // Invalidate cache
+      await CacheService.clearCachePattern(`task_template:${id}*`);
+
       return TaskTemplateService.normalizeMongoTemplate(deletedTemplate.toObject());
     } catch (error) {
       throw new Error(`Error deleting task template: ${(error as Error).message}`);
@@ -253,6 +276,9 @@ export class TaskTemplateService {
       }
 
       await updateTemplateFile(id, content);
+
+      // Invalidate cache
+      await CacheService.clearCachePattern(`task_template:${id}*`);
 
       // Fetch the updated template
       return await TaskTemplateService.getTaskTemplateById(id);
@@ -272,6 +298,9 @@ export class TaskTemplateService {
       }
 
       await deleteTemplateFile(id);
+
+      // Invalidate cache
+      await CacheService.clearCachePattern(`task_template:${id}*`);
 
       return template;
     } catch (error) {

@@ -27,7 +27,7 @@ declare module 'elysia' {
   }
 }
 await connectDatabase();
-// await connectRedis();
+await connectRedis();
 
 // Initialize MinIO (optional - will log error but not crash if unavailable)
 try {
