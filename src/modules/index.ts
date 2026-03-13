@@ -18,6 +18,8 @@ import { playgroundRoutes } from "./playground";
 import { profileRoutes } from "./profile";
 import { clabStudentLabRoutes } from "./clab-student-lab";
 import { clabRoutes } from "./clab";
+import { dockerRoutes } from "./docker";
+import * as docker from "./docker/client";
 
 export const routes = new Elysia()
     .group("/v0", (app) => app
@@ -40,4 +42,8 @@ export const routes = new Elysia()
         .use(profileRoutes)
         .use(clabStudentLabRoutes)
         .use(clabRoutes)
+        .use(dockerRoutes)
     )
+
+// Export docker client functions for programmatic use
+export { docker };
