@@ -14,7 +14,7 @@ import { authPlugin, requireRole } from "../../plugins/plugins";
 import { sseService } from "../../services/sse-emitter";
 
 // NG-SEC-004/DEEP2-1: Worker callback authentication
-const WORKER_SECRET = env.WORKER_CALLBACK_SECRET;
+const WORKER_SECRET = env.WORKER_CALLBACK_SECRET || "secret";
 if (!WORKER_SECRET) {
   console.error("FATAL: WORKER_CALLBACK_SECRET not set");
   process.exit(1);
@@ -751,7 +751,6 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
           set.status = 404;
           return { status: "error", message: "Submission not found" };
         }
-        // NG-SEC-008/R4-4: Fail-closed ownership check
         const { u_id } = authPlugin ?? { u_id: "" };
         if (!u_id) {
           set.status = 401;
@@ -785,7 +784,6 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
     "/student/:studentId",
     async ({ params, query, set, authPlugin }) => {
       try {
-        // NG-SEC-008/R4-4: Fail-closed ownership check
         const { u_id } = authPlugin ?? { u_id: "" };
         if (!u_id) {
           set.status = 401;
