@@ -19,27 +19,33 @@ import { profileRoutes } from "./profile";
 import { themeRoutes } from "./themes";
 import { clabStudentLabRoutes } from "./clab-student-lab";
 import { clabRoutes } from "./clab";
+import { dockerRoutes } from "./docker";
+import * as docker from "./docker/client";
 
 export const routes = new Elysia()
-        .group("/v0", (app) => app
-                .use(websocket)
-                .use(courseRoutes)
-                .use(authRoutes)
-                .use(submissionRoutes)
-                .use(enrollmentRoutes)
-                .use(aiRoutes)
-                .use(labRoutes)
-                .use(partRoutes)
-                .use(taskTemplateRoutes)
-                .use(deviceTemplateRoutes)
-                .use(sessionCleanupRoutes)
-                .use(gns3SyncRoutes)
-                .use(storageRoutes)
-                .use(gns3Routes)
-                .use(gns3StudentLabRoutes)
-                .use(playgroundRoutes)
-                .use(profileRoutes)
-                .use(themeRoutes)
-                .use(clabStudentLabRoutes)
-                .use(clabRoutes)
-        )
+    .group("/v0", (app) => app
+        .use(websocket)
+        .use(courseRoutes)
+        .use(authRoutes)
+        .use(submissionRoutes)
+        .use(enrollmentRoutes)
+        .use(aiRoutes)
+        .use(labRoutes)
+        .use(partRoutes)
+        .use(taskTemplateRoutes)
+        .use(deviceTemplateRoutes)
+        .use(sessionCleanupRoutes)
+        .use(gns3SyncRoutes)
+        .use(storageRoutes)
+        .use(gns3Routes)
+        .use(gns3StudentLabRoutes)
+        .use(playgroundRoutes)
+        .use(profileRoutes)
+        .use(themeRoutes)
+        .use(clabStudentLabRoutes)
+        .use(clabRoutes)
+        .use(dockerRoutes)
+    )
+
+// Export docker client functions for programmatic use
+export { docker };
