@@ -44,7 +44,7 @@ package-lock.json
 .env
 docker-compose.yml
 CLAUDE.md
-.claude
+.claude*
 .playwright-mcp
 skills-lock.json
 

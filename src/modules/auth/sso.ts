@@ -13,7 +13,7 @@ const auth = new AuthentikAuth({
   sessionSecret: process.env.SESSION_SECRET!,
   basePath: process.env.OIDC_BASE_PATH ?? "/sso",
   postLoginRedirect: "/v0/auth/sso/complete",
-  postLogoutRedirect: "/v0/auth/logout",
+  postLogoutRedirect: "/v0/auth/sso/signout",
   // allowHttp: process.env.NODE_ENV !== "production",
 });
 
@@ -65,5 +65,6 @@ export const ssoRoutes = new Elysia()
     // Clear the app's JWT cookie, then redirect to the plugin's logout route
     // which clears the Authentik session and redirects to Authentik's end_session_endpoint
     auth_token.remove();
-    return redirect("/v0/auth/sso/logout");
+    const frontendUrl = env.FRONTEND_ORIGIN || "/";
+    return redirect(frontendUrl);
   });
