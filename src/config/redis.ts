@@ -183,14 +183,14 @@ export class CacheService {
   static async clearCachePattern(pattern: string) {
     await this.safeRedisOperation(async () => {
       // Use SCAN instead of KEYS to avoid blocking Redis on large keyspaces
-      let cursor = 0;
+      let cursor = '0';
       do {
         const result = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
-        cursor = result.cursor;
+        cursor = String(result.cursor);
         if (result.keys.length > 0) {
           await redisClient.del(result.keys);
         }
-      } while (cursor !== 0);
+      } while (cursor !== '0');
     });
   }
 
