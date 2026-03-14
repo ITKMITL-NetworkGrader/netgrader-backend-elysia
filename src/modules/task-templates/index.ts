@@ -349,6 +349,66 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     }
   )
 
+  // Test-run template directly through FastAPI worker (no RabbitMQ)
+  .post(
+    "/test-run",
+    async ({ body, set }) => {
+      try {
+        const workerBaseUrl = (env.WORKER_API_URL || env.FASTAPI_URL || "http://localhost:8000").replace(/\/+$/, "");
+        const response = await fetch(`${workerBaseUrl}/template-tests/run`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            yaml_content: body.yamlContent,
+            job_payload: body.jobPayload,
+            validate_only: body.validateOnly ?? false,
+            task_name_override: body.taskNameOverride
+          })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          set.status = response.status;
+          return {
+            success: false,
+            message: result?.detail || "Template test run failed",
+            error: result
+          };
+        }
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Template test run completed",
+          data: result
+        };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error running template test",
+          error: (error as Error).message
+        };
+      }
+    },
+    {
+      body: t.Object({
+        yamlContent: t.String({ description: "Raw YAML template content" }),
+        jobPayload: t.Any({ description: "Direct grading job payload for testing" }),
+        validateOnly: t.Optional(t.Boolean({ description: "Validate payload only, skip execution" })),
+        taskNameOverride: t.Optional(t.String({ description: "Optional task_name override for preview testing" }))
+      }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: {
+        tags: ["Task Templates"],
+        summary: "Run Template Test Directly"
+      }
+    }
+  )
+
   // Get raw YAML content for a MinIO template
   .get(
     "/minio/:id/raw",
