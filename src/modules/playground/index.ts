@@ -8,27 +8,27 @@ import { sseService } from "../../services/sse-emitter";
 import { env } from "process";
 
 // Worker callback authentication for playground
-const WORKER_SECRET = env.WORKER_CALLBACK_SECRET;
+const WORKER_SECRET = env.WORKER_CALLBACK_SECRET || "secret";
 if (!WORKER_SECRET) {
-  console.error("FATAL: WORKER_CALLBACK_SECRET not set (playground)");
-  process.exit(1);
+    console.error("FATAL: WORKER_CALLBACK_SECRET not set (playground)");
+    process.exit(1);
 }
 
 function verifyPlaygroundWorkerSecret(request: Request, set: any): boolean {
-  const secret = request.headers.get("x-worker-secret");
-  if (!secret || secret.length !== WORKER_SECRET.length) {
-    set.status = 403;
-    return false;
-  }
-  const isValid = crypto.timingSafeEqual(
-    Buffer.from(secret),
-    Buffer.from(WORKER_SECRET)
-  );
-  if (!isValid) {
-    set.status = 403;
-    return false;
-  }
-  return true;
+    const secret = request.headers.get("x-worker-secret");
+    if (!secret || secret.length !== WORKER_SECRET.length) {
+        set.status = 403;
+        return false;
+    }
+    const isValid = crypto.timingSafeEqual(
+        Buffer.from(secret),
+        Buffer.from(WORKER_SECRET)
+    );
+    if (!isValid) {
+        set.status = 403;
+        return false;
+    }
+    return true;
 }
 
 export const playgroundRoutes = new Elysia({ prefix: "/playground" })
@@ -289,7 +289,7 @@ export const playgroundRoutes = new Elysia({ prefix: "/playground" })
         "/started",
         async ({ body, request, set }) => {
             if (!verifyPlaygroundWorkerSecret(request, set)) {
-              return { error: "Forbidden" };
+                return { error: "Forbidden" };
             }
             const jobId = body.job_id;
             console.log(`[Playground] Job Started: ${jobId}`);
@@ -322,10 +322,10 @@ export const playgroundRoutes = new Elysia({ prefix: "/playground" })
         "/progress",
         async ({ body, request, set }) => {
             if (!verifyPlaygroundWorkerSecret(request, set)) {
-              return { error: "Forbidden" };
+                return { error: "Forbidden" };
             }
             const jobId = body.job_id;
-            
+
             console.log(`[Playground] Progress for job ${jobId}: ${body.percentage || 0}% - ${body.message || ""}`);
 
             // Emit SSE progress event directly (no database)
@@ -370,10 +370,10 @@ export const playgroundRoutes = new Elysia({ prefix: "/playground" })
         "/result",
         async ({ body, request, set }) => {
             if (!verifyPlaygroundWorkerSecret(request, set)) {
-              return { error: "Forbidden" };
+                return { error: "Forbidden" };
             }
             const jobId = body.job_id;
-            
+
             console.log(`[Playground] Final Result for job ${jobId}: Status - ${body.status}, Points Earned - ${body.total_points_earned}/${body.total_points_possible}`);
 
             if (Array.isArray(body.test_results)) {
