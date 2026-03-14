@@ -8,6 +8,7 @@ COPY bun.lock .
 RUN bun install --production
 
 COPY src src
+COPY lib lib
 COPY tsconfig.json .
 # COPY public public
 
