@@ -1,6 +1,11 @@
 import { createClient, RedisClientType } from 'redis';
 import { env } from 'process';
 
+// Sanitize Redis key components to prevent cache key injection
+function sanitizeKeyComponent(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_\-\.@]/g, '');
+}
+
 // Enhanced Redis client configuration with retry logic and connection pooling
 const redisClient: RedisClientType = createClient({
   url: env.REDIS_URL || 'redis://localhost:6379',
@@ -105,7 +110,7 @@ export class CacheService {
    */
   static async getTaskTemplate(templateId: string) {
     return this.safeRedisOperation(async () => {
-      const key = `task_template:${templateId}`;
+      const key = `task_template:${sanitizeKeyComponent(templateId)}`;
       const cached = await redisClient.get(key);
       return cached ? JSON.parse(cached) : null;
     });
@@ -113,7 +118,7 @@ export class CacheService {
 
   static async setTaskTemplate(templateId: string, template: any) {
     await this.safeRedisOperation(async () => {
-      const key = `task_template:${templateId}`;
+      const key = `task_template:${sanitizeKeyComponent(templateId)}`;
       await redisClient.setEx(key, 3600, JSON.stringify(template)); // 1 hour TTL
     });
   }
@@ -123,7 +128,7 @@ export class CacheService {
    */
   static async getDeviceTemplate(templateId: string) {
     return this.safeRedisOperation(async () => {
-      const key = `device_template:${templateId}`;
+      const key = `device_template:${sanitizeKeyComponent(templateId)}`;
       const cached = await redisClient.get(key);
       return cached ? JSON.parse(cached) : null;
     });
@@ -131,7 +136,7 @@ export class CacheService {
 
   static async setDeviceTemplate(templateId: string, template: any) {
     await this.safeRedisOperation(async () => {
-      const key = `device_template:${templateId}`;
+      const key = `device_template:${sanitizeKeyComponent(templateId)}`;
       await redisClient.setEx(key, 3600, JSON.stringify(template)); // 1 hour TTL
     });
   }
@@ -141,7 +146,7 @@ export class CacheService {
    */
   static async getStudentIPs(labId: string, studentId: string) {
     return this.safeRedisOperation(async () => {
-      const key = `ips:${labId}:${studentId}`;
+      const key = `ips:${sanitizeKeyComponent(labId)}:${sanitizeKeyComponent(studentId)}`;
       const cached = await redisClient.get(key);
       return cached ? JSON.parse(cached) : null;
     });
@@ -149,7 +154,7 @@ export class CacheService {
 
   static async setStudentIPs(labId: string, studentId: string, ipAssignments: any, ttl: number = 86400) {
     await this.safeRedisOperation(async () => {
-      const key = `ips:${labId}:${studentId}`;
+      const key = `ips:${sanitizeKeyComponent(labId)}:${sanitizeKeyComponent(studentId)}`;
       await redisClient.setEx(key, ttl, JSON.stringify(ipAssignments)); // Lab duration TTL
     });
   }
@@ -159,7 +164,7 @@ export class CacheService {
    */
   static async getCoursePermissions(userId: string, courseId: string) {
     return this.safeRedisOperation(async () => {
-      const key = `perms:${userId}:${courseId}`;
+      const key = `perms:${sanitizeKeyComponent(userId)}:${sanitizeKeyComponent(courseId)}`;
       const cached = await redisClient.get(key);
       return cached ? JSON.parse(cached) : null;
     });
@@ -167,7 +172,7 @@ export class CacheService {
 
   static async setCoursePermissions(userId: string, courseId: string, permissions: any) {
     await this.safeRedisOperation(async () => {
-      const key = `perms:${userId}:${courseId}`;
+      const key = `perms:${sanitizeKeyComponent(userId)}:${sanitizeKeyComponent(courseId)}`;
       await redisClient.setEx(key, 900, JSON.stringify(permissions)); // 15 minutes TTL
     });
   }
@@ -177,10 +182,15 @@ export class CacheService {
    */
   static async clearCachePattern(pattern: string) {
     await this.safeRedisOperation(async () => {
-      const keys = await redisClient.keys(pattern);
-      if (keys.length > 0) {
-        await redisClient.del(keys);
-      }
+      // Use SCAN instead of KEYS to avoid blocking Redis on large keyspaces
+      let cursor = '0';
+      do {
+        const result = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        cursor = String(result.cursor);
+        if (result.keys.length > 0) {
+          await redisClient.del(result.keys);
+        }
+      } while (cursor !== '0');
     });
   }
 

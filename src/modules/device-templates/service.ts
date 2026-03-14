@@ -1,6 +1,11 @@
 import { DeviceTemplate, IDeviceTemplate } from "./model";
 import { CacheService } from "../../config/redis";
 
+/** Escape special regex characters in user input to prevent ReDoS / injection */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * DeviceTemplate Service - Business logic for device template operations
  */
@@ -50,7 +55,7 @@ export class DeviceTemplateService {
       const filter: any = {};
       if (platform) filter.platform = platform;
       if (deviceType) filter.deviceType = deviceType;
-      if (name) filter.name = { $regex: name, $options: 'i' };
+      if (name) filter.name = { $regex: escapeRegex(name), $options: 'i' };
 
       const [templates, total] = await Promise.all([
         DeviceTemplate.find(filter)
@@ -93,7 +98,7 @@ export class DeviceTemplateService {
       }
 
       const template = await DeviceTemplate.findById(id).lean();
-      
+
       if (!template) {
         return null;
       }
@@ -143,7 +148,7 @@ export class DeviceTemplateService {
 
       const allowedFields = ['name', 'deviceType', 'platform', 'defaultInterfaces', 'connectionParams', 'description'];
       const updateFields: any = {};
-      
+
       allowedFields.forEach(field => {
         if (filteredData[field] !== undefined) {
           updateFields[field] = filteredData[field];
@@ -179,7 +184,7 @@ export class DeviceTemplateService {
   static async deleteDeviceTemplate(id: string) {
     try {
       const deletedTemplate = await DeviceTemplate.findByIdAndDelete(id);
-      
+
       if (!deletedTemplate) {
         return null;
       }

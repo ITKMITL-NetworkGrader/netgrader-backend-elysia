@@ -5,27 +5,41 @@ import { env } from "process";
 import { JWTPayload } from "..";
 import { User } from "../modules/auth/model";
 
+// NG-SEC-010: Fail fast if JWT secret is missing or weak
+if (!env.JWT_SECRET || env.JWT_SECRET === "secret" || env.JWT_SECRET.length < 32) {
+  console.error("FATAL: JWT_SECRET is missing, weak, or set to default. Set a strong secret (32+ chars).");
+  process.exit(1);
+}
+
 export const authPlugin = new Elysia({ name: "authPlugin" })
   .use(bearer())
   .use(
     jwt({
       name: "jwt",
-      secret: env.JWT_SECRET || "secret",
+      secret: env.JWT_SECRET!,
       exp: '1d'
     })
   )
   .derive({ as: 'global' }, async ({ jwt, set, path, cookie: { auth_token } }) => {
-    console.log(path)
-    const excludedPaths = ["/", "/health", "/swagger", "/swagger/json", "/v0/auth/login", "/v0/auth/register", "/v0/auth/me", "/v0/submissions/progress", "/v0/submissions/result", "/v0/submissions/started", "/v0/auth/sso/login", "/v0/auth/sso/callback", "/v0/auth/sso/complete", "/v0/auth/sso/logout"];
+    const publicPaths = ["/", "/health", "/v0/auth/login", "/v0/auth/me", "/swagger", "/swagger/json", "/v0/auth/sso/login", "/v0/auth/sso/callback", "/v0/auth/sso/complete", "/v0/auth/sso/logout"];
 
-    // Also exclude SSE stream endpoints (they include jobId in path)
-    if (path.includes("/stream")) {
+    if (publicPaths.includes(path)) {
       return {};
     }
-    const dev_env = env.NODE_ENV !== "production";
-    if (excludedPaths.includes(path) || dev_env) {
+
+    // D-2/R2-1: Allow worker callback endpoints (exact paths only, authenticated via X-Worker-Secret)
+    const workerCallbackPaths = [
+      "/v0/submissions/started",
+      "/v0/submissions/progress",
+      "/v0/submissions/result",
+      "/v0/playground/started",
+      "/v0/playground/progress",
+      "/v0/playground/result"
+    ];
+    if (workerCallbackPaths.includes(path)) {
       return {};
     }
+
     if (!auth_token?.value) {
       console.warn("No auth token provided");
       set.status = 401;

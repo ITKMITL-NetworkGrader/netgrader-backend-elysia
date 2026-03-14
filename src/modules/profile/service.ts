@@ -52,7 +52,7 @@ export class ProfileService {
 
         const result = await User.findOneAndUpdate(
             { u_id: userId },
-            { bio: bio.trim() },
+            { bio: bio.trim().replace(/<[^>]*>?/gm, '').replace(/[<>]/g, '') },
             { new: true }
         );
 

@@ -7,6 +7,7 @@ import { User } from "../auth/model";
 import { processRichContent } from "../../utils/rich-content";
 import { LabPart } from "../parts/model";
 import { Submission } from "../submissions/model";
+import crypto from 'crypto';
 
 /**
  * Lab Service - Business logic for lab operations
@@ -19,7 +20,7 @@ export class LabService {
   static async createLab(labData: any, createdBy: string) {
     try {
       // Find user by u_id and get their MongoDB _id
-      const user = await User.findOne({ u_id: createdBy });
+      const user = await User.findOne({ u_id: createdBy }).lean();
       if (!user) {
         throw new Error(`User not found with u_id: ${createdBy}`);
       }
@@ -33,6 +34,10 @@ export class LabService {
             labData.instructions.html,
             labData.instructions.json
           );
+          // Store markdown if provided (for image support)
+          if (labData.instructions.markdown) {
+            processedInstructions.markdown = labData.instructions.markdown;
+          }
         }
       }
 
@@ -168,6 +173,10 @@ export class LabService {
                   ip.html,
                   ip.json
                 );
+                // Store markdown if provided (for image support)
+                if (ip.markdown) {
+                  updateFields.instructions.markdown = ip.markdown;
+                }
               } else {
                 // Fallback: preserve provided object (or adjust as needed)
                 updateFields.instructions = instructionsPayload;
@@ -365,7 +374,7 @@ export class LabService {
   ) {
     try {
       // Find user by u_id and get their MongoDB _id
-      const user = await User.findOne({ u_id: createdBy });
+      const user = await User.findOne({ u_id: createdBy }).lean();
       if (!user) {
         throw new Error(`User not found with u_id: ${createdBy}`);
       }
@@ -408,11 +417,11 @@ export class LabService {
           // Update labId to new lab
           partClone.labId = savedLab._id;
 
-          // Generate new task IDs for all tasks
+          // DSEC-03: Generate new task IDs using cryptographically secure random bytes
           if (partClone.tasks && Array.isArray(partClone.tasks)) {
             partClone.tasks = partClone.tasks.map((task: any) => ({
               ...task,
-              taskId: `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+              taskId: `task_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`
             }));
           }
 

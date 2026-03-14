@@ -3,6 +3,7 @@ import { storageService, MAX_FILE_SIZE } from '../../services/storage.js';
 import { User } from '../auth/model.js';
 import { Course } from '../courses/model.js';
 import { authPlugin } from '../../plugins/plugins.js';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Storage Routes
@@ -81,7 +82,7 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
         set.status = 500;
         return {
           error: 'Failed to upload profile picture',
-          details: error instanceof Error ? error.message : 'Unknown error',
+
         };
       }
     },
@@ -213,7 +214,7 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
         set.status = 500;
         return {
           error: 'Failed to upload course banner',
-          details: error instanceof Error ? error.message : 'Unknown error',
+
         };
       }
     },
@@ -276,7 +277,7 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
         set.status = 500;
         return {
           error: 'Failed to delete course banner',
-          details: error instanceof Error ? error.message : 'Unknown error',
+
         };
       }
     },
@@ -292,37 +293,213 @@ export const storageRoutes = new Elysia({ prefix: '/storage' })
     }
   )
 
+  // DEEP2-4: Open presigned URL endpoint removed for security
+
   /**
-   * Get file URL (for testing purposes)
-   * GET /storage/url/:path
+   * Serve images through authenticated proxy (no expiry issues)
+   * GET /storage/serve/:path
    */
   .get(
-    '/url/:path',
-    async ({ params, set }) => {
+    '/serve/*',
+    async ({ params, authPlugin, set, path }) => {
       try {
-        const { path } = params;
-        const url = await storageService.getPresignedUrl(path);
+        // Validate authentication
+        if (!authPlugin) {
+          set.status = 401
+          return { error: 'Unauthorized' }
+        }
+
+        // Get the object path from wildcard
+        const objectPath = params['*']
+        if (!objectPath) {
+          set.status = 400
+          return { error: 'No path specified' }
+        }
+
+        // Security: Only allow specific prefixes
+        const allowedPrefixes = ['editor/', 'profiles/', 'courses/']
+        const isAllowed = allowedPrefixes.some(prefix => objectPath.startsWith(prefix))
+        if (!isAllowed) {
+          set.status = 403
+          return { error: 'Access denied' }
+        }
+
+        // Get object from MinIO
+        try {
+          const objectData = await storageService.getObject(objectPath)
+
+          // Set appropriate content type
+          const ext = objectPath.split('.').pop()?.toLowerCase()
+          const contentTypes: Record<string, string> = {
+            jpg: 'image/jpeg',
+            jpeg: 'image/jpeg',
+            png: 'image/png',
+            gif: 'image/gif',
+            webp: 'image/webp',
+          }
+          const contentType = contentTypes[ext || ''] || 'application/octet-stream'
+
+          set.headers['Content-Type'] = contentType
+          set.headers['Content-Disposition'] = 'inline'
+
+          return objectData
+        } catch (err) {
+          console.error('Error fetching object:', err)
+          set.status = 404
+          return { error: 'Image not found' }
+        }
+      } catch (error) {
+        console.error('Error in serve endpoint:', error)
+        set.status = 500
+        return { error: 'Failed to serve image' }
+      }
+    },
+    {
+      detail: {
+        summary: 'Serve image through authenticated proxy',
+        description: 'Stream images through authenticated endpoint (no expiry)',
+        tags: ['Storage'],
+      },
+    }
+  )
+
+  /**
+   * Upload editor image (for rich text editor)
+   * POST /storage/editor-image
+   */
+  .post(
+    '/editor-image',
+    async ({ body, authPlugin, set }) => {
+      try {
+        // Allow unauthenticated uploads for editor images (limited scope)
+        const { file } = body;
+
+        // Validate file
+        if (!file || !(file instanceof File)) {
+          set.status = 400;
+          return { error: 'No file provided' };
+        }
+
+        // Check file size (2MB limit for editor images)
+        const maxSize = 2 * 1024 * 1024;
+        if (file.size > maxSize) {
+          set.status = 400;
+          return {
+            error: `File size exceeds maximum allowed size of ${maxSize / (1024 * 1024)} MB`,
+          };
+        }
+
+        // Validate content type
+        if (!file.type.startsWith('image/')) {
+          set.status = 400;
+          return { error: 'Only image files are allowed' };
+        }
+
+        // Convert file to buffer
+        const arrayBuffer = await file.arrayBuffer();
+        const fileBuffer = Buffer.from(arrayBuffer);
+
+        // Generate unique filename
+        const extension = file.name.split('.').pop() || 'jpg';
+        const fileName = `editor-${uuidv4()}.${extension}`;
+        const objectPath = `editor/${fileName}`;
+
+        // Upload to MinIO
+        const result = await storageService.uploadFile(
+          objectPath,
+          fileBuffer,
+          { contentType: file.type }
+        );
+
+        // Return presigned URL with 7-day expiry for persistent student access
+        const presignedUrl = await storageService.getPresignedUrl(result.objectPath, 604800); // 7 days
 
         return {
-          url,
+          success: true,
+          data: {
+            url: presignedUrl, // For immediate display in editor
+            path: result.objectPath, // For storage in markdown (persistent)
+            filename: fileName,
+            originalName: file.name,
+            size: file.size,
+            type: file.type
+          }
         };
       } catch (error) {
-        console.error('Error getting file URL:', error);
+        console.error('Error uploading editor image:', error);
         set.status = 500;
         return {
-          error: 'Failed to get file URL',
-          details: error instanceof Error ? error.message : 'Unknown error',
+          error: 'Failed to upload editor image',
         };
       }
     },
     {
-      params: t.Object({
-        path: t.String(),
+      body: t.Object({
+        file: t.File({
+          type: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'],
+          maxSize: 2 * 1024 * 1024, // 2MB
+        }),
       }),
       detail: {
-        summary: 'Get presigned URL for a file',
-        description: 'Get a presigned URL for accessing a file in MinIO',
+        summary: 'Upload editor image',
+        description: 'Upload an image for use in the rich text editor',
         tags: ['Storage'],
       },
     }
-  );
+  )
+
+  /**
+   * Get presigned URLs for images (editor, profiles, course banners)
+   * POST /storage/images/urls
+   */
+  .post(
+    '/images/urls',
+    async ({ body, set }) => {
+      try {
+        const { paths } = body as { paths: string[] };
+
+        if (!paths || !Array.isArray(paths) || paths.length === 0) {
+          set.status = 400;
+          return { error: 'No paths provided' };
+        }
+
+        // Limit to 50 paths per request
+        const limitedPaths = paths.slice(0, 50);
+
+        const urls: Record<string, string> = {};
+        for (const objectPath of limitedPaths) {
+          // Validate path is from allowed prefixes
+          const allowedPrefixes = ['editor/', 'profiles/', 'courses/'];
+          const isAllowed = allowedPrefixes.some(prefix => objectPath.startsWith(prefix));
+
+          if (!isAllowed) {
+            continue;
+          }
+
+          try {
+            const presignedUrl = await storageService.getPresignedUrl(objectPath, 604800); // 7 days
+            urls[objectPath] = presignedUrl;
+          } catch (err) {
+            console.error(`Failed to generate URL for ${objectPath}:`, err);
+            urls[objectPath] = '';
+          }
+        }
+
+        return { success: true, data: urls };
+      } catch (error) {
+        console.error('Error getting image URLs:', error);
+        set.status = 500;
+        return { error: 'Failed to get image URLs' };
+      }
+    },
+    {
+      body: t.Object({
+        paths: t.Array(t.String()),
+      }),
+      detail: {
+        summary: 'Get presigned URLs for images',
+        description: 'Get fresh presigned URLs for stored images (profiles, banners, editor images)',
+        tags: ['Storage'],
+      },
+    }
+  )

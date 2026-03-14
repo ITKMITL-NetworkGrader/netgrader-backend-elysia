@@ -201,7 +201,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
       try {
         const { courseId, createdBy, type, page = "1", limit = "10" } = query;
         const pageNum = parseInt(page as string);
-        const limitNum = parseInt(limit as string);
+        // DSEC-04: Cap limit to prevent excessive data retrieval
+        const limitNum = Math.min(parseInt(limit as string) || 10, 100);
 
         const result = await LabService.getLabs({
           courseId,
@@ -218,11 +219,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           data: result
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error fetching labs:", (error as Error).message);
         set.status = 500;
         return {
           success: false,
-          message: "Error fetching labs",
-          error: (error as Error).message
+          message: "Error fetching labs"
         };
       }
     },
@@ -366,11 +368,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           data: savedLab
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error creating lab:", (error as Error).message);
         set.status = 400;
         return {
           success: false,
-          message: "Error creating lab",
-          error: (error as Error).message
+          message: "Error creating lab"
         };
       }
     },
@@ -452,11 +455,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           }
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error fetching lab:", (error as Error).message);
         set.status = 500;
         return {
           success: false,
-          message: "Error fetching lab",
-          error: (error as Error).message
+          message: "Error fetching lab"
         };
       }
     },
@@ -548,6 +552,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
     },
     {
       params: t.Object({ id: t.String() }),
+      // DSEC-08: Require authentication for SSE endpoint
+      beforeHandle: requireRole(["STUDENT", "INSTRUCTOR", "ADMIN"]),
       detail: {
         tags: ["Labs"],
         summary: "Subscribe to lab timer updates",
@@ -624,11 +630,11 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
         };
       } catch (error) {
         console.error('[Lab Start Error]', error);
+        // DSEC-05: Do not expose error.message to client
         set.status = 500;
         return {
           success: false,
-          message: "Error starting lab",
-          error: (error as Error).message
+          message: "Error starting lab"
         };
       }
     },
@@ -716,11 +722,11 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
         };
       } catch (error) {
         console.error('[Lab Restart Error]', error);
+        // DSEC-05: Do not expose error.message to client
         set.status = 500;
         return {
           success: false,
-          message: "Error restarting lab",
-          error: (error as Error).message
+          message: "Error restarting lab"
         };
       }
     },
@@ -796,11 +802,11 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
         };
       } catch (error) {
         console.error('[Instructions Acknowledge Error]', error);
+        // DSEC-05: Do not expose error.message to client
         set.status = 500;
         return {
           success: false,
-          message: "Failed to acknowledge instructions",
-          error: (error as Error).message
+          message: "Failed to acknowledge instructions"
         };
       }
     },
@@ -1001,11 +1007,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           data: updatedLab
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error updating lab:", (error as Error).message);
         set.status = 400;
         return {
           success: false,
-          message: "Error updating lab",
-          error: (error as Error).message
+          message: "Error updating lab"
         };
       }
     },
@@ -1046,11 +1053,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           data: deletedLab
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error deleting lab:", (error as Error).message);
         set.status = 500;
         return {
           success: false,
-          message: "Error deleting lab",
-          error: (error as Error).message
+          message: "Error deleting lab"
         };
       }
     },
@@ -1096,11 +1104,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           data: result
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error duplicating lab:", (error as Error).message);
         set.status = 400;
         return {
           success: false,
-          message: "Error duplicating lab",
-          error: (error as Error).message
+          message: "Error duplicating lab"
         };
       }
     },
@@ -1127,7 +1136,8 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
       try {
         const { page = "1", limit = "10" } = query;
         const pageNum = parseInt(page as string);
-        const limitNum = parseInt(limit as string);
+        // DSEC-04: Cap limit to prevent excessive data retrieval
+        const limitNum = Math.min(parseInt(limit as string) || 10, 100);
 
         const result = await LabService.getLabsByCourse(params.courseId, pageNum, limitNum);
 
@@ -1138,11 +1148,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           data: result
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error fetching labs for course:", (error as Error).message);
         set.status = 500;
         return {
           success: false,
-          message: "Error fetching labs for course",
-          error: (error as Error).message
+          message: "Error fetching labs for course"
         };
       }
     },
@@ -1184,11 +1195,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           ipCapacity: capacity
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error fetching lab details:", (error as Error).message);
         set.status = 500;
         return {
           success: false,
-          message: "Error fetching lab details",
-          error: (error as Error).message
+          message: "Error fetching lab details"
         };
       }
     },
@@ -1218,11 +1230,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           data: stats
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error fetching lab statistics:", (error as Error).message);
         set.status = 500;
         return {
           success: false,
-          message: "Error fetching lab statistics",
-          error: (error as Error).message
+          message: "Error fetching lab statistics"
         };
       }
     },
@@ -1260,11 +1273,12 @@ export const labRoutes = new Elysia({ prefix: "/labs" })
           assignedIps
         };
       } catch (error) {
+        // DSEC-05: Do not expose error.message to client
+        console.error("Error fetching lab IP assignment statistics:", (error as Error).message);
         set.status = 500;
         return {
           success: false,
-          message: "Error fetching lab IP assignment statistics",
-          error: (error as Error).message
+          message: "Error fetching lab IP assignment statistics"
         };
       }
     },

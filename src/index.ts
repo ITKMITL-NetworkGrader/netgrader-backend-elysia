@@ -27,7 +27,7 @@ declare module 'elysia' {
   }
 }
 await connectDatabase();
-// await connectRedis();
+await connectRedis();
 
 // Initialize MinIO (optional - will log error but not crash if unavailable)
 try {
@@ -105,19 +105,19 @@ console.log(`   - Housekeeping: Every ${HOUSEKEEPING_INTERVAL / 3600000} hours`)
 // Graceful Shutdown
 // ============================================================================
 
-// Graceful shutdown handling
-// process.on('SIGINT', async () => {
-//   console.log('\n🛑 Received SIGINT, shutting down gracefully...');
-//   clearInterval(cleanupInterval);
-//   clearInterval(housekeepingInterval);
-//   await gracefulShutdown();
-//   process.exit(0);
-// });
+// NG-SEC-017: Restored graceful shutdown handlers
+process.on('SIGINT', async () => {
+  console.log('\n Received SIGINT, shutting down gracefully...');
+  clearInterval(cleanupInterval);
+  clearInterval(housekeepingInterval);
+  await gracefulShutdown();
+  process.exit(0);
+});
 
-// process.on('SIGTERM', async () => {
-//   console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
-//   clearInterval(cleanupInterval);
-//   clearInterval(housekeepingInterval);
-//   await gracefulShutdown();
-//   process.exit(0);
-// });
+process.on('SIGTERM', async () => {
+  console.log('\n Received SIGTERM, shutting down gracefully...');
+  clearInterval(cleanupInterval);
+  clearInterval(housekeepingInterval);
+  await gracefulShutdown();
+  process.exit(0);
+});

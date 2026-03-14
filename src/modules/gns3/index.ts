@@ -1,6 +1,8 @@
 import { Elysia, t } from "elysia";
 import { GNS3Service } from "./service";
-import { authPlugin } from "../../plugins/plugins";
+import { authPlugin, requireRole } from "../../plugins/plugins";
+
+// R4-2/R4-4: Removed weak isAllowedServerIp — validateGNS3Target in service.ts is the single SSRF gate
 
 export const gns3Routes = new Elysia({ prefix: "/playground/gns3" })
     .use(authPlugin)
@@ -37,6 +39,7 @@ export const gns3Routes = new Elysia({ prefix: "/playground/gns3" })
             };
         },
         {
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
             body: t.Object({
                 serverIp: t.String({ minLength: 1 }),
                 serverPort: t.Number({ minimum: 1, maximum: 65535 }),
@@ -88,6 +91,7 @@ export const gns3Routes = new Elysia({ prefix: "/playground/gns3" })
             };
         },
         {
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
             body: t.Object({
                 serverIp: t.String({ minLength: 1 }),
                 serverPort: t.Number({ minimum: 1, maximum: 65535 }),
@@ -135,6 +139,7 @@ export const gns3Routes = new Elysia({ prefix: "/playground/gns3" })
             };
         },
         {
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
             body: t.Object({
                 serverIp: t.String({ minLength: 1 }),
                 serverPort: t.Number({ minimum: 1, maximum: 65535 }),
@@ -182,6 +187,7 @@ export const gns3Routes = new Elysia({ prefix: "/playground/gns3" })
             };
         },
         {
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
             body: t.Object({
                 serverIp: t.String({ minLength: 1 }),
                 serverPort: t.Number({ minimum: 1, maximum: 65535 }),
@@ -228,6 +234,7 @@ export const gns3Routes = new Elysia({ prefix: "/playground/gns3" })
             };
         },
         {
+            beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
             body: t.Object({
                 serverIp: t.String({ minLength: 1 }),
                 serverPort: t.Number({ minimum: 1, maximum: 65535 }),

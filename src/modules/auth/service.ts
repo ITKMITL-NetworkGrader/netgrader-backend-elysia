@@ -4,6 +4,16 @@ import { env } from "process";
 import { getDateWithTimezone } from "../../utils/helpers.js";
 import { get } from "mongoose";
 import { GNS3v3Service } from "../gns3-student-lab/service";
+import bcrypt from "bcrypt";
+
+const BCRYPT_ROUNDS = 12;
+
+// DEEP-2: Sanitize LDAP metacharacters per RFC 4515
+function sanitizeLdapInput(input: string): string {
+  return input.replace(/[\\*()\x00]/g, (c) =>
+    '\\' + c.charCodeAt(0).toString(16).padStart(2, '0')
+  );
+}
 
 
 export interface LDAPConfig {
@@ -29,6 +39,12 @@ export interface AuthResult {
 
 export class AuthService {
   private static getLDAPConfig(username: string, password: string): LDAPConfig {
+    // DEEP-11: Fail fast if LDAP defaults in production
+    if (env.NODE_ENV === "production") {
+      if (!env.LDAP_ADMIN_PASSWORD || env.LDAP_ADMIN_PASSWORD === "admin") {
+        throw new Error("FATAL: Default LDAP admin credentials in production");
+      }
+    }
     return {
       ldapOpts: {
         url: env.LDAP_URL || "ldap://localhost:389",
@@ -38,21 +54,31 @@ export class AuthService {
       userPassword: password,
       userSearchBase: env.LDAP_USER_SEARCH_BASE || "ou=users,dc=example,dc=com",
       usernameAttribute: env.LDAP_USERNAME_ATTRIBUTE || "uid",
-      username: username,
+      username: sanitizeLdapInput(username),
       attributes: ["dn", "sn", "cn"],
     };
   }
 
-  private static hashPassword(password: string): string {
-    const crypto = require("crypto");
-    return crypto.createHash("sha256").update(password).digest("hex");
+  private static async hashPassword(password: string): Promise<string> {
+    return bcrypt.hash(password, BCRYPT_ROUNDS);
+  }
+
+  private static async verifyPassword(password: string, hash: string): Promise<boolean> {
+    // Migration: if hash is 64 chars hex, it's legacy SHA-256
+    if (/^[a-f0-9]{64}$/i.test(hash)) {
+      const crypto = require("crypto");
+      const sha256 = crypto.createHash("sha256").update(password).digest("hex");
+      // D-8: Timing-safe comparison for legacy hash
+      return crypto.timingSafeEqual(Buffer.from(sha256), Buffer.from(hash));
+    }
+    return bcrypt.compare(password, hash);
   }
 
   static async createUser(userData: IUser): Promise<IUser | null> {
     try {
       // console.log("Creating user with data:", userData);
       const newUser = new User(userData);
-      newUser.password = this.hashPassword(newUser.password || ""); // Hash password if provided
+      newUser.password = await this.hashPassword(newUser.password || ""); // Hash password if provided
       newUser.lastLogin = getDateWithTimezone(7); // Set last login to current time with timezone offset
       await newUser.save();
       return newUser;
@@ -72,10 +98,7 @@ export class AuthService {
           ? username.substring(2) // Cut "it" prefix
           : username; // Use username as is if not starting with "it"
 
-      const passwordHash = this.hashPassword(password);
       let ldapDown = false;
-
-      console.log("Password Hash:", passwordHash);
 
       // Step 1: Try LDAP authentication first (prioritized)
       const ldapConfig = this.getLDAPConfig(username, password);
@@ -111,8 +134,8 @@ export class AuthService {
         let user = await User.findOne({ u_id: u_id.toLowerCase() });
 
         if (user) {
-          // User exists, update their password hash and last login
-          user.password = passwordHash;
+          // User exists, update their password hash (bcrypt) and last login
+          user.password = await this.hashPassword(password);
           user.lastLogin = getDateWithTimezone(7);
           user.ldapAuthenticated = true;
           await user.save();
@@ -158,8 +181,12 @@ export class AuthService {
         let user = await User.findOne({ u_id: u_id.toLowerCase() });
 
         if (user) {
-          // Check password against stored hash
-          if (user.password === passwordHash) {
+          // Check password against stored hash (supports bcrypt + legacy SHA-256 migration)
+          if (await this.verifyPassword(password, user.password || "")) {
+            // Migrate legacy hash to bcrypt on successful login
+            if (/^[a-f0-9]{64}$/i.test(user.password || "")) {
+              user.password = await this.hashPassword(password);
+            }
             user.lastLogin = getDateWithTimezone(7);
             await user.save();
             user.password = undefined;

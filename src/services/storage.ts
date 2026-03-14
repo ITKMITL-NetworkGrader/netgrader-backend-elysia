@@ -179,6 +179,14 @@ export class StorageService {
   }
 
   /**
+   * Get object as buffer (for authenticated proxy)
+   * @param objectName - Full path in the bucket
+   */
+  async getObject(objectName: string): Promise<Buffer> {
+    return this.downloadFile(objectName)
+  }
+
+  /**
    * Download a file from MinIO
    * @param objectName - Full path in the bucket
    */
@@ -202,9 +210,9 @@ export class StorageService {
   /**
    * Get a presigned URL for file access
    * @param objectName - Full path in the bucket
-   * @param expirySeconds - URL expiry time in seconds (default: 7 days)
+   * @param expirySeconds - URL expiry time in seconds (default: 1 hour)
    */
-  async getPresignedUrl(objectName: string, expirySeconds: number = 7 * 24 * 60 * 60): Promise<string> {
+  async getPresignedUrl(objectName: string, expirySeconds: number = 3600): Promise<string> {
     try {
       return await this.client.presignedGetObject(BUCKET_NAME, objectName, expirySeconds);
     } catch (error) {

@@ -1,22 +1,20 @@
 import { Elysia, t } from "elysia";
-import jwt from "@elysiajs/jwt";
-import { env } from "process";
 import { AIService } from "./service";
-
+import { authPlugin } from "../../plugins/plugins";
 
 const promptSchema= t.Object({
     prompt: t.String({ minLength: 1 }),
 })
 
 export const aiRoutes = new Elysia({ prefix: "/ai" })
-.use(
-    jwt({
-        name: "jwt",
-        secret: env.JWT_SECRET || "secret",
-    }))
+.use(authPlugin)
 .post(
     "/generate",
-    async ({ body, set }) => {
+    async ({ body, set, authPlugin: auth }) => {
+        if (!auth?.u_id) {
+            set.status = 401;
+            return { success: false, message: "Unauthorized" };
+        }
         const { prompt } = body;
 
         if (!prompt) {

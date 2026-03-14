@@ -309,5 +309,7 @@ submissionSchema.index({ studentId: 1, status: 1 });
 submissionSchema.index({ labId: 1, status: 1 });
 submissionSchema.index({ submittedAt: -1 });
 submissionSchema.index({ 'gradingResult.status': 1 });
+submissionSchema.index({ labSessionId: 1 }); // Session-based lookups
+submissionSchema.index({ attempt: 1 }); // Sort by attempt number
 
 export const Submission = model<ISubmission>('Submission', submissionSchema);

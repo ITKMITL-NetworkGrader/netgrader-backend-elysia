@@ -3,6 +3,9 @@ import { StudentLabSession } from '../modules/student-lab-sessions/model';
 import { StudentLabSessionService } from '../modules/student-lab-sessions/service';
 import { Lab, ILab } from '../modules/labs/model';
 
+// DSEC-06: Conditional debug logging
+const DEBUG = process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true';
+
 /**
  * Cleanup service for expired lab sessions
  * Releases IPs when labs timeout (reach availableUntil or dueDate)
@@ -60,9 +63,12 @@ export class LabSessionCleanupService {
           reason
         });
 
-        console.log(
-          `[Timeout Cleanup] Released IP ${session.managementIp} for student ${session.studentId} - Lab "${lab.title}" - ${reason}`
-        );
+        // DSEC-06: Only log sensitive session details in debug mode
+        if (DEBUG) {
+          console.log(
+            `[Timeout Cleanup] Released IP ${session.managementIp} for student ${session.studentId} - Lab "${lab.title}" - ${reason}`
+          );
+        }
       }
     }
 
@@ -81,18 +87,24 @@ export class LabSessionCleanupService {
     deleted: number;
     message: string;
   }> {
+    // DSEC-21: Enforce minimum 7 days retention to prevent accidental data loss
+    const safeRetentionDays = Math.max(7, retentionDays);
+
     const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+    cutoffDate.setDate(cutoffDate.getDate() - safeRetentionDays);
 
     const result = await StudentLabSession.deleteMany({
       status: 'completed',
       completedAt: { $lt: cutoffDate }
     });
 
-    const message = `Deleted ${result.deletedCount} old completed sessions (older than ${retentionDays} days)`;
+    const message = `Deleted ${result.deletedCount} old completed sessions (older than ${safeRetentionDays} days)`;
 
     if (result.deletedCount > 0) {
-      console.log(`[Housekeeping] ${message}`);
+      // DSEC-06: Only log deletion details in debug mode
+      if (DEBUG) {
+        console.log(`[Housekeeping] ${message}`);
+      }
     }
 
     return {

@@ -162,6 +162,8 @@ const studentLabSessionSchema = new Schema<IStudentLabSession>({
 studentLabSessionSchema.index({ labId: 1, status: 1 }); // Find all active sessions for a lab
 studentLabSessionSchema.index({ courseId: 1 }); // Course-level queries
 studentLabSessionSchema.index({ studentId: 1, labId: 1, attemptNumber: 1 });
+studentLabSessionSchema.index({ status: 1 }); // Status-only queries
+studentLabSessionSchema.index({ studentId: 1, status: 1, startedAt: -1 }); // Student sessions sorted by time
 
 // Compound unique index: One active session per student per lab
 // This also covers queries for { studentId: 1, labId: 1, status: 1 }

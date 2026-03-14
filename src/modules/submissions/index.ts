@@ -9,8 +9,34 @@ import { GNS3v3Service, type GNS3Node } from "../gns3-student-lab/service";
 import { ExportService } from "./export";
 import { User } from "../auth/model";
 import { env } from "process";
+import crypto from "crypto";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 import { sseService } from "../../services/sse-emitter";
+
+// NG-SEC-004/DEEP2-1: Worker callback authentication
+const WORKER_SECRET = env.WORKER_CALLBACK_SECRET || "secret";
+if (!WORKER_SECRET) {
+  console.error("FATAL: WORKER_CALLBACK_SECRET not set");
+  process.exit(1);
+}
+
+function verifyWorkerSecret(request: Request, set: any): boolean {
+  const secret = request.headers.get("x-worker-secret");
+  if (!secret || secret.length !== WORKER_SECRET.length) {
+    set.status = 403;
+    return false;
+  }
+  // D-8: Timing-safe comparison to prevent side-channel attacks
+  const isValid = crypto.timingSafeEqual(
+    Buffer.from(secret),
+    Buffer.from(WORKER_SECRET)
+  );
+  if (!isValid) {
+    set.status = 403;
+    return false;
+  }
+  return true;
+}
 
 export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   .use(authPlugin)
@@ -478,7 +504,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         set.status = 500;
         return {
           status: "error",
-          message: `Failed to generate submission: ${(error as Error).message}`
+          message: "Failed to generate submission"
         };
       }
     },
@@ -518,7 +544,10 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   )
   .post(
     "/started",
-    async ({ body, set }) => {
+    async ({ body, set, request }) => {
+      if (!verifyWorkerSecret(request, set)) {
+        return { status: "error", message: "Unauthorized" };
+      }
       try {
         const jobId = body.job_id;
         if (!jobId) {
@@ -559,7 +588,10 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   )
   .post(
     "/progress",
-    async ({ body, set }) => {
+    async ({ body, set, request }) => {
+      if (!verifyWorkerSecret(request, set)) {
+        return { status: "error", message: "Unauthorized" };
+      }
       try {
         const jobId = body.job_id;
         if (!jobId) {
@@ -622,7 +654,10 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   )
   .post(
     "/result",
-    async ({ body, set }) => {
+    async ({ body, set, request }) => {
+      if (!verifyWorkerSecret(request, set)) {
+        return { status: "error", message: "Unauthorized" };
+      }
       try {
         const jobId = body.job_id;
         if (!jobId) {
@@ -709,12 +744,23 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   )
   .get(
     "/:jobId",
-    async ({ params, set }) => {
+    async ({ params, set, authPlugin }) => {
       try {
         const submission = await SubmissionService.getSubmissionByJobId(params.jobId);
         if (!submission) {
           set.status = 404;
           return { status: "error", message: "Submission not found" };
+        }
+        const { u_id } = authPlugin ?? { u_id: "" };
+        if (!u_id) {
+          set.status = 401;
+          return { status: "error", message: "Unauthorized" };
+        }
+        const user = await User.findOne({ u_id }, "role");
+        const isPrivileged = user && ["ADMIN", "INSTRUCTOR"].includes(user.role);
+        if (!isPrivileged && submission.studentId !== u_id) {
+          set.status = 403;
+          return { status: "error", message: "Forbidden" };
         }
         return { status: "success", data: submission };
       } catch (error) {
@@ -736,8 +782,19 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   )
   .get(
     "/student/:studentId",
-    async ({ params, query, set }) => {
+    async ({ params, query, set, authPlugin }) => {
       try {
+        const { u_id } = authPlugin ?? { u_id: "" };
+        if (!u_id) {
+          set.status = 401;
+          return { status: "error", message: "Unauthorized" };
+        }
+        const user = await User.findOne({ u_id }, "role");
+        const isPrivileged = user && ["ADMIN", "INSTRUCTOR"].includes(user.role);
+        if (!isPrivileged && params.studentId !== u_id) {
+          set.status = 403;
+          return { status: "error", message: "Forbidden" };
+        }
         const submissions = await SubmissionService.getSubmissionsByStudent(
           params.studentId,
           {
@@ -799,6 +856,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         limit: t.Optional(t.String()),
         offset: t.Optional(t.String())
       }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
       detail: {
         tags: ["Submissions"],
         summary: "Get Lab Submission Overview",
@@ -830,7 +888,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
       } catch (error) {
         console.error("Error exporting lab scores:", error);
         set.status = 500;
-        return { status: "error", message: `Failed to export lab scores: ${(error as Error).message}` };
+        return { status: "error", message: "Failed to export lab scores" };
       }
     },
     {
@@ -840,6 +898,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
       query: t.Object({
         asOfDate: t.Optional(t.String())
       }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
       detail: {
         tags: ["Submissions"],
         summary: "Export Lab Scores (Time Machine)",
@@ -863,6 +922,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
       params: t.Object({
         labId: t.String()
       }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
       detail: {
         tags: ["Submissions"],
         summary: "Get Part Submission Summary",
@@ -872,8 +932,20 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   )
   .get(
     "/history/lab/:labId/student/:studentId",
-    async ({ params, query, set }) => {
+    async ({ params, query, set, authPlugin }) => {
       try {
+        // NG-SEC-008/R4-4: Fail-closed ownership check
+        const { u_id } = authPlugin ?? { u_id: "" };
+        if (!u_id) {
+          set.status = 401;
+          return { status: "error", message: "Unauthorized" };
+        }
+        const user = await User.findOne({ u_id }, "role");
+        const isPrivileged = user && ["ADMIN", "INSTRUCTOR"].includes(user.role);
+        if (!isPrivileged && params.studentId !== u_id) {
+          set.status = 403;
+          return { status: "error", message: "Forbidden" };
+        }
         const history = await SubmissionService.getStudentSubmissionHistory(
           params.labId,
           params.studentId,
@@ -907,12 +979,24 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
   )
   .get(
     "/detailed/:submissionId",
-    async ({ params, set }) => {
+    async ({ params, set, authPlugin }) => {
       try {
         const submission = await SubmissionService.getSubmissionById(params.submissionId);
         if (!submission) {
           set.status = 404;
           return { status: "error", message: "Submission not found" };
+        }
+        // NG-SEC-008/R4-4: Fail-closed ownership check
+        const { u_id } = authPlugin ?? { u_id: "" };
+        if (!u_id) {
+          set.status = 401;
+          return { status: "error", message: "Unauthorized" };
+        }
+        const user = await User.findOne({ u_id }, "role");
+        const isPrivileged = user && ["ADMIN", "INSTRUCTOR"].includes(user.role);
+        if (!isPrivileged && submission.studentId !== u_id) {
+          set.status = 403;
+          return { status: "error", message: "Forbidden" };
         }
         return { status: "success", data: submission };
       } catch (error) {
@@ -1044,7 +1128,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         set.status = 500;
         return {
           status: "error",
-          message: `Failed to store IP answers: ${(error as Error).message}`
+          message: "Failed to store IP answers"
         };
       }
     },
@@ -1103,7 +1187,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         set.status = 500;
         return {
           status: "error",
-          message: `Failed to retrieve IP answers: ${(error as Error).message}`
+          message: "Failed to retrieve IP answers"
         };
       }
     },
@@ -1206,7 +1290,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         set.status = 500;
         return {
           status: "error",
-          message: `Failed to force pass: ${(error as Error).message}`
+          message: "Failed to force pass"
         };
       }
     },

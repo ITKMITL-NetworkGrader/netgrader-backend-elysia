@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia';
 import { ProfileService } from './service.js';
 import { authPlugin } from '../../plugins/plugins.js';
+import { User } from '../auth/model.js';
 
 /**
  * Profile Routes
@@ -39,7 +40,6 @@ export const profileRoutes = new Elysia({ prefix: '/profile' })
                 set.status = 500;
                 return {
                     error: 'Failed to get profile',
-                    details: error instanceof Error ? error.message : 'Unknown error',
                 };
             }
         },
@@ -82,7 +82,6 @@ export const profileRoutes = new Elysia({ prefix: '/profile' })
                 set.status = 500;
                 return {
                     error: 'Failed to get profile',
-                    details: error instanceof Error ? error.message : 'Unknown error',
                 };
             }
         },
@@ -131,7 +130,6 @@ export const profileRoutes = new Elysia({ prefix: '/profile' })
                 set.status = 500;
                 return {
                     error: 'Failed to update bio',
-                    details: error instanceof Error ? error.message : 'Unknown error',
                 };
             }
         },
@@ -142,6 +140,64 @@ export const profileRoutes = new Elysia({ prefix: '/profile' })
             detail: {
                 summary: 'Update bio',
                 description: 'Update the authenticated user\'s bio (max 500 characters)',
+                tags: ['Profile'],
+            },
+        }
+    )
+
+    /**
+     * Update theme preferences
+     * PUT /profile/preferences
+     */
+    .put(
+        '/preferences',
+        async ({ body, authPlugin, set }) => {
+            try {
+                if (!authPlugin) {
+                    set.status = 401;
+                    return { error: 'Unauthorized' };
+                }
+
+                const { u_id } = authPlugin;
+                const update: Record<string, string> = {};
+
+                if (body.themePreference !== undefined) {
+                    update.themePreference = body.themePreference;
+                }
+                if (body.colorMode !== undefined) {
+                    update.colorMode = body.colorMode;
+                }
+
+                if (Object.keys(update).length === 0) {
+                    set.status = 400;
+                    return { error: 'No preferences to update' };
+                }
+
+                await User.updateOne({ u_id }, { $set: update });
+
+                return {
+                    success: true,
+                    message: 'Preferences updated',
+                    data: update,
+                };
+            } catch (error) {
+                console.error('Error updating preferences:', error);
+                set.status = 500;
+                return { error: 'Failed to update preferences' };
+            }
+        },
+        {
+            body: t.Object({
+                themePreference: t.Optional(t.String({ minLength: 1 })),
+                colorMode: t.Optional(t.Union([
+                    t.Literal('light'),
+                    t.Literal('dark'),
+                    t.Literal('system'),
+                ])),
+            }),
+            detail: {
+                summary: 'Update theme preferences',
+                description: 'Update the authenticated user\'s theme and color mode preferences',
                 tags: ['Profile'],
             },
         }

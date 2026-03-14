@@ -7,8 +7,12 @@ export interface AIConfig {
     aiApiKey: string;
 }
 
-const googleGenerativeAI = new GoogleGenerativeAI(env.AI_API_KEY || "AIzaSyD1WHNyXki9wg6PMGwuNG-wgNFb9rK42Zg");
-const model = googleGenerativeAI.getGenerativeModel({ model: "gemini-2.5-pro" })
+// NG-SEC-029: Removed hardcoded API key
+if (!env.AI_API_KEY) {
+    console.warn("AI_API_KEY not set. AI features will not be available.");
+}
+const googleGenerativeAI = env.AI_API_KEY ? new GoogleGenerativeAI(env.AI_API_KEY) : null;
+const model = googleGenerativeAI ? googleGenerativeAI.getGenerativeModel({ model: "gemini-2.5-pro" }) : null;
 
 export class AIService {
     
@@ -20,25 +24,9 @@ export class AIService {
     }
 
     static async generateResponse(prompt: string): Promise<string> {
-        // const config = this.getAIConfig();
-        // const response = await fetch(config.aiServiceUrl, {
-        //     method: "POST",
-        //     headers: {
-        //     "Content-Type": "application/json",
-        //     "X-goog-api-key": `${config.aiApiKey}`,
-        //     },
-        //     body: JSON.stringify({ 
-        //         "contents": [
-        //             {
-        //                 "parts":[
-        //                     {
-        //                         "text": prompt
-        //                     }
-        //                 ]
-        //             }
-        //         ]
-        //     }),
-        // });
+        if (!model) {
+            throw new Error("AI service is not configured. Set AI_API_KEY environment variable.");
+        }
         const result = await model.generateContent(prompt);
         const response = result.response;
         const analysis = response.text();
