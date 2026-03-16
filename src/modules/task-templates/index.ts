@@ -360,6 +360,7 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
           headers: {
             "Content-Type": "application/json",
           },
+          signal: AbortSignal.timeout(75000), // 75s — slightly longer than FastAPI's 60s timeout
           body: JSON.stringify({
             yaml_content: body.yamlContent,
             job_payload: body.jobPayload,
@@ -396,7 +397,7 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     },
     {
       body: t.Object({
-        yamlContent: t.String({ description: "Raw YAML template content" }),
+        yamlContent: t.String({ description: "Raw YAML template content", maxLength: 51200 }),
         jobPayload: t.Any({ description: "Direct grading job payload for testing" }),
         validateOnly: t.Optional(t.Boolean({ description: "Validate payload only, skip execution" })),
         taskNameOverride: t.Optional(t.String({ description: "Optional task_name override for preview testing" }))
