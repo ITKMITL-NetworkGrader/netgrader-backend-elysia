@@ -410,6 +410,51 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     }
   )
 
+  // Dry-run a single parse_output action without a real device
+  .post(
+    "/parse-dry-run",
+    async ({ body, set }) => {
+      try {
+        const workerBaseUrl = (env.WORKER_API_URL || env.FASTAPI_URL || "http://localhost:8000").replace(/\/+$/, "");
+        const response = await fetch(`${workerBaseUrl}/template-tests/parse-dry-run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(15000),
+          body: JSON.stringify({
+            input: body.input,
+            parser: body.parser,
+            pattern: body.pattern ?? null,
+            template: body.template ?? null,
+            platform: body.platform ?? null,
+            command: body.command ?? null,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          set.status = response.status;
+          return { success: false, message: result?.detail || "Parse dry run failed", error: result };
+        }
+        set.status = 200;
+        return { success: true, message: "Parse dry run completed", data: result };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, message: "Error running parse dry run", error: (error as Error).message };
+      }
+    },
+    {
+      body: t.Object({
+        input: t.String({ description: "Raw device output text to parse" }),
+        parser: t.Optional(t.String({ description: "Parser type: regex, textfsm, or jinja" })),
+        pattern: t.Optional(t.String({ description: "Regex pattern or Jinja fallback pattern" })),
+        template: t.Optional(t.String({ description: "TextFSM or Jinja template string" })),
+        platform: t.Optional(t.String({ description: "NTC-templates platform (e.g. cisco_ios)" })),
+        command: t.Optional(t.String({ description: "NTC-templates command (e.g. show interfaces)" })),
+      }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: { tags: ["Task Templates"], summary: "Dry-run a parse_output action without a device" },
+    }
+  )
+
   // Get raw YAML content for a MinIO template
   .get(
     "/minio/:id/raw",
