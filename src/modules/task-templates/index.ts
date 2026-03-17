@@ -355,7 +355,6 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     async ({ body, set }) => {
       try {
         const workerBaseUrl = (env.WORKER_API_URL || env.FASTAPI_URL || "http://localhost:8000").replace(/\/+$/, "");
-        console.log(`Call to ${workerBaseUrl}`)
         const response = await fetch(`${workerBaseUrl}/template-tests/run`, {
           method: "POST",
           headers: {
@@ -417,7 +416,6 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     async ({ body, set }) => {
       try {
         const workerBaseUrl = (env.WORKER_API_URL || env.FASTAPI_URL || "http://localhost:8000").replace(/\/+$/, "");
-        console.log(`Call to ${workerBaseUrl}`)
         const response = await fetch(`${workerBaseUrl}/template-tests/parse-dry-run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -463,7 +461,6 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     async ({ body, set }) => {
       try {
         const workerBaseUrl = (env.WORKER_API_URL || env.FASTAPI_URL || "http://localhost:8000").replace(/\/+$/, "");
-        console.log(`Call to ${workerBaseUrl}`)
         const response = await fetch(`${workerBaseUrl}/template-tests/validate-dry-run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
