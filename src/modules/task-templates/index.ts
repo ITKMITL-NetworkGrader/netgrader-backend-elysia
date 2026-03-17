@@ -455,6 +455,41 @@ export const taskTemplateRoutes = new Elysia({ prefix: "/task-templates" })
     }
   )
 
+  // Dry-run validation rules against a user-supplied variables dict (no device needed)
+  .post(
+    "/validate-dry-run",
+    async ({ body, set }) => {
+      try {
+        const workerBaseUrl = (env.WORKER_API_URL || env.FASTAPI_URL || "http://localhost:8000").replace(/\/+$/, "");
+        const response = await fetch(`${workerBaseUrl}/template-tests/validate-dry-run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(15000),
+          body: JSON.stringify({ variables: body.variables, rules: body.rules, parameters: body.parameters ?? {} }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          set.status = response.status;
+          return { success: false, message: result?.detail || "Validation dry run failed", error: result };
+        }
+        set.status = 200;
+        return { success: true, message: "Validation dry run completed", data: result };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, message: "Error running validation dry run", error: (error as Error).message };
+      }
+    },
+    {
+      body: t.Object({
+        variables:  t.Record(t.String(), t.Any()),
+        rules:      t.Array(t.Record(t.String(), t.Any())),
+        parameters: t.Optional(t.Record(t.String(), t.Any())),
+      }),
+      beforeHandle: requireRole(["ADMIN", "INSTRUCTOR"]),
+      detail: { tags: ["Task Templates"], summary: "Dry-run validation rules against provided variables" },
+    }
+  )
+
   // Get raw YAML content for a MinIO template
   .get(
     "/minio/:id/raw",
