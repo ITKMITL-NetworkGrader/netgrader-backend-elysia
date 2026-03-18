@@ -16,7 +16,7 @@ import {
 } from "./client";
 import { authPlugin, requireRole } from "../../plugins/plugins";
 
-const dockerRoutes = new Elysia({ prefix: "/docker" })
+export const dockerRoutes = new Elysia({ prefix: "/docker" })
     .use(authPlugin)
     .get(
         "/test",
