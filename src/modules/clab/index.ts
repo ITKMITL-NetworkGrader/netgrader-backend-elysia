@@ -220,4 +220,73 @@ export const clabRoutes = new Elysia({ prefix: '/playground/clab' })
                     'Destroy a running ContainerLab topology on the clab-api-server.',
             },
         },
+    )
+
+    // ─── Exec command on a node ───────────────────────────────────────────────
+
+    .post(
+        '/exec-node',
+        async ({ body, set }) => {
+            console.log(body)
+            return runClabAction(
+                body,
+                set,
+                (orchestrator) => orchestrator.execCommand(body.labName, body.command, body.nodeName),
+                'Exec failed',
+            );
+        },
+        {
+            body: t.Object({
+                serverIp: t.String(),
+                serverPort: t.Number(),
+                username: t.String(),
+                password: t.String(),
+                labName: t.String(),
+                nodeName: t.String(),
+                command: t.String(),
+            }),
+            beforeHandle: requireRole(['ADMIN', 'INSTRUCTOR']),
+            detail: {
+                tags: ['ContainerLab'],
+                summary: 'Execute a command on a lab node',
+                description:
+                    'Run a command on a specific node via the clab-api-server exec API. Returns stdout/stderr.',
+            },
+        },
+    )
+
+    // ─── Request SSH proxy access to a node ───────────────────────────────────
+
+    .post(
+        '/get-ssh-proxy',
+        async ({ body, set }) => {
+            return runClabAction(
+                body,
+                set,
+                (orchestrator) => orchestrator.getSSHProxyInfo(body.labName, body.nodeName, {
+                    duration: body.duration,
+                    sshUsername: body.sshUsername,
+                }),
+                'SSH proxy request failed',
+            );
+        },
+        {
+            body: t.Object({
+                serverIp: t.String(),
+                serverPort: t.Number(),
+                username: t.String(),
+                password: t.String(),
+                labName: t.String(),
+                nodeName: t.String(),
+                duration: t.Optional(t.String()),
+                sshUsername: t.Optional(t.String()),
+            }),
+            beforeHandle: requireRole(['ADMIN', 'INSTRUCTOR']),
+            detail: {
+                tags: ['ContainerLab'],
+                summary: 'Request SSH proxy access to a node',
+                description:
+                    'Allocate an SSH proxy port on the clab-api-server for direct SSH access to a specific lab node.',
+            },
+        },
     );
