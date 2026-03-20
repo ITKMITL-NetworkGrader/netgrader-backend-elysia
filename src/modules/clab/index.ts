@@ -190,4 +190,34 @@ export const clabRoutes = new Elysia({ prefix: '/playground/clab' })
                     'Get node/container details for a deployed lab.',
             },
         },
+    )
+
+    // ─── Destroy lab ─────────────────────────────────────────────────────
+
+    .post(
+        '/destroy-lab',
+        async ({ body, set }) => {
+            return runClabAction(
+                body,
+                set,
+                (orchestrator) => orchestrator.destroyLab(body.labName),
+                'Destroy failed',
+            );
+        },
+        {
+            body: t.Object({
+                serverIp: t.String(),
+                serverPort: t.Number(),
+                username: t.String(),
+                password: t.String(),
+                labName: t.String(),
+            }),
+            beforeHandle: requireRole(['ADMIN', 'INSTRUCTOR']),
+            detail: {
+                tags: ['ContainerLab'],
+                summary: 'Destroy a deployed lab',
+                description:
+                    'Destroy a running ContainerLab topology on the clab-api-server.',
+            },
+        },
     );

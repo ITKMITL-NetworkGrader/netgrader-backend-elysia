@@ -6,6 +6,7 @@ export interface ILab extends Document {
   title: string;
   description?: string;
   type: 'lab' | 'exam';
+  networkProvider?: 'gns3' | 'clab';
   instructions?: RichContent;
 
   // Embedded Network Configuration (frequently co-accessed)
@@ -166,6 +167,12 @@ const labSchema = new Schema<ILab>({
     required: true,
     enum: ['lab', 'exam'],
     default: 'lab'
+  },
+  networkProvider: {
+    type: String,
+    required: false,
+    enum: ['gns3', 'clab'],
+    default: 'gns3'
   },
 
   // Embedded Network Configuration
