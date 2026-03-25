@@ -133,6 +133,16 @@ export class SubmissionService {
     total_tests: number;
     percentage: number;
   }): Promise<ISubmission | null> {
+    // Fallback transition: if /started callback is missed, first progress update
+    // should still move submission out of queue and into running.
+    await Submission.updateOne(
+      { jobId, status: 'pending' },
+      {
+        status: 'running',
+        startedAt: new Date()
+      }
+    );
+
     const progressUpdate: IProgressUpdate = {
       message: progressData.message,
       current_test: progressData.current_test || '',
