@@ -1416,5 +1416,193 @@ export class SubmissionService {
 
     return savedSubmission;
   }
+
+  /**
+   * Get monitoring/analytics data for a lab.
+   * Runs four aggregation pipelines in parallel:
+   *  1. KPI metrics (avg execution time, avg end-to-end latency)
+   *  2. Execution time distribution (histogram buckets)
+   *  3. Submission timeline (grouped by hour of day, UTC)
+   *  4. Pass rate by attempt number
+   */
+  static async getMonitoringData(labId: string, submissionType?: 'fill_in_blank' | 'auto_grading'): Promise<{
+    kpi: {
+      avgTotalExecutionTimeSec: number;
+      avgEndToEndLatencySec: number;
+      totalCompletedSubmissions: number;
+    };
+    executionTimeDistribution: Array<{ bucket: string; count: number }>;
+    submissionTimeline: Array<{ hour: number; count: number }>;
+    passRateByAttempt: Array<{
+      attempt: number;
+      total: number;
+      passed: number;
+      failed: number;
+      passRate: number;
+    }>;
+  }> {
+    const labObjectId = new Types.ObjectId(labId);
+
+    // Build base match — optionally filter by submissionType
+    const baseMatch: Record<string, any> = { labId: labObjectId };
+    if (submissionType) {
+      baseMatch.submissionType = submissionType;
+    }
+
+    // Run all four aggregations concurrently
+    const [kpiResult, distributionResult, timelineResult, passRateResult] =
+      await Promise.all([
+
+        // ── 1. KPI metrics ────────────────────────────────────────────────────
+        Submission.aggregate([
+          {
+            $match: {
+              ...baseMatch,
+              status: 'completed',
+              gradingResult: { $exists: true, $ne: null },
+              completedAt: { $exists: true, $ne: null },
+              submittedAt: { $exists: true, $ne: null },
+            },
+          },
+          {
+            $addFields: {
+              endToEndLatencyMs: { $subtract: ['$completedAt', '$submittedAt'] },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalCompletedSubmissions: { $sum: 1 },
+              avgTotalExecutionTimeSec: { $avg: '$gradingResult.total_execution_time' },
+              avgEndToEndLatencyMs: { $avg: '$endToEndLatencyMs' },
+            },
+          },
+        ]).allowDiskUse(true),
+
+        // ── 2. Execution time distribution ────────────────────────────────────
+        Submission.aggregate([
+          {
+            $match: {
+              ...baseMatch,
+              status: 'completed',
+              'gradingResult.total_execution_time': { $exists: true, $ne: null },
+            },
+          },
+          {
+            $bucket: {
+              groupBy: '$gradingResult.total_execution_time',
+              boundaries: [0, 10, 30, 60, 120, 300],
+              default: '300+',
+              output: { count: { $sum: 1 } },
+            },
+          },
+        ]).allowDiskUse(true),
+
+        // ── 3. Submission timeline (by hour of day, Bangkok UTC+7) ───────────
+        Submission.aggregate([
+          {
+            $match: {
+              ...baseMatch,
+              status: { $in: ['completed', 'failed', 'running', 'cancelled'] },
+              submittedAt: { $exists: true, $ne: null },
+            },
+          },
+          {
+            $group: {
+              _id: { $hour: { date: '$submittedAt', timezone: 'Asia/Bangkok' } },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ]).allowDiskUse(true),
+
+        // ── 4. Pass rate by attempt ───────────────────────────────────────────
+        Submission.aggregate([
+          {
+            $match: {
+              ...baseMatch,
+              status: 'completed',
+              gradingResult: { $exists: true, $ne: null },
+            },
+          },
+          // Cap attempt at 4 (represents "4 or more")
+          {
+            $addFields: {
+              attemptBucket: { $min: ['$attempt', 4] },
+              isPassed: {
+                $and: [
+                  { $gt: ['$gradingResult.total_points_possible', 0] },
+                  {
+                    // Round to 4 decimal places to guard against IEEE 754 float
+                    // precision drift (e.g. 99.99999 instead of 100.0)
+                    $gte: [
+                      { $round: ['$gradingResult.total_points_earned', 4] },
+                      '$gradingResult.total_points_possible',
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            $group: {
+              _id: '$attemptBucket',
+              total: { $sum: 1 },
+              passed: { $sum: { $cond: ['$isPassed', 1, 0] } },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ]).allowDiskUse(true),
+      ]);
+
+    // ── Shape KPI result ──────────────────────────────────────────────────────
+    const kpiRaw = kpiResult[0] ?? {
+      totalCompletedSubmissions: 0,
+      avgTotalExecutionTimeSec: 0,
+      avgEndToEndLatencyMs: 0,
+    };
+    const kpi = {
+      totalCompletedSubmissions: kpiRaw.totalCompletedSubmissions ?? 0,
+      avgTotalExecutionTimeSec: Math.round((kpiRaw.avgTotalExecutionTimeSec ?? 0) * 1000) / 1000,
+      avgEndToEndLatencySec: Math.round(((kpiRaw.avgEndToEndLatencyMs ?? 0) / 1000) * 1000) / 1000,
+    };
+
+    // ── Shape distribution result ─────────────────────────────────────────────
+    const bucketLabels: Record<string | number, string> = {
+      0: '0–10s',
+      10: '10–30s',
+      30: '30–60s',
+      60: '1–2m',
+      120: '2–5m',
+      '300+': '5m+',
+    };
+    const executionTimeDistribution = distributionResult.map((b: any) => ({
+      bucket: bucketLabels[b._id] ?? String(b._id),
+      count: b.count,
+    }));
+
+    // ── Shape timeline result (fill missing hours with 0) ────────────────────
+    const timelineMap = new Map<number, number>(
+      timelineResult.map((r: any) => [r._id as number, r.count as number])
+    );
+    const submissionTimeline = Array.from({ length: 24 }, (_, h) => ({
+      hour: h,
+      count: timelineMap.get(h) ?? 0,
+    }));
+
+    // ── Shape pass-rate result ────────────────────────────────────────────────
+    const passRateByAttempt = passRateResult.map((r: any) => {
+      const failed = (r.total ?? 0) - (r.passed ?? 0);
+      return {
+        attempt: r._id as number,
+        total: r.total ?? 0,
+        passed: r.passed ?? 0,
+        failed,
+        passRate: r.total > 0 ? Math.round((r.passed / r.total) * 100) : 0,
+      };
+    });
+
+    return { kpi, executionTimeDistribution, submissionTimeline, passRateByAttempt };
+  }
 }
 

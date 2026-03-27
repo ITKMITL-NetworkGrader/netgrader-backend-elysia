@@ -865,6 +865,32 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
     }
   )
   .get(
+    "/lab/:labId/monitoring",
+    async ({ params, query, set }) => {
+      try {
+        const submissionType = query.submissionType as 'fill_in_blank' | 'auto_grading' | undefined;
+        const data = await SubmissionService.getMonitoringData(params.labId, submissionType);
+        return { status: "success", data };
+      } catch (error) {
+        console.error("Error fetching monitoring data:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to fetch monitoring data" };
+      }
+    },
+    {
+      params: t.Object({ labId: t.String() }),
+      query: t.Object({
+        submissionType: t.Optional(t.Union([t.Literal('fill_in_blank'), t.Literal('auto_grading')]))
+      }),
+      beforeHandle: requireRole(["ADMIN"]),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get Lab Monitoring Data",
+        description: "Aggregated analytics for the Monitoring tab: KPI metrics, execution time distribution, submission timeline, and pass rate by attempt. Admin/Instructor only."
+      }
+    }
+  )
+  .get(
     "/lab/:labId/export",
     async ({ params, query, set }) => {
       try {
