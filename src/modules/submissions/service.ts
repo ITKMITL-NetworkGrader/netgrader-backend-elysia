@@ -1422,17 +1422,23 @@ export class SubmissionService {
    * Runs four aggregation pipelines in parallel:
    *  1. KPI metrics (avg execution time, avg end-to-end latency)
    *  2. Execution time distribution (histogram buckets)
-   *  3. Submission timeline (grouped by hour of day, UTC)
+   *  3. Submission timeline (real date+hour buckets, Bangkok UTC+7)
    *  4. Pass rate by attempt number
    */
-  static async getMonitoringData(labId: string, submissionType?: 'fill_in_blank' | 'auto_grading'): Promise<{
+  static async getMonitoringData(
+    labId: string,
+    submissionType?: 'fill_in_blank' | 'auto_grading',
+    startDate?: Date,
+    endDate?: Date,
+  ): Promise<{
     kpi: {
       avgTotalExecutionTimeSec: number;
       avgEndToEndLatencySec: number;
       totalCompletedSubmissions: number;
     };
     executionTimeDistribution: Array<{ bucket: string; count: number }>;
-    submissionTimeline: Array<{ hour: number; count: number }>;
+    submissionTimeline: Array<{ timestamp: string; count: number }>;
+    timelineGranularity: 'hourly' | 'daily';
     passRateByAttempt: Array<{
       attempt: number;
       total: number;
@@ -1443,11 +1449,27 @@ export class SubmissionService {
   }> {
     const labObjectId = new Types.ObjectId(labId);
 
-    // Build base match — optionally filter by submissionType
-    const baseMatch: Record<string, any> = { labId: labObjectId };
+    // Build a submittedAt filter that always requires field existence and
+    // optionally constrains to the selected date range.
+    const submittedAtFilter: Record<string, any> = { $exists: true, $ne: null };
+    if (startDate) submittedAtFilter.$gte = startDate;
+    if (endDate) submittedAtFilter.$lte = endDate;
+
+    // Base match shared by all four pipelines — always includes the submittedAt
+    // filter so date range is respected everywhere (KPI, distribution, timeline,
+    // pass rate) without risk of a later hardcoded key overriding it.
+    const baseMatch: Record<string, any> = {
+      labId: labObjectId,
+      submittedAt: submittedAtFilter,
+    };
     if (submissionType) {
       baseMatch.submissionType = submissionType;
     }
+
+    // Determine timeline granularity: hourly for ≤3 days, daily otherwise
+    const rangeMs = (endDate?.getTime() ?? Date.now()) - (startDate?.getTime() ?? 0);
+    const rangeDays = rangeMs / (1000 * 60 * 60 * 24);
+    const timelineGranularity: 'hourly' | 'daily' = (!startDate && !endDate) || rangeDays <= 3 ? 'hourly' : 'daily';
 
     // Run all four aggregations concurrently
     const [kpiResult, distributionResult, timelineResult, passRateResult] =
@@ -1461,7 +1483,6 @@ export class SubmissionService {
               status: 'completed',
               gradingResult: { $exists: true, $ne: null },
               completedAt: { $exists: true, $ne: null },
-              submittedAt: { $exists: true, $ne: null },
             },
           },
           {
@@ -1498,18 +1519,23 @@ export class SubmissionService {
           },
         ]).allowDiskUse(true),
 
-        // ── 3. Submission timeline (by hour of day, Bangkok UTC+7) ───────────
+        // ── 3. Submission timeline (real date+hour buckets, Bangkok UTC+7) ──
         Submission.aggregate([
           {
             $match: {
               ...baseMatch,
               status: { $in: ['completed', 'failed', 'running', 'cancelled'] },
-              submittedAt: { $exists: true, $ne: null },
             },
           },
           {
             $group: {
-              _id: { $hour: { date: '$submittedAt', timezone: 'Asia/Bangkok' } },
+              _id: {
+                $dateToString: {
+                  format: timelineGranularity === 'hourly' ? '%Y-%m-%dT%H:00:00' : '%Y-%m-%d',
+                  date: '$submittedAt',
+                  timezone: 'Asia/Bangkok',
+                },
+              },
               count: { $sum: 1 },
             },
           },
@@ -1581,14 +1607,38 @@ export class SubmissionService {
       count: b.count,
     }));
 
-    // ── Shape timeline result (fill missing hours with 0) ────────────────────
-    const timelineMap = new Map<number, number>(
-      timelineResult.map((r: any) => [r._id as number, r.count as number])
+    // ── Shape timeline result (fill missing buckets with 0) ──────────────────
+    // Thailand is always UTC+7 (no DST), so offset is constant.
+    const BKK_OFFSET_MS = 7 * 60 * 60 * 1000;
+    const stepMs = timelineGranularity === 'hourly' ? 3_600_000 : 86_400_000;
+
+    const timelineMap = new Map<string, number>(
+      timelineResult.map((r: any) => [r._id as string, r.count as number])
     );
-    const submissionTimeline = Array.from({ length: 24 }, (_, h) => ({
-      hour: h,
-      count: timelineMap.get(h) ?? 0,
-    }));
+
+    // Determine iteration bounds in UTC, aligned to Bangkok step boundaries
+    const rawStartMs = startDate?.getTime() ?? (timelineResult[0]
+      ? new Date(timelineResult[0]._id + (timelineGranularity === 'hourly' ? '+07:00' : 'T00:00:00+07:00')).getTime()
+      : Date.now());
+    const rawEndMs = endDate?.getTime() ?? (timelineResult.length
+      ? new Date(timelineResult[timelineResult.length - 1]._id + (timelineGranularity === 'hourly' ? '+07:00' : 'T00:00:00+07:00')).getTime()
+      : Date.now());
+
+    // Floor rawStartMs to the Bangkok step boundary
+    const firstBkkAligned = Math.floor((rawStartMs + BKK_OFFSET_MS) / stepMs) * stepMs;
+    const firstUtc = firstBkkAligned - BKK_OFFSET_MS;
+
+    const submissionTimeline: Array<{ timestamp: string; count: number }> = [];
+    for (let utcMs = firstUtc; utcMs <= rawEndMs; utcMs += stepMs) {
+      const d = new Date(utcMs + BKK_OFFSET_MS); // shift to Bangkok "UTC view"
+      const y = d.getUTCFullYear();
+      const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      const ts = timelineGranularity === 'hourly'
+        ? `${y}-${mo}-${day}T${String(d.getUTCHours()).padStart(2, '0')}:00:00`
+        : `${y}-${mo}-${day}`;
+      submissionTimeline.push({ timestamp: ts, count: timelineMap.get(ts) ?? 0 });
+    }
 
     // ── Shape pass-rate result ────────────────────────────────────────────────
     const passRateByAttempt = passRateResult.map((r: any) => {
@@ -1602,7 +1652,7 @@ export class SubmissionService {
       };
     });
 
-    return { kpi, executionTimeDistribution, submissionTimeline, passRateByAttempt };
+    return { kpi, executionTimeDistribution, submissionTimeline, timelineGranularity, passRateByAttempt };
   }
 }
 
