@@ -871,7 +871,10 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         const submissionType = query.submissionType as 'fill_in_blank' | 'auto_grading' | undefined;
         const startDate = query.startDate ? new Date(query.startDate as string) : undefined;
         const endDate = query.endDate ? new Date(query.endDate as string) : undefined;
-        const data = await SubmissionService.getMonitoringData(params.labId, submissionType, startDate, endDate);
+        const studentIdPrefixes = query.studentIdPrefixes
+          ? (query.studentIdPrefixes as string).split(',').map(s => s.trim()).filter(Boolean)
+          : undefined;
+        const data = await SubmissionService.getMonitoringData(params.labId, submissionType, startDate, endDate, studentIdPrefixes);
         return { status: "success", data };
       } catch (error) {
         console.error("Error fetching monitoring data:", error);
@@ -885,6 +888,7 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
         submissionType: t.Optional(t.Union([t.Literal('fill_in_blank'), t.Literal('auto_grading')])),
         startDate: t.Optional(t.String()),
         endDate: t.Optional(t.String()),
+        studentIdPrefixes: t.Optional(t.String()),
       }),
       beforeHandle: requireRole(["ADMIN"]),
       detail: {

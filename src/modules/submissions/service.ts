@@ -1430,6 +1430,7 @@ export class SubmissionService {
     submissionType?: 'fill_in_blank' | 'auto_grading',
     startDate?: Date,
     endDate?: Date,
+    studentIdPrefixes?: string[],
   ): Promise<{
     kpi: {
       avgTotalExecutionTimeSec: number;
@@ -1466,6 +1467,13 @@ export class SubmissionService {
       baseMatch.submissionType = submissionType;
     }
 
+    // Student ID prefix filter — only include submissions whose studentId
+    // starts with one of the given prefixes (e.g. ["67070", "62070"]).
+    if (studentIdPrefixes && studentIdPrefixes.length > 0) {
+      const escaped = studentIdPrefixes.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      baseMatch.studentId = { $regex: new RegExp(`^(${escaped.join('|')})`) };
+    }
+
     // Determine timeline granularity: hourly for ≤3 days, daily otherwise
     const rangeMs = (endDate?.getTime() ?? Date.now()) - (startDate?.getTime() ?? 0);
     const rangeDays = rangeMs / (1000 * 60 * 60 * 24);
@@ -1476,6 +1484,8 @@ export class SubmissionService {
       await Promise.all([
 
         // ── 1. KPI metrics ────────────────────────────────────────────────────
+        // Count ALL completed submissions, but only average execution time
+        // and E2E latency where values are meaningful (> 0).
         Submission.aggregate([
           {
             $match: {
@@ -1494,8 +1504,27 @@ export class SubmissionService {
             $group: {
               _id: null,
               totalCompletedSubmissions: { $sum: 1 },
-              avgTotalExecutionTimeSec: { $avg: '$gradingResult.total_execution_time' },
-              avgEndToEndLatencyMs: { $avg: '$endToEndLatencyMs' },
+              // Only average execution time for submissions with total_execution_time > 0
+              // (excludes fill-in-blank and force-pass synthetic submissions)
+              avgTotalExecutionTimeSec: {
+                $avg: {
+                  $cond: [
+                    { $gt: ['$gradingResult.total_execution_time', 0] },
+                    '$gradingResult.total_execution_time',
+                    '$$REMOVE',
+                  ],
+                },
+              },
+              // Only average E2E latency where completedAt > submittedAt
+              avgEndToEndLatencyMs: {
+                $avg: {
+                  $cond: [
+                    { $gt: ['$endToEndLatencyMs', 0] },
+                    '$endToEndLatencyMs',
+                    '$$REMOVE',
+                  ],
+                },
+              },
             },
           },
         ]).allowDiskUse(true),
