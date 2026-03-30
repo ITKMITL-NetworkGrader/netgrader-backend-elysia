@@ -1480,22 +1480,29 @@ export class SubmissionService {
     const timelineGranularity: 'hourly' | 'daily' = (!startDate && !endDate) || rangeDays <= 3 ? 'hourly' : 'daily';
 
     // Run all four aggregations concurrently
+    // Build KPI match: for fill_in_blank we respect the baseMatch submissionType
+    // as-is (fill_in_blank submissions don't go through the grading worker so
+    // execution_time is always 0). For auto_grading or no type filter we restrict
+    // to auto_grading submissions with execution_time > 0 so that force-pass
+    // synthetics and unfinished jobs don't pollute the averages.
+    const kpiMatch: Record<string, any> = {
+      ...baseMatch,
+      status: 'completed',
+      gradingResult: { $exists: true, $ne: null },
+      completedAt: { $exists: true, $ne: null },
+    };
+    if (submissionType !== 'fill_in_blank') {
+      kpiMatch.submissionType = 'auto_grading';
+      kpiMatch['gradingResult.total_execution_time'] = { $gt: 0 };
+    }
+
     const [kpiResult, distributionResult, timelineResult, passRateResult] =
       await Promise.all([
 
         // ── 1. KPI metrics ────────────────────────────────────────────────────
-        // Only auto_grading submissions with execution time > 0 so that
-        // fill-in-blank and force-pass synthetics don't pollute averages or counts.
         Submission.aggregate([
           {
-            $match: {
-              ...baseMatch,
-              submissionType: 'auto_grading',
-              status: 'completed',
-              gradingResult: { $exists: true, $ne: null },
-              completedAt: { $exists: true, $ne: null },
-              'gradingResult.total_execution_time': { $gt: 0 },
-            },
+            $match: kpiMatch,
           },
           {
             $addFields: {
