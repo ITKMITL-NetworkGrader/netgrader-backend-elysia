@@ -1484,15 +1484,17 @@ export class SubmissionService {
       await Promise.all([
 
         // ── 1. KPI metrics ────────────────────────────────────────────────────
-        // Count ALL completed submissions, but only average execution time
-        // and E2E latency where values are meaningful (> 0).
+        // Only auto_grading submissions with execution time > 0 so that
+        // fill-in-blank and force-pass synthetics don't pollute averages or counts.
         Submission.aggregate([
           {
             $match: {
               ...baseMatch,
+              submissionType: 'auto_grading',
               status: 'completed',
               gradingResult: { $exists: true, $ne: null },
               completedAt: { $exists: true, $ne: null },
+              'gradingResult.total_execution_time': { $gt: 0 },
             },
           },
           {
@@ -1504,16 +1506,8 @@ export class SubmissionService {
             $group: {
               _id: null,
               totalCompletedSubmissions: { $sum: 1 },
-              // Only average execution time for submissions with total_execution_time > 0
-              // (excludes fill-in-blank and force-pass synthetic submissions)
               avgTotalExecutionTimeSec: {
-                $avg: {
-                  $cond: [
-                    { $gt: ['$gradingResult.total_execution_time', 0] },
-                    '$gradingResult.total_execution_time',
-                    '$$REMOVE',
-                  ],
-                },
+                $avg: '$gradingResult.total_execution_time',
               },
               // Only average E2E latency where completedAt > submittedAt
               avgEndToEndLatencyMs: {
@@ -1535,7 +1529,7 @@ export class SubmissionService {
             $match: {
               ...baseMatch,
               status: 'completed',
-              'gradingResult.total_execution_time': { $exists: true, $ne: null },
+              'gradingResult.total_execution_time': { $exists: true, $ne: null, $gt: 0 },
             },
           },
           {
