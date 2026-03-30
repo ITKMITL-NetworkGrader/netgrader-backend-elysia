@@ -1480,19 +1480,18 @@ export class SubmissionService {
     const timelineGranularity: 'hourly' | 'daily' = (!startDate && !endDate) || rangeDays <= 3 ? 'hourly' : 'daily';
 
     // Run all four aggregations concurrently
-    // Build KPI match: for fill_in_blank we respect the baseMatch submissionType
-    // as-is (fill_in_blank submissions don't go through the grading worker so
-    // execution_time is always 0). For auto_grading or no type filter we restrict
-    // to auto_grading submissions with execution_time > 0 so that force-pass
-    // synthetics and unfinished jobs don't pollute the averages.
+    // Build KPI match:
+    // - "auto_grading" selected: only count submissions with execution_time > 0
+    //   (excludes force-pass synthetics and jobs that never actually ran).
+    // - "fill_in_blank" or no filter: use baseMatch as-is (fill_in_blank has
+    //   execution_time = 0 by definition; "all" counts every completed submission).
     const kpiMatch: Record<string, any> = {
       ...baseMatch,
       status: 'completed',
       gradingResult: { $exists: true, $ne: null },
       completedAt: { $exists: true, $ne: null },
     };
-    if (submissionType !== 'fill_in_blank') {
-      kpiMatch.submissionType = 'auto_grading';
+    if (submissionType === 'auto_grading') {
       kpiMatch['gradingResult.total_execution_time'] = { $gt: 0 };
     }
 
@@ -1513,8 +1512,16 @@ export class SubmissionService {
             $group: {
               _id: null,
               totalCompletedSubmissions: { $sum: 1 },
+              // Only average execution time for submissions that actually ran (> 0);
+              // fill_in_blank submissions always have execution_time = 0.
               avgTotalExecutionTimeSec: {
-                $avg: '$gradingResult.total_execution_time',
+                $avg: {
+                  $cond: [
+                    { $gt: ['$gradingResult.total_execution_time', 0] },
+                    '$gradingResult.total_execution_time',
+                    '$$REMOVE',
+                  ],
+                },
               },
               // Only average E2E latency where completedAt > submittedAt
               avgEndToEndLatencyMs: {
