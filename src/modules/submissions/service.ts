@@ -284,9 +284,9 @@ export class SubmissionService {
    * Get submission by job ID
    */
   static async getSubmissionByJobId(jobId: string): Promise<ISubmission | null> {
-    return await Submission.findOne({ jobId })
-      .populate('studentId', 'name email')
-      .populate('labId', 'title description');
+    // NOTE: Do NOT populate 'labId' here — keep it as a plain ObjectId string to prevent
+    // "[object Object]" bugs if downstream callers use submission.labId in URL templates.
+    return await Submission.findOne({ jobId });
   }
 
   /**
@@ -410,8 +410,7 @@ export class SubmissionService {
       labId: new Types.ObjectId(labId),
       partId
     })
-      .sort({ attempt: -1, submittedAt: -1 })
-      .populate('labId', 'title description');
+      .sort({ attempt: -1, submittedAt: -1 });
   }
 
   /**
@@ -1042,8 +1041,10 @@ export class SubmissionService {
    * Returns complete submission with all grading results and test details
    */
   static async getSubmissionById(submissionId: string | Types.ObjectId): Promise<ISubmission | null> {
-    return await Submission.findById(submissionId)
-      .populate('labId', 'title description');
+    // NOTE: Do NOT populate 'labId' here — the returned labId must remain a plain ObjectId string.
+    // Populating it would replace the ID with a Lab document object, which causes downstream
+    // callers that use submission.labId in URLs to produce "[object Object]" instead of the ID.
+    return await Submission.findById(submissionId);
   }
 
   /**
