@@ -150,7 +150,6 @@ export class ClabApiOrchestrator implements ILabOrchestrator {
     }> {
         try {
             const token = await this.getToken();
-            console.log(token);
             // If login succeeds, the server is reachable and credentials work
             return {
                 success: true,
