@@ -133,6 +133,16 @@ export class SubmissionService {
     total_tests: number;
     percentage: number;
   }): Promise<ISubmission | null> {
+    // Fallback transition: if /started callback is missed, first progress update
+    // should still move submission out of queue and into running.
+    await Submission.updateOne(
+      { jobId, status: 'pending' },
+      {
+        status: 'running',
+        startedAt: new Date()
+      }
+    );
+
     const progressUpdate: IProgressUpdate = {
       message: progressData.message,
       current_test: progressData.current_test || '',
@@ -1406,6 +1416,281 @@ export class SubmissionService {
     console.log(`[Force Pass] Admin ${params.adminUserId} force-passed student ${params.studentId} for part ${params.partId} (${totalPoints} pts)`);
 
     return savedSubmission;
+  }
+
+  /**
+   * Get monitoring/analytics data for a lab.
+   * Runs four aggregation pipelines in parallel:
+   *  1. KPI metrics (avg execution time, avg end-to-end latency)
+   *  2. Execution time distribution (histogram buckets)
+   *  3. Submission timeline (real date+hour buckets, Bangkok UTC+7)
+   *  4. Pass rate by attempt number
+   */
+  static async getMonitoringData(
+    labId: string,
+    submissionType?: 'fill_in_blank' | 'auto_grading',
+    startDate?: Date,
+    endDate?: Date,
+    studentIdPrefixes?: string[],
+  ): Promise<{
+    kpi: {
+      avgTotalExecutionTimeSec: number;
+      avgEndToEndLatencySec: number;
+      totalCompletedSubmissions: number;
+    };
+    executionTimeDistribution: Array<{ bucket: string; count: number }>;
+    submissionTimeline: Array<{ timestamp: string; count: number }>;
+    timelineGranularity: 'hourly' | 'daily';
+    passRateByAttempt: Array<{
+      attempt: number;
+      total: number;
+      passed: number;
+      failed: number;
+      passRate: number;
+    }>;
+  }> {
+    const labObjectId = new Types.ObjectId(labId);
+
+    // Build a submittedAt filter that always requires field existence and
+    // optionally constrains to the selected date range.
+    const submittedAtFilter: Record<string, any> = { $exists: true, $ne: null };
+    if (startDate) submittedAtFilter.$gte = startDate;
+    if (endDate) submittedAtFilter.$lte = endDate;
+
+    // Base match shared by all four pipelines — always includes the submittedAt
+    // filter so date range is respected everywhere (KPI, distribution, timeline,
+    // pass rate) without risk of a later hardcoded key overriding it.
+    const baseMatch: Record<string, any> = {
+      labId: labObjectId,
+      submittedAt: submittedAtFilter,
+    };
+    if (submissionType) {
+      baseMatch.submissionType = submissionType;
+    }
+
+    // Student ID prefix filter — only include submissions whose studentId
+    // starts with one of the given prefixes (e.g. ["67070", "62070"]).
+    if (studentIdPrefixes && studentIdPrefixes.length > 0) {
+      const escaped = studentIdPrefixes.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      baseMatch.studentId = { $regex: new RegExp(`^(${escaped.join('|')})`) };
+    }
+
+    // Determine timeline granularity: hourly for ≤3 days, daily otherwise
+    const rangeMs = (endDate?.getTime() ?? Date.now()) - (startDate?.getTime() ?? 0);
+    const rangeDays = rangeMs / (1000 * 60 * 60 * 24);
+    const timelineGranularity: 'hourly' | 'daily' = (!startDate && !endDate) || rangeDays <= 3 ? 'hourly' : 'daily';
+
+    // Run all four aggregations concurrently
+    // Build KPI match:
+    // - "auto_grading" selected: only count submissions with execution_time > 0
+    //   (excludes force-pass synthetics and jobs that never actually ran).
+    // - "fill_in_blank" or no filter: use baseMatch as-is (fill_in_blank has
+    //   execution_time = 0 by definition; "all" counts every completed submission).
+    const kpiMatch: Record<string, any> = {
+      ...baseMatch,
+      status: 'completed',
+      gradingResult: { $exists: true, $ne: null },
+      completedAt: { $exists: true, $ne: null },
+    };
+    if (submissionType === 'auto_grading') {
+      kpiMatch['gradingResult.total_execution_time'] = { $gt: 0 };
+    }
+
+    const [kpiResult, distributionResult, timelineResult, passRateResult] =
+      await Promise.all([
+
+        // ── 1. KPI metrics ────────────────────────────────────────────────────
+        Submission.aggregate([
+          {
+            $match: kpiMatch,
+          },
+          {
+            $addFields: {
+              endToEndLatencyMs: { $subtract: ['$completedAt', '$submittedAt'] },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalCompletedSubmissions: { $sum: 1 },
+              // Only average execution time for submissions that actually ran (> 0);
+              // fill_in_blank submissions always have execution_time = 0.
+              avgTotalExecutionTimeSec: {
+                $avg: {
+                  $cond: [
+                    { $gt: ['$gradingResult.total_execution_time', 0] },
+                    '$gradingResult.total_execution_time',
+                    '$$REMOVE',
+                  ],
+                },
+              },
+              // Only average E2E latency where completedAt > submittedAt
+              avgEndToEndLatencyMs: {
+                $avg: {
+                  $cond: [
+                    { $gt: ['$endToEndLatencyMs', 0] },
+                    '$endToEndLatencyMs',
+                    '$$REMOVE',
+                  ],
+                },
+              },
+            },
+          },
+        ]).allowDiskUse(true),
+
+        // ── 2. Execution time distribution ────────────────────────────────────
+        Submission.aggregate([
+          {
+            $match: {
+              ...baseMatch,
+              status: 'completed',
+              'gradingResult.total_execution_time': { $exists: true, $ne: null, $gt: 0 },
+            },
+          },
+          {
+            $bucket: {
+              groupBy: '$gradingResult.total_execution_time',
+              boundaries: [0, 10, 30, 60, 120, 300],
+              default: '300+',
+              output: { count: { $sum: 1 } },
+            },
+          },
+        ]).allowDiskUse(true),
+
+        // ── 3. Submission timeline (real date+hour buckets, Bangkok UTC+7) ──
+        Submission.aggregate([
+          {
+            $match: {
+              ...baseMatch,
+              status: { $in: ['completed', 'failed', 'running', 'cancelled'] },
+            },
+          },
+          {
+            $group: {
+              _id: {
+                $dateToString: {
+                  format: timelineGranularity === 'hourly' ? '%Y-%m-%dT%H:00:00' : '%Y-%m-%d',
+                  date: '$submittedAt',
+                  timezone: 'Asia/Bangkok',
+                },
+              },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ]).allowDiskUse(true),
+
+        // ── 4. Pass rate by attempt ───────────────────────────────────────────
+        Submission.aggregate([
+          {
+            $match: {
+              ...baseMatch,
+              status: 'completed',
+              gradingResult: { $exists: true, $ne: null },
+            },
+          },
+          // Cap attempt at 4 (represents "4 or more")
+          {
+            $addFields: {
+              attemptBucket: { $min: ['$attempt', 4] },
+              isPassed: {
+                $and: [
+                  { $gt: ['$gradingResult.total_points_possible', 0] },
+                  {
+                    // Round to 4 decimal places to guard against IEEE 754 float
+                    // precision drift (e.g. 99.99999 instead of 100.0)
+                    $gte: [
+                      { $round: ['$gradingResult.total_points_earned', 4] },
+                      '$gradingResult.total_points_possible',
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            $group: {
+              _id: '$attemptBucket',
+              total: { $sum: 1 },
+              passed: { $sum: { $cond: ['$isPassed', 1, 0] } },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ]).allowDiskUse(true),
+      ]);
+
+    // ── Shape KPI result ──────────────────────────────────────────────────────
+    const kpiRaw = kpiResult[0] ?? {
+      totalCompletedSubmissions: 0,
+      avgTotalExecutionTimeSec: 0,
+      avgEndToEndLatencyMs: 0,
+    };
+    const kpi = {
+      totalCompletedSubmissions: kpiRaw.totalCompletedSubmissions ?? 0,
+      avgTotalExecutionTimeSec: Math.round((kpiRaw.avgTotalExecutionTimeSec ?? 0) * 1000) / 1000,
+      avgEndToEndLatencySec: Math.round(((kpiRaw.avgEndToEndLatencyMs ?? 0) / 1000) * 1000) / 1000,
+    };
+
+    // ── Shape distribution result ─────────────────────────────────────────────
+    const bucketLabels: Record<string | number, string> = {
+      0: '0–10s',
+      10: '10–30s',
+      30: '30–60s',
+      60: '1–2m',
+      120: '2–5m',
+      '300+': '5m+',
+    };
+    const executionTimeDistribution = distributionResult.map((b: any) => ({
+      bucket: bucketLabels[b._id] ?? String(b._id),
+      count: b.count,
+    }));
+
+    // ── Shape timeline result (fill missing buckets with 0) ──────────────────
+    // Thailand is always UTC+7 (no DST), so offset is constant.
+    const BKK_OFFSET_MS = 7 * 60 * 60 * 1000;
+    const stepMs = timelineGranularity === 'hourly' ? 3_600_000 : 86_400_000;
+
+    const timelineMap = new Map<string, number>(
+      timelineResult.map((r: any) => [r._id as string, r.count as number])
+    );
+
+    // Determine iteration bounds in UTC, aligned to Bangkok step boundaries
+    const rawStartMs = startDate?.getTime() ?? (timelineResult[0]
+      ? new Date(timelineResult[0]._id + (timelineGranularity === 'hourly' ? '+07:00' : 'T00:00:00+07:00')).getTime()
+      : Date.now());
+    const rawEndMs = endDate?.getTime() ?? (timelineResult.length
+      ? new Date(timelineResult[timelineResult.length - 1]._id + (timelineGranularity === 'hourly' ? '+07:00' : 'T00:00:00+07:00')).getTime()
+      : Date.now());
+
+    // Floor rawStartMs to the Bangkok step boundary
+    const firstBkkAligned = Math.floor((rawStartMs + BKK_OFFSET_MS) / stepMs) * stepMs;
+    const firstUtc = firstBkkAligned - BKK_OFFSET_MS;
+
+    const submissionTimeline: Array<{ timestamp: string; count: number }> = [];
+    for (let utcMs = firstUtc; utcMs <= rawEndMs; utcMs += stepMs) {
+      const d = new Date(utcMs + BKK_OFFSET_MS); // shift to Bangkok "UTC view"
+      const y = d.getUTCFullYear();
+      const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      const ts = timelineGranularity === 'hourly'
+        ? `${y}-${mo}-${day}T${String(d.getUTCHours()).padStart(2, '0')}:00:00`
+        : `${y}-${mo}-${day}`;
+      submissionTimeline.push({ timestamp: ts, count: timelineMap.get(ts) ?? 0 });
+    }
+
+    // ── Shape pass-rate result ────────────────────────────────────────────────
+    const passRateByAttempt = passRateResult.map((r: any) => {
+      const failed = (r.total ?? 0) - (r.passed ?? 0);
+      return {
+        attempt: r._id as number,
+        total: r.total ?? 0,
+        passed: r.passed ?? 0,
+        failed,
+        passRate: r.total > 0 ? Math.round((r.passed / r.total) * 100) : 0,
+      };
+    });
+
+    return { kpi, executionTimeDistribution, submissionTimeline, timelineGranularity, passRateByAttempt };
   }
 }
 

@@ -865,6 +865,40 @@ export const submissionRoutes = new Elysia({ prefix: "/submissions" })
     }
   )
   .get(
+    "/lab/:labId/monitoring",
+    async ({ params, query, set }) => {
+      try {
+        const submissionType = query.submissionType as 'fill_in_blank' | 'auto_grading' | undefined;
+        const startDate = query.startDate ? new Date(query.startDate as string) : undefined;
+        const endDate = query.endDate ? new Date(query.endDate as string) : undefined;
+        const studentIdPrefixes = query.studentIdPrefixes
+          ? (query.studentIdPrefixes as string).split(',').map(s => s.trim()).filter(Boolean)
+          : undefined;
+        const data = await SubmissionService.getMonitoringData(params.labId, submissionType, startDate, endDate, studentIdPrefixes);
+        return { status: "success", data };
+      } catch (error) {
+        console.error("Error fetching monitoring data:", error);
+        set.status = 500;
+        return { status: "error", message: "Failed to fetch monitoring data" };
+      }
+    },
+    {
+      params: t.Object({ labId: t.String() }),
+      query: t.Object({
+        submissionType: t.Optional(t.Union([t.Literal('fill_in_blank'), t.Literal('auto_grading')])),
+        startDate: t.Optional(t.String()),
+        endDate: t.Optional(t.String()),
+        studentIdPrefixes: t.Optional(t.String()),
+      }),
+      beforeHandle: requireRole(["ADMIN"]),
+      detail: {
+        tags: ["Submissions"],
+        summary: "Get Lab Monitoring Data",
+        description: "Aggregated analytics for the Monitoring tab: KPI metrics, execution time distribution, submission timeline, and pass rate by attempt. Admin/Instructor only."
+      }
+    }
+  )
+  .get(
     "/lab/:labId/export",
     async ({ params, query, set }) => {
       try {
