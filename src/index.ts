@@ -37,7 +37,7 @@ try {
 }
 
 const app = new Elysia()
-  .use(swagger())
+  // .use(swagger())
   .use(cors({
     origin: env.FRONTEND_ORIGIN,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
